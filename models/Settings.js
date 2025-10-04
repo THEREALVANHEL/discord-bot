@@ -1,4 +1,4 @@
-// models/Settings.js
+// models/Settings.js (REPLACE - Added levelUpChannelId)
 const mongoose = require('mongoose');
 
 const settingsSchema = new mongoose.Schema({
@@ -16,6 +16,7 @@ const settingsSchema = new mongoose.Schema({
   }],
   ticketPanelChannelId: { type: String, default: null },
   ticketCategoryId: { type: String, default: null },
+  levelUpChannelId: { type: String, default: null }, // NEW
 });
 
 module.exports = mongoose.model('Settings', settingsSchema);
