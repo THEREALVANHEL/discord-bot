@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "deploy-commands": "node deploy-commands.js",
-    "postinstall": "npm run deploy-commands" // This will run after npm install
+    "postinstall": "npm run deploy-commands"
   },
   "dependencies": {
     "discord.js": "^14.14.1",
