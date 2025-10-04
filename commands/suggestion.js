@@ -1,4 +1,4 @@
-// commands/suggestion.js (REPLACE - Simplified: removed thread creation)
+// commands/suggestion.js (REPLACE - Simplified: removed thread creation, Added image_url option)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const Settings = require('../models/Settings');
 
@@ -9,9 +9,14 @@ module.exports = {
     .addStringOption(option =>
       option.setName('idea')
         .setDescription('Your suggestion')
-        .setRequired(true)),
+        .setRequired(true))
+    .addStringOption(option => // NEW IMAGE OPTION
+      option.setName('image_url')
+        .setDescription('A direct URL for an image to include with the suggestion')
+        .setRequired(false)),
   async execute(interaction) {
     const idea = interaction.options.getString('idea');
+    const imageUrl = interaction.options.getString('image_url'); // GET NEW OPTION
 
     const settings = await Settings.findOne({ guildId: interaction.guild.id });
     if (!settings || !settings.suggestionChannelId) {
@@ -33,6 +38,10 @@ module.exports = {
       .setColor(0xFFA500)
       .setTimestamp()
       .setFooter({ text: `Use the reactions to vote! | Suggested by: ${interaction.user.tag}` });
+      
+    if (imageUrl) { // SET IMAGE IF PROVIDED
+      embed.setImage(imageUrl);
+    }
 
     try {
       const suggestionMessage = await suggestionChannel.send({ embeds: [embed] });
