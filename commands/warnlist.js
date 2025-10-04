@@ -6,20 +6,20 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('warnlist')
     .setDescription('View warnings of a user.')
-    .addUser Option(option =>
+    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
       option.setName('target')
         .setDescription('User  to view warnings for')
         .setRequired(true)),
   async execute(interaction) {
-    const targetUser  = interaction.options.getUser ('target');
+    const targetUser = interaction.options.getUser('target');
 
-    let user = await User.findOne({ userId: targetUser .id });
+    let user = await User.findOne({ userId: targetUser.id });
     if (!user || !user.warnings.length) {
-      return interaction.reply({ content: `${targetUser .tag} has no warnings.`, ephemeral: true });
+      return interaction.reply({ content: `${targetUser.tag} has no warnings.`, ephemeral: true });
     }
 
     const embed = new EmbedBuilder()
-      .setTitle(`Warnings for ${targetUser .tag}`)
+      .setTitle(`Warnings for ${targetUser.tag}`)
       .setColor(0xFFA500)
       .setTimestamp();
 
