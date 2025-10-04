@@ -5,7 +5,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('avatar')
     .setDescription('Get the avatar of a user')
-    .addUserOption(option =>
+    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
       option.setName('target')
         .setDescription('User to get avatar of')
         .setRequired(false)),
