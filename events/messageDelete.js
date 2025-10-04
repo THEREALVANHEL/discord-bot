@@ -7,4 +7,22 @@ module.exports = {
     if (!message.guild) return;
 
     const settings = await Settings.findOne({ guildId: message.guild.id });
-    if (!settings || !settings.autologChannelId)
+    if (!settings || !settings.autologChannelId) return;
+
+    const logChannel = message.guild.channels.cache.get(settings.autologChannelId);
+    if (!logChannel) return;
+
+    logChannel.send({
+      embeds: [{
+        title: 'Message Deleted',
+        color: 0xFF0000,
+        fields: [
+          { name: 'User ', value: `${message.author.tag} (${message.author.id})` },
+          { name: 'Channel', value: `${message.channel}` },
+          { name: 'Content', value: message.content || '[No content]' },
+        ],
+        timestamp: new Date(),
+      }],
+    });
+  },
+};
