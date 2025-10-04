@@ -6,7 +6,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('timeout')
     .setDescription('Timeout a user for a specified duration.')
-    .addUser Option(option =>
+    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
       option.setName('target')
         .setDescription('User  to timeout')
         .setRequired(true))
@@ -19,7 +19,7 @@ module.exports = {
         .setDescription('Reason for timeout')
         .setRequired(true)),
   async execute(interaction, client, logModerationAction) {
-    const target = interaction.options.getUser ('target');
+    const target = interaction.options.getUser('target');
     const durationStr = interaction.options.getString('duration');
     const reason = interaction.options.getString('reason');
 
@@ -48,9 +48,9 @@ module.exports = {
       }
 
       // Public confirmation (visible to everyone)
-      await interaction.reply({ 
-        content: `⏰ **Timeout Executed:** ${target.tag} has been timed out by ${interaction.user.tag} for ${durationStr} due to: \`${reason}\`.`, 
-        ephemeral: false 
+      await interaction.reply({
+        content: `⏰ **Timeout Executed:** ${target.tag} has been timed out by ${interaction.user.tag} for ${durationStr} due to: \`${reason}\`.`,
+        ephemeral: false
       });
 
       // Log
