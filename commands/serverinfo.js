@@ -1,4 +1,4 @@
-// commands/serverinfo.js (REPLACE - Premium GUI)
+// commands/serverinfo.js (REPLACE - Premium GUI, Fixed integer to string bug)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 module.exports = {
@@ -19,8 +19,9 @@ module.exports = {
         { name: 'Members 👥', value: `${guild.memberCount}`, inline: true },
         { name: 'Channels #️⃣', value: `${guild.channels.cache.size}`, inline: true },
         { name: 'Roles 🎭', value: `${guild.roles.cache.size}`, inline: true },
+        // FIX: Ensure values are strings by converting numbers/enums explicitly
         { name: 'Boosts 🚀', value: `${guild.premiumSubscriptionCount || 0} (Tier ${guild.premiumTier})`, inline: true },
-        { name: 'Verification Level', value: guild.verificationLevel, inline: true },
+        { name: 'Verification Level', value: `${guild.verificationLevel}`, inline: true }, // FIX: Convert to string
         { name: 'Server Created 📅', value: `<t:${Math.floor(guild.createdTimestamp / 1000)}:F>`, inline: false },
       )
       .setFooter({ text: `ID: ${guild.id} | You Joined: ${new Date(interaction.member.joinedTimestamp).toLocaleDateString()}` })
