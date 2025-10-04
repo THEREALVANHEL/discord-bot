@@ -1,5 +1,5 @@
-// commands/lock.js (REPLACE - Removed ping, disabled threads, Premium GUI)
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+// commands/lock.js (REPLACE - Removed invalid thread permissions, Premium GUI)
+const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js'); // Added PermissionsBitField for robustness, though not strictly needed here
 const ms = require('ms');
 
 module.exports = {
@@ -28,13 +28,11 @@ module.exports = {
     }
 
     try {
-      // Deny send messages, add reactions, and thread creation for @everyone
+      // FIX: Removed invalid or non-existent thread permissions (ViewThread, CreatePublicThreads, CreatePrivateThreads)
+      // to resolve RangeError [BitFieldInvalid]. We will only modify SendMessages and AddReactions.
       await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
         SendMessages: false,
         AddReactions: false,
-        ViewThread: false,           // Deny viewing existing threads
-        CreatePublicThreads: false,  // Deny creating new threads
-        CreatePrivateThreads: false, // Deny creating private threads (if channel is text)
       });
 
       let endTime = null;
@@ -52,12 +50,10 @@ module.exports = {
         // Auto-unlock
         setTimeout(async () => {
           try {
+            // Restore permissions for @everyone (null resets to default/inherits)
             await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
               SendMessages: null,
               AddReactions: null,
-              ViewThread: null,
-              CreatePublicThreads: null,
-              CreatePrivateThreads: null,
             });
             client.locks.delete(channel.id);
             const unlockEmbed = new EmbedBuilder()
