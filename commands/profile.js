@@ -6,7 +6,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('profile')
     .setDescription('View your or another user\'s profile.')
-    .addUserOption(option =>
+    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
       option.setName('target')
         .setDescription('The user whose profile you want to view')
         .setRequired(false)),
