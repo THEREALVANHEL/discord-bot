@@ -1,10 +1,11 @@
 {
   "name": "ultimate-discord-bot",
   "version": "1.0.0",
-  "description": "A top-tier Discord bot with leveling, economy, moderation, and more.",
+  "description": "Top-tier Discord bot with leveling, economy, moderation, and more.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "deploy-commands": "node deploy-commands.js"
   },
   "dependencies": {
     "discord.js": "^14.11.0",
