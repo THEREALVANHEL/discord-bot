@@ -1,6 +1,7 @@
-// events/messageCreate.js
+// events/messageCreate.js (REPLACE - Slower XP + Level Up Channel)
 const User = require('../models/User');
 const Settings = require('../models/Settings');
+const { EmbedBuilder } = require('discord.js');
 
 module.exports = {
   name: 'messageCreate',
@@ -16,8 +17,8 @@ module.exports = {
       user = new User({ userId: message.author.id });
     }
 
-    // XP gain 5-10 per message
-    const xpGain = Math.floor(Math.random() * 6) + 5;
+    // XP gain is now 1-3 per message (slower)
+    const xpGain = Math.floor(Math.random() * 3) + 1; // 1-3 XP
     user.xp += xpGain;
 
     const nextLevelXp = Math.floor(100 * Math.pow(user.level + 1, 1.5));
@@ -29,32 +30,47 @@ module.exports = {
 
       const member = message.member;
 
-      // Remove all leveling roles
-      for (const roleConfig of client.config.levelingRoles) {
+      // Remove all leveling roles and add highest one
+      const levelingRoles = client.config.levelingRoles;
+      for (const roleConfig of levelingRoles) {
         if (member.roles.cache.has(roleConfig.roleId)) {
           await member.roles.remove(roleConfig.roleId).catch(() => {});
         }
       }
 
-      // Add highest leveling role
-      const newLevelRole = client.config.levelingRoles
+      const newLevelRole = levelingRoles
         .filter(r => r.level <= user.level)
         .sort((a, b) => b.level - a.level)[0];
       if (newLevelRole) {
         await member.roles.add(newLevelRole.roleId).catch(() => {});
       }
 
-      message.channel.send(`${message.author}, congratulations! You leveled up to level ${user.level}! 🎉`);
+      // Send level-up message to the configured channel or the current channel
+      const levelUpChannel = settings?.levelUpChannelId ? 
+        message.guild.channels.cache.get(settings.levelUpChannelId) : 
+        message.channel;
+
+      if (levelUpChannel) {
+        const levelUpEmbed = new EmbedBuilder()
+          .setTitle('🚀 Level UP!')
+          .setDescription(`${message.author}, congratulations! You've leveled up to **Level ${user.level}**! 🎉`)
+          .setThumbnail(message.author.displayAvatarURL({ dynamic: true }))
+          .setColor(0xFFD700) // Gold
+          .setTimestamp();
+        
+        await levelUpChannel.send({ content: `${message.author}`, embeds: [levelUpEmbed] });
+      }
     }
 
-    // Cookie roles update
+    // Cookie roles update (This block remains the same)
     const member = message.member;
-    for (const roleConfig of client.config.cookieRoles) {
+    const cookieRoles = client.config.cookieRoles;
+    for (const roleConfig of cookieRoles) {
       if (member.roles.cache.has(roleConfig.roleId)) {
         await member.roles.remove(roleConfig.roleId).catch(() => {});
       }
     }
-    const newCookieRole = client.config.cookieRoles
+    const newCookieRole = cookieRoles
       .filter(r => r.cookies <= user.cookies)
       .sort((a, b) => b.cookies - a.cookies)[0];
     if (newCookieRole) {
