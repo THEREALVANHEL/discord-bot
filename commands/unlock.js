@@ -1,5 +1,5 @@
-// commands/unlock.js (NEW)
-const { SlashCommandBuilder } = require('discord.js');
+// commands/unlock.js (REPLACE - Premium GUI)
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -13,20 +13,30 @@ module.exports = {
     const channel = interaction.options.getChannel('channel') || interaction.channel;
 
     if (!channel.manageable) {
-      return interaction.reply({ content: 'I cannot manage this channel.', ephemeral: true });
+      return interaction.reply({ content: '❌ **Error:** I cannot manage this channel.', ephemeral: true });
     }
 
     try {
-      // Restore permissions for @everyone
+      // Restore permissions for @everyone (null resets to default/inherits)
       await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
         SendMessages: null,
         AddReactions: null,
+        ViewThread: null,
+        CreatePublicThreads: null,
+        CreatePrivateThreads: null,
       });
 
       // Remove from locks Map if present
       client.locks.delete(channel.id);
 
-      await interaction.reply({ content: `🔓 ${channel} has been unlocked.` });
+      const unlockEmbed = new EmbedBuilder()
+        .setTitle('🔓 Channel Unlocked')
+        .setDescription(`${channel} has been unlocked by ${interaction.user}. Messaging and thread creation restored.`)
+        .setColor(0x00FF00)
+        .setTimestamp()
+        .setFooter({ text: `Unlocked by ${interaction.user.tag}` });
+
+      await interaction.reply({ embeds: [unlockEmbed] });
 
       // Log
       const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
@@ -34,7 +44,7 @@ module.exports = {
 
     } catch (error) {
       console.error('Unlock error:', error);
-      await interaction.reply({ content: 'Failed to unlock channel. Check bot permissions (Manage Channels).', ephemeral: true });
+      await interaction.reply({ content: '❌ **Error:** Failed to unlock channel. Check bot permissions (Manage Channels).', ephemeral: true });
     }
   },
 };
