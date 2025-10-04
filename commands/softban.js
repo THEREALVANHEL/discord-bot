@@ -1,4 +1,4 @@
-// commands/softban.js (REPLACE - No message deletion, improved DM and logging)
+// commands/softban.js (REPLACE - Success reply now visible to everyone)
 const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
@@ -36,16 +36,20 @@ module.exports = {
       // Immediate unban
       await interaction.guild.members.unban(target.id, 'Softban unban');
 
-      // DM the user
+      // DM the user (private)
       try {
         await target.send(`You have been softbanned from ${interaction.guild.name} for: \`${reason}\`. This is a temporary action to warn you. Please review the server rules.`);
       } catch (dmError) {
         console.log(`Could not DM ${target.tag}: ${dmError.message}`);
       }
 
-      await interaction.reply({ content: `${target.tag} has been softbanned for \`${reason}\`. (No messages were deleted.)`, ephemeral: true });
+      // Public confirmation (visible to everyone)
+      await interaction.reply({ 
+        content: `🔨 **Softban Executed:** ${target.tag} has been softbanned by ${interaction.user.tag} for: \`${reason}\`. (No messages were deleted.)`, 
+        ephemeral: false 
+      });
 
-      // Log the action
+      // Log the action (private modlog)
       const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
       await logModerationAction(interaction.guild, settings, 'Softban', target, interaction.user, reason, 'No messages deleted');
 
