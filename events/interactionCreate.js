@@ -1,4 +1,4 @@
-// events/interactionCreate.js (REPLACE - Updated permissions and roles)
+// events/interactionCreate.js (REPLACE - Updated permissions, roles, poll button/permissions, job apply button)
 const { EmbedBuilder } = require('discord.js');
 const Settings = require('../models/Settings');
 
@@ -65,13 +65,21 @@ module.exports = {
     // Permission checks
     if (interaction.isChatInputCommand()) {
       const cmdName = interaction.commandName;
+      
+      // /poll result requires moderation permissions (Admin/LeadMod/Mod)
+      if (cmdName === 'poll') {
+        const subcommand = interaction.options.getSubcommand();
+        if (subcommand === 'result' && !isMod && !isAdmin) {
+          return interaction.reply({ content: '🗳️ Only moderators can manually end a poll and view results.', ephemeral: true });
+        }
+      }
 
       // Lock/Unlock: Only lead mod or admin
       if (['lock', 'unlock'].includes(cmdName) && !isLeadMod && !isAdmin) {
         return interaction.reply({ content: '🔒 Only lead moderators can use this command.', ephemeral: true });
       }
 
-      // Announce/Poll: Only mod or admin
+      // Announce/Poll: Only mod or admin (Applies to /poll create)
       if (['announce', 'poll'].includes(cmdName) && !isMod && !isAdmin) {
         return interaction.reply({ content: '📢 Only moderators can use this command.', ephemeral: true });
       }
@@ -96,8 +104,56 @@ module.exports = {
       }
     }
 
-    // Handle Button Interactions (existing ticket logic)
+    // Handle Button Interactions
     if (interaction.isButton()) {
+      // Handle job application
+      if (interaction.customId.startsWith('job_apply_')) {
+          const jobId = interaction.customId.split('_')[2];
+          const User = require('../models/User');
+          const workProgression = client.config.workProgression;
+          const newJob = workProgression.find(job => job.id === jobId);
+
+          let user = await User.findOne({ userId: interaction.user.id });
+          if (!user) user = new User({ userId: interaction.user.id });
+
+          if (!newJob || user.level < newJob.minLevel) {
+              return interaction.reply({ content: '❌ **Error:** You are not eligible for this job or the job is invalid.', ephemeral: true });
+          }
+
+          user.currentJob = newJob.id;
+          await user.save();
+
+          await interaction.update({ 
+              content: `🎉 **Application Successful!** You are now a **${newJob.title}**. Start working with \`/work work\`!`, 
+              components: [] 
+          });
+          return;
+      }
+      
+      // Handle poll result button (Only poll owner can end it)
+      if (interaction.customId === 'poll_result_manual') {
+          await interaction.deferReply({ ephemeral: true });
+          const pollData = client.polls.get(interaction.message.id);
+          
+          if (!pollData) {
+               return interaction.editReply({ content: '❌ **Error:** This poll is not tracked or has already ended.' });
+          }
+          
+          if (pollData.creatorId !== interaction.user.id) {
+              return interaction.editReply({ content: '❌ **Error:** Only the person who created this poll can manually end it.', ephemeral: true });
+          }
+          
+          // Delegate the actual poll ending logic to the command file helper function
+          const pollCommand = client.commands.get('poll');
+          if (pollCommand && pollCommand.endPoll) {
+               await pollCommand.endPoll(interaction.channel, interaction.message.id, client, interaction, true);
+               // endPoll handles the message edit/reply, we just need to ensure the deferred reply is edited
+               return interaction.editReply({ content: '✅ **Poll Ended!** Results posted.' });
+          } else {
+              return interaction.editReply({ content: '❌ **Error:** Poll end function not found.' });
+          }
+      }
+      
       // Handle reminder removal
       if (interaction.customId.startsWith('remove_reminder_')) {
           const reminderId = interaction.customId.split('_')[2];
