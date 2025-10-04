@@ -1,9 +1,10 @@
-// MultipleFiles/guildMemberRemove.js
+// events/guildMemberRemove.js
+const Settings = require('../models/Settings');
+
 module.exports = {
   name: 'guildMemberRemove',
   async execute(member, client) {
     try {
-      const Settings = require('../models/Settings'); // Require here
       const settings = await Settings.findOne({ guildId: member.guild.id });
       if (settings && settings.leaveChannelId) {
         const channel = member.guild.channels.cache.get(settings.leaveChannelId);
@@ -14,6 +15,12 @@ module.exports = {
           });
         }
       }
+
+      // Send DM to user if possible
+      try {
+        await member.send(`You left ${member.guild.name}. We're sorry to see you go!`);
+      } catch {}
+
     } catch (error) {
       console.error('Error in guildMemberRemove event:', error);
     }
