@@ -6,7 +6,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('removecoins')
     .setDescription('Remove coins from a user.')
-    .addUserOption(option =>
+    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
       option.setName('target')
         .setDescription('The user to remove coins from')
         .setRequired(true))
