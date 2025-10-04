@@ -1,0 +1,19 @@
+const mongoose = require('mongoose');
+
+const settingsSchema = new mongoose.Schema({
+  guildId: { type: String, required: true, unique: true },
+  welcomeChannelId: { type: String, default: null },
+  leaveChannelId: { type: String, default: null },
+  suggestionChannelId: { type: String, default: null },
+  autologChannelId: { type: String, default: null },
+  noXpChannels: { type: [String], default: [] },
+  reactionRoles: [{
+    messageId: String,
+    emoji: String,
+    roleId: String,
+  }],
+  ticketPanelChannelId: { type: String, default: null },
+  // Add more settings as needed
+});
+
+module.exports = mongoose.model('Settings', settingsSchema);
