@@ -1,4 +1,4 @@
-// commands/gamble.js (REPLACE - Premium GUI)
+// commands/gamble.js (REPLACE - Premium GUI, Cooldown 30s)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -10,7 +10,7 @@ module.exports = {
       option.setName('amount')
         .setDescription('Amount of coins to gamble')
         .setRequired(true)),
-  cooldown: 300, // 5 minutes
+  cooldown: 30, // 5 minutes (300) changed to 30 seconds
   async execute(interaction) {
     const amount = interaction.options.getInteger('amount');
     if (amount < 10) return interaction.reply({ content: '❌ **Error:** Minimum gamble amount is 10 coins.', ephemeral: true });
