@@ -1,4 +1,4 @@
-// commands/suggestion.js (REPLACE - Premium GUI)
+// commands/suggestion.js (REPLACE - Simplified: removed thread creation)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const Settings = require('../models/Settings');
 
@@ -32,25 +32,17 @@ module.exports = {
       )
       .setColor(0xFFA500)
       .setTimestamp()
-      .setFooter({ text: `Use the reactions to vote!` });
+      .setFooter({ text: `Use the reactions to vote! | Suggested by: ${interaction.user.tag}` });
 
     try {
       const suggestionMessage = await suggestionChannel.send({ embeds: [embed] });
       await suggestionMessage.react('👍');
       await suggestionMessage.react('👎');
 
-      // Create a thread for discussion
-      const thread = await suggestionMessage.startThread({
-        name: `Suggestion: ${idea.substring(0, 30)}...`,
-        autoArchiveDuration: 1440,
-        reason: 'Discussion for new suggestion',
-      });
-      await thread.send(`Discuss this suggestion here! Please keep the discussion civil and constructive. ${suggestionMessage.url}`);
-
-      await interaction.reply({ content: '✅ **Suggestion Submitted!** Your idea is now open for community voting and discussion.', ephemeral: true });
+      await interaction.reply({ content: '✅ **Suggestion Submitted!** Your idea is now open for community voting.', ephemeral: true });
     } catch (error) {
       console.error('Error submitting suggestion:', error);
-      await interaction.reply({ content: '❌ **Error:** Failed to submit suggestion. Check my permissions (send messages, add reactions, and create threads).', ephemeral: true });
+      await interaction.reply({ content: '❌ **Error:** Failed to submit suggestion. Check my permissions (send messages, add reactions).', ephemeral: true });
     }
   },
 };
