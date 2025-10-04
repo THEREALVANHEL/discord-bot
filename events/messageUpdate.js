@@ -5,6 +5,8 @@ module.exports = {
   name: 'messageUpdate',
   async execute(oldMessage, newMessage, client) {
     if (oldMessage.author?.bot) return;
+    // FIX: Add null check for oldMessage.author before reading .tag
+    if (!oldMessage.author) return; 
     if (!oldMessage.guild) return;
     if (oldMessage.content === newMessage.content) return;
 
