@@ -7,7 +7,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('givecoins')
     .setDescription('Give coins to another user.')
-    .addUser Option(option =>
+    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
       option.setName('target')
         .setDescription('User  to give coins to')
         .setRequired(true))
@@ -16,15 +16,15 @@ module.exports = {
         .setDescription('Amount of coins to give')
         .setRequired(true)),
   async execute(interaction) {
-    const targetUser  = interaction.options.getUser ('target');
+    const targetUser = interaction.options.getUser('target');
     const amount = interaction.options.getInteger('amount');
 
-    if (targetUser .bot) return interaction.reply({ content: 'You cannot give coins to bots.', ephemeral: true });
-    if (targetUser .id === interaction.user.id) return interaction.reply({ content: 'You cannot give coins to yourself.', ephemeral: true });
+    if (targetUser.bot) return interaction.reply({ content: 'You cannot give coins to bots.', ephemeral: true });
+    if (targetUser.id === interaction.user.id) return interaction.reply({ content: 'You cannot give coins to yourself.', ephemeral: true });
     if (amount <= 0) return interaction.reply({ content: 'Amount must be positive.', ephemeral: true });
 
     const giver = await User.findOne({ userId: interaction.user.id }) || new User({ userId: interaction.user.id });
-    const receiver = await User.findOne({ userId: targetUser .id }) || new User({ userId: targetUser .id });
+    const receiver = await User.findOne({ userId: targetUser.id }) || new User({ userId: targetUser.id });
 
     if (giver.coins < amount) return interaction.reply({ content: `You don't have enough coins. You have ${giver.coins} coins.`, ephemeral: true });
 
@@ -61,7 +61,7 @@ module.exports = {
 
     const embed = new EmbedBuilder()
       .setTitle('Coins Given')
-      .setDescription(`${interaction.user} gave ${amount} coins to ${targetUser }.`)
+      .setDescription(`${interaction.user} gave ${amount} coins to ${targetUser}.`)
       .setColor(0x00FF00)
       .setTimestamp();
 
