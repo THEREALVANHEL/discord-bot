@@ -55,7 +55,7 @@ module.exports = {
       const centerY = canvas.height / 2;
       const radius = 350;
 
-      // Ensure white background
+      // FIX: Ensure white background explicitly to prevent black image issues
       ctx.fillStyle = '#FFFFFF'; 
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
