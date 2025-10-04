@@ -6,7 +6,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('removewarn')
     .setDescription('Remove a warning from a user by index.')
-    .addUser Option(option =>
+    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
       option.setName('target')
         .setDescription('User  to remove warning from')
         .setRequired(true))
@@ -15,7 +15,7 @@ module.exports = {
         .setDescription('Warning number to remove (1-based)')
         .setRequired(true)),
   async execute(interaction) {
-    const target = interaction.options.getUser ('target');
+    const target = interaction.options.getUser('target');
     const index = interaction.options.getInteger('index');
 
     let user = await User.findOne({ userId: target.id });
@@ -31,9 +31,9 @@ module.exports = {
     await user.save();
 
     // Public confirmation (visible to everyone)
-    await interaction.reply({ 
-      content: `🗑️ **Warning Removed:** Warning #${index} has been removed from ${target.tag} by ${interaction.user.tag}. (Reason was: "${removedWarn.reason}") Remaining warnings: ${user.warnings.length}`, 
-      ephemeral: false 
+    await interaction.reply({
+      content: `🗑️ **Warning Removed:** Warning #${index} has been removed from ${target.tag} by ${interaction.user.tag}. (Reason was: "${removedWarn.reason}") Remaining warnings: ${user.warnings.length}`,
+      ephemeral: false
     });
   },
 };
