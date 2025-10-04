@@ -1,4 +1,4 @@
-// MultipleFiles/messageUpdate.js
+// events/messageUpdate.js
 const Settings = require('../models/Settings');
 
 module.exports = {
@@ -6,7 +6,7 @@ module.exports = {
   async execute(oldMessage, newMessage, client) {
     if (oldMessage.author?.bot) return;
     if (!oldMessage.guild) return;
-    if (oldMessage.content === newMessage.content) return; // No actual content change
+    if (oldMessage.content === newMessage.content) return;
 
     const settings = await Settings.findOne({ guildId: oldMessage.guild.id });
     if (!settings || !settings.autologChannelId) return;
