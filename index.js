@@ -32,7 +32,7 @@ client.config = {
     cookiesManager: '1372121024841125888',
     forgottenOne: '1376574861333495910', // Admin
     overseer: '1371004219875917875',     // Admin
-    gamelog: '1371003310223654974',       // Fixed: Removed invalid "User " and made it a string key-value
+    gamelog: '1371003310223654974',       // Fixed: Removed invalid "User  " and made it a string key-value
   },
   levelingRoles: [
     { level: 30, roleId: '1371032270361853962' },
