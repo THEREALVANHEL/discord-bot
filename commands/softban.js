@@ -5,7 +5,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('softban')
     .setDescription('Softban a user (temporary ban without deleting messages).')
-    .addUser Option(option =>
+    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
       option.setName('target')
         .setDescription('User  to softban')
         .setRequired(true))
@@ -14,7 +14,7 @@ module.exports = {
         .setDescription('Reason for softban')
         .setRequired(true)),
   async execute(interaction, client, logModerationAction) {
-    const target = interaction.options.getUser ('target');
+    const target = interaction.options.getUser('target');
     const reason = interaction.options.getString('reason');
 
     const member = interaction.guild.members.cache.get(target.id);
@@ -44,9 +44,9 @@ module.exports = {
       }
 
       // Public confirmation (visible to everyone)
-      await interaction.reply({ 
-        content: `🔨 **Softban Executed:** ${target.tag} has been softbanned by ${interaction.user.tag} for: \`${reason}\`. (No messages were deleted.)`, 
-        ephemeral: false 
+      await interaction.reply({
+        content: `🔨 **Softban Executed:** ${target.tag} has been softbanned by ${interaction.user.tag} for: \`${reason}\`. (No messages were deleted.)`,
+        ephemeral: false
       });
 
       // Log the action (private modlog)
