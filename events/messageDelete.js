@@ -1,10 +1,12 @@
-// events/messageDelete.js
+// events/messageDelete.js (REPLACE - Added null check for message.author)
 const Settings = require('../models/Settings');
 
 module.exports = {
   name: 'messageDelete',
   async execute(message, client) {
     if (message.author?.bot) return;
+    // FIX: Add null check for message.author to prevent crashes
+    if (!message.author) return;
     if (!message.guild) return;
 
     const settings = await Settings.findOne({ guildId: message.guild.id });
