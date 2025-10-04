@@ -1,19 +1,19 @@
-// commands/gamelog.js
+// commands/gamelog.js (REPLACE - Fixed option order, Premium GUI)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('gamelog')
     .setDescription('Log details of a game session.')
-    .addStringOption(option => // 1. Required
+    .addStringOption(option => // 1. REQUIRED
       option.setName('host')
         .setDescription('The host of the game')
         .setRequired(true))
-    .addStringOption(option => // 2. Required (Moved up)
+    .addStringOption(option => // 2. REQUIRED (Moved up)
       option.setName('participants')
         .setDescription('List of participants (e.g., User1, User2, User3)')
         .setRequired(true))
-    .addStringOption(option => // 3. Required (Moved up)
+    .addStringOption(option => // 3. REQUIRED (Moved up)
       option.setName('time_hosted')
         .setDescription('When the game was hosted (e.g., 2023-10-27 19:00 UTC)')
         .setRequired(true))
@@ -34,16 +34,34 @@ module.exports = {
         .setDescription('An image related to the game session')
         .setRequired(false)),
   async execute(interaction) {
+    // Defer reply immediately since this might take a moment and prevents the "Application didn't respond" error
+    await interaction.deferReply({ ephemeral: false }); 
+
     const host = interaction.options.getString('host');
-    // Ensure you update the order of options being fetched in execute if needed
-    // (In this case, it relies on option names, so only deployment is affected)
+    const participants = interaction.options.getString('participants');
+    const timeHosted = interaction.options.getString('time_hosted');
     const cohost = interaction.options.getString('cohost');
     const guide = interaction.options.getString('guide');
     const medic = interaction.options.getString('medic');
-    const participants = interaction.options.getString('participants');
-    const timeHosted = interaction.options.getString('time_hosted');
     const image = interaction.options.getAttachment('image');
-    
-    // ... rest of the command logic
+
+    const embed = new EmbedBuilder()
+      .setTitle('📢 Official Game Session Log')
+      .setColor(0x3498DB)
+      .setAuthor({ name: interaction.guild.name, iconURL: interaction.guild.iconURL({ dynamic: true }) })
+      .addFields(
+        { name: 'Host(s) 👑', value: `${host}` + (cohost ? ` & ${cohost}` : ''), inline: false },
+        { name: 'Support Staff 🤝', value: `Guide: ${guide || 'N/A'}, Medic: ${medic || 'N/A'}`, inline: false },
+        { name: 'Time Hosted 🕒', value: timeHosted, inline: false },
+        { name: 'Participants 👥', value: participants },
+      )
+      .setTimestamp()
+      .setFooter({ text: `Logged by ${interaction.user.tag}` });
+
+    if (image) {
+      embed.setImage(image.url);
+    }
+
+    await interaction.editReply({ embeds: [embed] });
   },
 };
