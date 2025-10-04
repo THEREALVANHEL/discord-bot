@@ -1,4 +1,4 @@
-// commands/removecookies.js
+// commands/removecookies.js (REPLACE - Premium GUI)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -6,7 +6,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('removecookies')
     .setDescription('Remove cookies from a user.')
-    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
+    .addUserOption(option =>
       option.setName('target')
         .setDescription('The user to remove cookies from')
         .setRequired(true))
@@ -19,15 +19,15 @@ module.exports = {
     const amount = interaction.options.getInteger('amount');
 
     if (amount <= 0) {
-      return interaction.reply({ content: 'Amount must be a positive number.', ephemeral: true });
+      return interaction.reply({ content: '❌ **Error:** Amount must be a positive number.', ephemeral: true });
     }
 
     let user = await User.findOne({ userId: targetUser.id });
     if (!user) {
-      return interaction.reply({ content: `${targetUser.tag} does not have any cookies yet.`, ephemeral: true });
+      return interaction.reply({ content: `⚠️ ${targetUser.tag} does not have any cookies yet.`, ephemeral: true });
     }
 
-    user.cookies = Math.max(0, user.cookies - amount); // Ensure cookies don't go below 0
+    user.cookies = Math.max(0, user.cookies - amount);
     await user.save();
 
     // Update cookie roles
@@ -48,8 +48,11 @@ module.exports = {
     }
 
     const embed = new EmbedBuilder()
-      .setTitle('Cookies Removed')
-      .setDescription(`Removed ${amount} cookies from ${targetUser.tag}. They now have ${user.cookies} cookies.`)
+      .setTitle('🔪 Cookies Smashed')
+      .setDescription(`Successfully removed **${amount} cookies** from ${targetUser}.`)
+      .addFields(
+        { name: 'New Cookie Count', value: `${user.cookies} cookies 🍪`, inline: true }
+      )
       .setColor(0xFF0000)
       .setTimestamp();
 
