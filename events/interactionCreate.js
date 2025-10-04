@@ -1,4 +1,4 @@
-// events/interactionCreate.js (REPLACE - Updated permissions, roles, poll button/permissions, job apply button)
+// events/interactionCreate.js (REPLACE - Fixed create_ticket failure by deferring interaction)
 const { EmbedBuilder } = require('discord.js');
 const Settings = require('../models/Settings');
 
@@ -181,17 +181,23 @@ module.exports = {
       
       // Existing ticket logic
       if (interaction.customId === 'create_ticket') {
+        // FIX: Defer the reply immediately to prevent "Unknown interaction"
+        await interaction.deferReply({ ephemeral: true }); 
+        
         const Ticket = require('../models/Ticket');
         if (!settings || !settings.ticketCategoryId) {
-          return interaction.reply({ content: 'Ticket system is not set up.', ephemeral: true });
+          // FIX: Use editReply after deferral
+          return interaction.editReply({ content: 'Ticket system is not set up.' });
         }
 
         const existingTicket = await Ticket.findOne({ userId: interaction.user.id, status: { $ne: 'closed' } });
         if (existingTicket) {
           const existingChannel = interaction.guild.channels.cache.get(existingTicket.channelId);
           if (existingChannel) {
-            return interaction.reply({ content: `You already have an open ticket: ${existingChannel}`, ephemeral: true });
+            // FIX: Use editReply after deferral
+            return interaction.editReply({ content: `You already have an open ticket: ${existingChannel}` });
           } else {
+            // Channel might have been deleted manually, delete DB entry
             await Ticket.deleteOne({ _id: existingTicket._id });
           }
         }
@@ -234,7 +240,8 @@ module.exports = {
           embeds: [ticketEmbed],
         });
 
-        return interaction.reply({ content: `Your ticket has been created: ${ticketChannel}`, ephemeral: true });
+        // FIX: Use editReply after deferral
+        return interaction.editReply({ content: `Your ticket has been created: ${ticketChannel}` });
       }
       return;
     }
