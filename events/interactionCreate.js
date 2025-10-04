@@ -1,4 +1,4 @@
-// events/interactionCreate.js (REPLACE - Added cooldowns, new permission checks, logModerationAction helper, giveaway button/reaction handling)
+// events/interactionCreate.js (REPLACE - Added permission checks for lock/unlock, beg, etc.)
 const { EmbedBuilder } = require('discord.js');
 const Settings = require('../models/Settings');
 
@@ -33,10 +33,12 @@ module.exports = {
 
     // Admin roles
     const isAdmin = member.roles.cache.has(config.roles.forgottenOne) || member.roles.cache.has(config.roles.overseer);
+    // Lead mod role (specific for lock/unlock)
+    const isLeadMod = member.roles.cache.has(config.roles.leadMod);
     // Mod roles
-    const isMod = member.roles.cache.has(config.roles.leadMod) || member.roles.cache.has(config.roles.mod);
+    const isMod = isLeadMod || member.roles.cache.has(config.roles.mod);
 
-    // Cooldown system
+    // Cooldown system (existing)
     const command = client.commands.get(interaction.commandName);
     if (interaction.isChatInputCommand() && command) {
       const now = Date.now();
@@ -59,44 +61,40 @@ module.exports = {
       setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
     }
 
-    // Permission checks for new commands
-    const restrictedCommands = {
-      warn: isMod || isAdmin,
-      warnlist: isMod || isAdmin,
-      removewarn: isMod || isAdmin,
-      softban: isMod || isAdmin,
-      timeout: isMod || isAdmin,
-      giveaway: isMod,
-      givecoins: true, // Anyone, but limited for non-admins
-    };
-
+    // Permission checks
     if (interaction.isChatInputCommand()) {
       const cmdName = interaction.commandName;
-      if (restrictedCommands[cmdName] === false) {
+
+      // Lock/Unlock: Only lead mod or admin
+      if (['lock', 'unlock'].includes(cmdName) && !isLeadMod && !isAdmin) {
+        return interaction.reply({ content: 'Only lead moderators can use this command.', ephemeral: true });
+      }
+
+      // Existing checks (warn, softban, etc.)
+      if (['warn', 'warnlist', 'removewarn', 'softban', 'timeout', 'giveaway'].includes(cmdName) && !isMod && !isAdmin) {
         return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
       }
 
-      // Existing checks (cookies, etc.)
       if (['addcookies', 'removecookies', 'addcookiesall', 'removecookiesall'].includes(cmdName) && !member.roles.cache.has(config.roles.cookiesManager) && !isAdmin) {
         return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
       }
-      // ... (keep all existing checks from your previous version)
 
-      if (interaction.commandName === 'gamelog' && !member.roles.cache.has(config.roles.gamelogUser ) && !isAdmin) {
+      if (cmdName === 'gamelog' && !member.roles.cache.has(config.roles.gamelogUser ) && !isAdmin) {
         return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
       }
+
       if (['purge', 'purgeuser'].includes(cmdName) && !isMod && !isAdmin) {
         return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
       }
+
       if (cmdName === 'quicksetup' && !isAdmin) {
         return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
       }
     }
 
-    // Handle Button Interactions (tickets + giveaways)
+    // Handle Button Interactions (existing ticket logic)
     if (interaction.isButton()) {
       if (interaction.customId === 'create_ticket') {
-        // Existing ticket logic...
         const Ticket = require('../models/Ticket');
         if (!settings || !settings.ticketCategoryId) {
           return interaction.reply({ content: 'Ticket system is not set up.', ephemeral: true });
@@ -143,12 +141,6 @@ module.exports = {
 
         return interaction.reply({ content: `Your ticket has been created: ${ticketChannel}`, ephemeral: true });
       }
-      return;
-    }
-
-    // Handle Giveaway Reactions (for entry)
-    if (interaction.isMessageComponent() && interaction.customId === 'enter_giveaway') {
-      // Simple reaction handling for giveaway entry (use reactions instead of buttons for simplicity)
       return;
     }
 
