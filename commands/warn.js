@@ -6,7 +6,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('warn')
     .setDescription('Warn a user.')
-    .addUser Option(option =>
+    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
       option.setName('target')
         .setDescription('User  to warn')
         .setRequired(true))
@@ -15,7 +15,7 @@ module.exports = {
         .setDescription('Reason for warning')
         .setRequired(true)),
   async execute(interaction, client, logModerationAction) {
-    const target = interaction.options.getUser ('target');
+    const target = interaction.options.getUser('target');
     const reason = interaction.options.getString('reason');
 
     if (target.bot) {
@@ -44,9 +44,9 @@ module.exports = {
     } catch {}
 
     // Public confirmation (visible to everyone)
-    await interaction.reply({ 
-      content: `⚠️ **Warning Issued:** ${target.tag} has been warned by ${interaction.user.tag} for: \`${reason}\`. (Total warnings: ${user.warnings.length})`, 
-      ephemeral: false 
+    await interaction.reply({
+      content: `⚠️ **Warning Issued:** ${target.tag} has been warned by ${interaction.user.tag} for: \`${reason}\`. (Total warnings: ${user.warnings.length})`,
+      ephemeral: false
     });
 
     // Log
@@ -60,9 +60,9 @@ module.exports = {
         try {
           await member.timeout(3600000, 'Auto timeout: 5 warnings reached');
           // Public auto-action message
-          await interaction.followUp({ 
-            content: `🚨 **Auto-Action:** ${target.tag} has been automatically timed out for 1 hour (5 warnings reached).`, 
-            ephemeral: false 
+          await interaction.followUp({
+            content: `🚨 **Auto-Action:** ${target.tag} has been automatically timed out for 1 hour (5 warnings reached).`,
+            ephemeral: false
           });
           await logModerationAction(interaction.guild, settings, 'Auto Timeout', target, client.user, '5 warnings reached');
           try {
