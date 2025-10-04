@@ -1,7 +1,14 @@
-// events/messageCreate.js (REPLACE - Slower XP + Level Up Channel)
+// events/messageCreate.js (REPLACE - Harder XP Formula + Level Up Channel)
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { EmbedBuilder } = require('discord.js');
+
+// Function to calculate XP needed for the next level (Made harder)
+const getNextLevelXp = (level) => {
+    // Original: 100 * Math.pow(level + 1, 1.5)
+    // New (Harder): 150 * Math.pow(level + 1, 1.8)
+    return Math.floor(150 * Math.pow(level + 1, 1.8));
+};
 
 module.exports = {
   name: 'messageCreate',
@@ -21,8 +28,9 @@ module.exports = {
     const xpGain = Math.floor(Math.random() * 3) + 1; // 1-3 XP
     user.xp += xpGain;
 
-    const nextLevelXp = Math.floor(100 * Math.pow(user.level + 1, 1.5));
+    const nextLevelXp = getNextLevelXp(user.level);
     let leveledUp = false;
+    
     if (user.xp >= nextLevelXp) {
       user.level++;
       user.xp -= nextLevelXp;
