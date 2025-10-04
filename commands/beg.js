@@ -1,4 +1,4 @@
-// commands/beg.js (NEW)
+// commands/beg.js (REPLACE - Premium GUI)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -20,28 +20,31 @@ module.exports = {
       await user.save();
 
       const messages = [
-        'A kind stranger gave you 15 coins! 🪙',
-        'You begged and got 20 coins from a passerby!',
-        'Someone pitied you and tossed 10 coins your way.',
-        'Lucky day! You earned 25 coins begging.',
-        'A rich user felt sorry and gave you 30 coins!'
+        'A kind stranger felt generous and donated **{amount} coins** to you! 🙏',
+        'You spotted a lost coin on the ground! You picked up **{amount} coins**.',
+        'An anonymous user sent you **{amount} coins** for your valiant efforts.',
+        'You earned **{amount} coins** for your inspiring performance.',
+        'A rich bot user passed by and dropped **{amount} coins**!'
       ];
-      const randomMsg = messages[Math.floor(Math.random() * messages.length)].replace('15', amount).replace('20', amount).replace('10', amount).replace('25', amount).replace('30', amount);
+      const randomMsg = messages[Math.floor(Math.random() * messages.length)].replace(/\{amount\}/g, amount);
 
       const embed = new EmbedBuilder()
         .setTitle('🪙 Begging Success!')
         .setDescription(randomMsg)
+        .addFields(
+            { name: 'New Balance', value: `${user.coins} 💰`, inline: true }
+        )
         .setColor(0x00FF00)
         .setTimestamp();
 
       await interaction.reply({ embeds: [embed] });
     } else {
       const failMessages = [
-        'No one gave you anything. Keep trying!',
-        'Strangers ignored your begging. 😔',
-        'You begged but got nothing this time.',
-        'Bad luck! Empty pockets remain.',
-        'A dog chased you away while begging.'
+        'No one gave you anything. The street is cold. 🥶',
+        'The beggar police told you to move along. No earnings.',
+        'You begged but only got judgmental stares. 😒',
+        'Your voice cracked at the worst time. Failed.',
+        'A stray cat stole your hat. Nothing earned.'
       ];
       const randomFail = failMessages[Math.floor(Math.random() * failMessages.length)];
 
