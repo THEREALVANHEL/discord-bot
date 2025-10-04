@@ -6,23 +6,23 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('rob')
     .setDescription('Attempt to rob coins from another user.')
-    .addUser Option(option =>
+    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
       option.setName('target')
         .setDescription('User  to rob')
         .setRequired(true)),
   cooldown: 600, // 10 minutes
   async execute(interaction) {
-    const targetUser  = interaction.options.getUser ('target');
-    if (targetUser .bot) return interaction.reply({ content: 'You cannot rob bots.', ephemeral: true });
-    if (targetUser .id === interaction.user.id) return interaction.reply({ content: 'You cannot rob yourself.', ephemeral: true });
+    const targetUser = interaction.options.getUser('target');
+    if (targetUser.bot) return interaction.reply({ content: 'You cannot rob bots.', ephemeral: true });
+    if (targetUser.id === interaction.user.id) return interaction.reply({ content: 'You cannot rob yourself.', ephemeral: true });
 
     let robber = await User.findOne({ userId: interaction.user.id });
     if (!robber) robber = new User({ userId: interaction.user.id });
 
-    let victim = await User.findOne({ userId: targetUser .id });
-    if (!victim) victim = new User({ userId: targetUser .id });
+    let victim = await User.findOne({ userId: targetUser.id });
+    if (!victim) victim = new User({ userId: targetUser.id });
 
-    if (victim.coins < 10) return interaction.reply({ content: `${targetUser .tag} does not have enough coins to rob.`, ephemeral: true });
+    if (victim.coins < 10) return interaction.reply({ content: `${targetUser.tag} does not have enough coins to rob.`, ephemeral: true });
 
     // 50% success rate
     if (Math.random() < 0.5) {
@@ -36,7 +36,7 @@ module.exports = {
 
       const embed = new EmbedBuilder()
         .setTitle('Robbery Successful!')
-        .setDescription(`${interaction.user} robbed ${amount} coins from ${targetUser }! 💰`)
+        .setDescription(`${interaction.user} robbed ${amount} coins from ${targetUser}! 💰`)
         .setColor(0x00FF00)
         .setTimestamp();
 
@@ -49,7 +49,7 @@ module.exports = {
 
       const embed = new EmbedBuilder()
         .setTitle('Robbery Failed!')
-        .setDescription(`${interaction.user} tried to rob ${targetUser } but got caught and lost ${penalty} coins! 😢`)
+        .setDescription(`${interaction.user} tried to rob ${targetUser} but got caught and lost ${penalty} coins! 😢`)
         .setColor(0xFF0000)
         .setTimestamp();
 
