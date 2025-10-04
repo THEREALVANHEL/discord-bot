@@ -1,4 +1,4 @@
-// commands/suggestion.js
+// commands/suggestion.js (REPLACE - Premium GUI)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const Settings = require('../models/Settings');
 
@@ -15,23 +15,24 @@ module.exports = {
 
     const settings = await Settings.findOne({ guildId: interaction.guild.id });
     if (!settings || !settings.suggestionChannelId) {
-      return interaction.reply({ content: 'The suggestion system is not set up yet.', ephemeral: true });
+      return interaction.reply({ content: '❌ **Error:** The suggestion system is not set up yet.', ephemeral: true });
     }
 
     const suggestionChannel = interaction.guild.channels.cache.get(settings.suggestionChannelId);
     if (!suggestionChannel) {
-      return interaction.reply({ content: 'The configured suggestion channel was not found.', ephemeral: true });
+      return interaction.reply({ content: '❌ **Error:** The configured suggestion channel was not found.', ephemeral: true });
     }
 
     const embed = new EmbedBuilder()
-      .setTitle('💡 New Suggestion')
-      .setDescription(idea)
+      .setTitle('💡 New Community Suggestion')
+      .setDescription(`> ${idea}`)
       .addFields(
         { name: 'Suggested By', value: interaction.user.tag, inline: true },
-        { name: 'Status', value: 'Pending', inline: true },
+        { name: 'Status', value: '📊 Pending Vote', inline: true },
       )
-      .setColor(0xFFA500) // Orange
-      .setTimestamp();
+      .setColor(0xFFA500)
+      .setTimestamp()
+      .setFooter({ text: `Use the reactions to vote!` });
 
     try {
       const suggestionMessage = await suggestionChannel.send({ embeds: [embed] });
@@ -40,16 +41,16 @@ module.exports = {
 
       // Create a thread for discussion
       const thread = await suggestionMessage.startThread({
-        name: `Suggestion by ${interaction.user.username}`,
-        autoArchiveDuration: 1440, // 24 hours
+        name: `Suggestion: ${idea.substring(0, 30)}...`,
+        autoArchiveDuration: 1440,
         reason: 'Discussion for new suggestion',
       });
-      await thread.send(`Discuss this suggestion here! Original suggestion: ${suggestionMessage.url}`);
+      await thread.send(`Discuss this suggestion here! Please keep the discussion civil and constructive. ${suggestionMessage.url}`);
 
-      await interaction.reply({ content: 'Your suggestion has been submitted!', ephemeral: true });
+      await interaction.reply({ content: '✅ **Suggestion Submitted!** Your idea is now open for community voting and discussion.', ephemeral: true });
     } catch (error) {
       console.error('Error submitting suggestion:', error);
-      await interaction.reply({ content: 'Failed to submit suggestion. Do I have permissions to send messages, add reactions, and create threads in the suggestion channel?', ephemeral: true });
+      await interaction.reply({ content: '❌ **Error:** Failed to submit suggestion. Check my permissions (send messages, add reactions, and create threads).', ephemeral: true });
     }
   },
 };
