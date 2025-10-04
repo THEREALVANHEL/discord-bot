@@ -1,19 +1,17 @@
 {
-  "name": "ultimate-discord-bot",
+  "name": "discord-bot",
   "version": "1.0.0",
-  "description": "Top-tier Discord bot with leveling, economy, moderation, and more.",
+  "description": "Discord bot with MongoDB and various commands",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "deploy-commands": "node deploy-commands.js"
+    "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.11.0",
-    "mongoose": "^7.3.1",
-    "dotenv": "^16.3.1",
-    "node-fetch": "^3.3.2",
+    "discord.js": "^14.14.1",
+    "mongoose": "^7.5.0",
+    "ms": "^2.1.3",
     "canvas": "^2.11.2",
-    "ms": "^2.1.3"
+    "express": "^4.18.2"
   },
   "engines": {
     "node": ">=18.0.0"
