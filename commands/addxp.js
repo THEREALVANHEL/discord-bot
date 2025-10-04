@@ -1,7 +1,12 @@
-// commands/addxp.js (REPLACE - Premium GUI + Level Up Channel)
+// commands/addxp.js (REPLACE - Premium GUI + Level Up Channel + Harder XP Formula)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
+
+// Function to calculate XP needed for the next level (Harder formula)
+const getNextLevelXp = (level) => {
+    return Math.floor(150 * Math.pow(level + 1, 1.8));
+};
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -18,9 +23,10 @@ module.exports = {
   async execute(interaction) {
     const targetUser = interaction.options.getUser('target');
     const amount = interaction.options.getInteger('amount');
+    await interaction.deferReply();
 
     if (amount <= 0) {
-      return interaction.reply({ content: '❌ **Error:** Amount must be a positive number.', ephemeral: true });
+      return interaction.editReply({ content: '❌ **Error:** Amount must be a positive number.', ephemeral: true });
     }
 
     let user = await User.findOne({ userId: targetUser.id });
@@ -37,7 +43,8 @@ module.exports = {
       interaction.guild.channels.cache.get(settings.levelUpChannelId) : 
       interaction.channel;
 
-    const nextLevelXp = Math.floor(100 * Math.pow(user.level + 1, 1.5));
+    let nextLevelXp = getNextLevelXp(user.level);
+    
     if (user.xp >= nextLevelXp) {
       user.level++;
       user.xp -= nextLevelXp; // Carry over excess XP
@@ -60,6 +67,9 @@ module.exports = {
       
       leveledUpMsg = `\n\n**🚀 Level UP!** ${targetUser} has leveled up to **Level ${user.level}**!`;
 
+      // Recalculate for display after level up
+      nextLevelXp = getNextLevelXp(user.level);
+      
       // Send level-up message to the configured channel or the current channel
       if (levelUpChannel) {
         const levelUpEmbed = new EmbedBuilder()
@@ -86,6 +96,6 @@ module.exports = {
       .setColor(0x7289DA)
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   },
 };
