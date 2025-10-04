@@ -1,4 +1,4 @@
-// commands/suggestion.js (REPLACE - Simplified: removed thread creation, Added image_url option)
+// commands/suggestion.js (REPLACE - Simplified: removed thread creation, Changed image option to Attachment)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const Settings = require('../models/Settings');
 
@@ -10,13 +10,13 @@ module.exports = {
       option.setName('idea')
         .setDescription('Your suggestion')
         .setRequired(true))
-    .addStringOption(option => // NEW IMAGE OPTION
-      option.setName('image_url')
-        .setDescription('A direct URL for an image to include with the suggestion')
+    .addAttachmentOption(option => // FIX: Changed to AttachmentOption for file uploads
+      option.setName('image')
+        .setDescription('An image file to include with the suggestion')
         .setRequired(false)),
   async execute(interaction) {
     const idea = interaction.options.getString('idea');
-    const imageUrl = interaction.options.getString('image_url'); // GET NEW OPTION
+    const imageAttachment = interaction.options.getAttachment('image'); // Get Attachment
 
     const settings = await Settings.findOne({ guildId: interaction.guild.id });
     if (!settings || !settings.suggestionChannelId) {
@@ -39,8 +39,8 @@ module.exports = {
       .setTimestamp()
       .setFooter({ text: `Use the reactions to vote! | Suggested by: ${interaction.user.tag}` });
       
-    if (imageUrl) { // SET IMAGE IF PROVIDED
-      embed.setImage(imageUrl);
+    if (imageAttachment) { // Use attachment URL
+      embed.setImage(imageAttachment.url);
     }
 
     try {
