@@ -1,8 +1,10 @@
+// MultipleFiles/guildMemberRemove.js
 module.exports = {
   name: 'guildMemberRemove',
   async execute(member, client) {
     try {
-      const settings = await require('../models/Settings').findOne({ guildId: member.guild.id });
+      const Settings = require('../models/Settings'); // Require here
+      const settings = await Settings.findOne({ guildId: member.guild.id });
       if (settings && settings.leaveChannelId) {
         const channel = member.guild.channels.cache.get(settings.leaveChannelId);
         if (channel) {
