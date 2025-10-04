@@ -1,9 +1,10 @@
-// index.js (Fixed syntax error in roles object)
+// index.js (Fixed syntax error in roles object + Dummy HTTP server for Render Web Service)
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, Collection } = require('discord.js');
 const mongoose = require('mongoose');
 const fs = require('fs');
 const path = require('path');
+const express = require('express'); // Add this for the dummy HTTP server
 
 const client = new Client({
   intents: [
@@ -32,7 +33,7 @@ client.config = {
     cookiesManager: '1372121024841125888',
     forgottenOne: '1376574861333495910', // Admin
     overseer: '1371004219875917875',     // Admin
-    gamelog: '1371003310223654974',       // Fixed: Removed invalid "User  " and made it a string key-value
+    gamelog: '1371003310223654974',       // Fixed: Removed invalid "User   " and made it a string key-value
   },
   levelingRoles: [
     { level: 30, roleId: '1371032270361853962' },
@@ -95,5 +96,17 @@ mongoose.connect(process.env.MONGODB_URI, {
 }).then(() => {
   console.log('Connected to MongoDB');
 }).catch(console.error);
+
+// Dummy HTTP server for Render Web Service (binds to $PORT for health checks)
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+  res.send('Discord Bot is running!'); // Simple health check response
+});
+
+app.listen(PORT, () => {
+  console.log(`Dummy HTTP server listening on port ${PORT}`);
+});
 
 client.login(process.env.DISCORD_TOKEN);
