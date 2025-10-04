@@ -1,4 +1,4 @@
-// commands/timeout.js (REPLACE - Improved with DM and reason)
+// commands/timeout.js (REPLACE - Success reply now visible to everyone)
 const { SlashCommandBuilder } = require('discord.js');
 const ms = require('ms');
 
@@ -24,9 +24,13 @@ module.exports = {
     const reason = interaction.options.getString('reason');
 
     const member = interaction.guild.members.cache.get(target.id);
-    if (!member) return interaction.reply({ content: 'User  not found in this server.', ephemeral: true });
+    if (!member) {
+      return interaction.reply({ content: 'User  not found in this server.', ephemeral: true });
+    }
 
-    if (member.id === interaction.user.id) return interaction.reply({ content: 'You cannot timeout yourself.', ephemeral: true });
+    if (member.id === interaction.user.id) {
+      return interaction.reply({ content: 'You cannot timeout yourself.', ephemeral: true });
+    }
 
     const durationMs = ms(durationStr);
     if (!durationMs || durationMs < 10000 || durationMs > 2419200000) {
@@ -36,17 +40,23 @@ module.exports = {
     try {
       await member.timeout(durationMs, reason);
 
-      // DM the user
+      // DM the user (private)
       try {
         await target.send(`You have been timed out in ${interaction.guild.name} for ${durationStr} for: \`${reason}\`. You can speak again on <t:${Math.floor(Date.now() + durationMs) / 1000}:F>.`);
       } catch (dmError) {
         console.log(`Could not DM ${target.tag}: ${dmError.message}`);
       }
 
-      await interaction.reply({ content: `${target.tag} has been timed out for ${durationStr} for \`${reason}\`.`, ephemeral: true });
+      // Public confirmation (visible to everyone)
+      await interaction.reply({ 
+        content: `⏰ **Timeout Executed:** ${target.tag} has been timed out by ${interaction.user.tag} for ${durationStr} due to: \`${reason}\`.`, 
+        ephemeral: false 
+      });
 
       // Log
-      await logModerationAction(interaction.guild, await require('../models/Settings').findOne({ guildId: interaction.guild.id }), 'Timeout', target, interaction.user, reason, `Duration: ${durationStr}`);
+      const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
+      await logModerationAction(interaction.guild, settings, 'Timeout', target, interaction.user, reason, `Duration: ${durationStr}`);
+
     } catch (error) {
       console.error(error);
       await interaction.reply({ content: 'Failed to timeout user. Check bot permissions (Moderate Members).', ephemeral: true });
