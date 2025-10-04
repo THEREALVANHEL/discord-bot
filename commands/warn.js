@@ -1,5 +1,5 @@
-// commands/warn.js
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+// commands/warn.js (REPLACE - Refined for better public visibility)
+const { SlashCommandBuilder } = require('discord.js');
 const User = require('../models/User');
 
 module.exports = {
@@ -15,14 +15,20 @@ module.exports = {
         .setDescription('Reason for warning')
         .setRequired(true)),
   async execute(interaction, client, logModerationAction) {
-    const targetUser  = interaction.options.getUser ('target');
+    const target = interaction.options.getUser ('target');
     const reason = interaction.options.getString('reason');
 
-    if (targetUser .bot) return interaction.reply({ content: 'You cannot warn bots.', ephemeral: true });
-    if (targetUser .id === interaction.user.id) return interaction.reply({ content: 'You cannot warn yourself.', ephemeral: true });
+    if (target.bot) {
+      return interaction.reply({ content: 'You cannot warn bots.', ephemeral: true });
+    }
+    if (target.id === interaction.user.id) {
+      return interaction.reply({ content: 'You cannot warn yourself.', ephemeral: true });
+    }
 
-    let user = await User.findOne({ userId: targetUser .id });
-    if (!user) user = new User({ userId: targetUser .id });
+    let user = await User.findOne({ userId: target.id });
+    if (!user) {
+      user = new User({ userId: target.id });
+    }
 
     user.warnings.push({
       reason,
@@ -32,25 +38,35 @@ module.exports = {
 
     await user.save();
 
-    // DM user
+    // DM user (private)
     try {
-      await targetUser .send(`You have been warned in ${interaction.guild.name} for: ${reason}`);
+      await target.send(`You have been warned in ${interaction.guild.name} for: ${reason}\nTotal warnings: ${user.warnings.length}`);
     } catch {}
 
-    await interaction.reply({ content: `${targetUser .tag} has been warned for: ${reason}`, ephemeral: false });
+    // Public confirmation (visible to everyone)
+    await interaction.reply({ 
+      content: `⚠️ **Warning Issued:** ${target.tag} has been warned by ${interaction.user.tag} for: \`${reason}\`. (Total warnings: ${user.warnings.length})`, 
+      ephemeral: false 
+    });
 
     // Log
-    await logModerationAction(interaction.guild, await require('../models/Settings').findOne({ guildId: interaction.guild.id }), 'Warn', targetUser , interaction.user, reason);
+    const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
+    await logModerationAction(interaction.guild, settings, 'Warn', target, interaction.user, reason);
 
     // Auto timeout after 5 warnings (configurable later)
     if (user.warnings.length >= 5) {
-      const member = interaction.guild.members.cache.get(targetUser .id);
+      const member = interaction.guild.members.cache.get(target.id);
       if (member) {
         try {
           await member.timeout(3600000, 'Auto timeout: 5 warnings reached');
-          await logModerationAction(interaction.guild, await require('../models/Settings').findOne({ guildId: interaction.guild.id }), 'Auto Timeout', targetUser , client.user, '5 warnings reached');
+          // Public auto-action message
+          await interaction.followUp({ 
+            content: `🚨 **Auto-Action:** ${target.tag} has been automatically timed out for 1 hour (5 warnings reached).`, 
+            ephemeral: false 
+          });
+          await logModerationAction(interaction.guild, settings, 'Auto Timeout', target, client.user, '5 warnings reached');
           try {
-            await targetUser .send(`You have been automatically timed out for 1 hour due to accumulating 5 warnings.`);
+            await target.send(`You have been automatically timed out for 1 hour due to accumulating 5 warnings.`);
           } catch {}
         } catch {}
       }
