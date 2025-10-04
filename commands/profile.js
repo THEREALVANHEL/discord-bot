@@ -1,4 +1,4 @@
-// commands/profile.js (REPLACE - Premium GUI, Progress Bar)
+// commands/profile.js (REPLACE - Premium GUI, Progress Bar, Fixed timestamps)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -67,8 +67,10 @@ module.exports = {
         { name: 'Cookies 🍪', value: `\`${user.cookies.toLocaleString()}\``, inline: true },
         { name: 'Daily Streak 🔥', value: `\`${user.dailyStreak || 0} days\``, inline: true },
         // Dates
-        { name: 'Joined Discord', value: `<t:${Math.floor(targetUser.createdAt.getTime() / 1000)}:D> (\`<t:${Math.floor(targetUser.createdAt.getTime() / 1000)}:R>\`)`, inline: false },
-        { name: 'Joined Server', value: member ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:D> (\`<t:${Math.floor(member.joinedTimestamp / 1000)}:R>\`)` : 'N/A', inline: false },
+        // FIX: Use full timestamp (:F)
+        { name: 'Joined Discord', value: `<t:${Math.floor(targetUser.createdAt.getTime() / 1000)}:F>`, inline: false },
+        // FIX: Use full timestamp (:F)
+        { name: 'Joined Server', value: member ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:F>` : 'N/A', inline: false },
       )
       .setFooter({ text: `User ID: ${targetUser.id}` })
       .setTimestamp();
