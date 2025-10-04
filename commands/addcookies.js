@@ -1,4 +1,4 @@
-// commands/addcookies.js
+// commands/addcookies.js (REPLACE - Premium GUI)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -6,7 +6,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('addcookies')
     .setDescription('Add cookies to a user.')
-    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
+    .addUserOption(option =>
       option.setName('target')
         .setDescription('The user to add cookies to')
         .setRequired(true))
@@ -19,7 +19,7 @@ module.exports = {
     const amount = interaction.options.getInteger('amount');
 
     if (amount <= 0) {
-      return interaction.reply({ content: 'Amount must be a positive number.', ephemeral: true });
+      return interaction.reply({ content: '❌ **Error:** Amount must be a positive number.', ephemeral: true });
     }
 
     let user = await User.findOne({ userId: targetUser.id });
@@ -48,8 +48,11 @@ module.exports = {
     }
 
     const embed = new EmbedBuilder()
-      .setTitle('Cookies Added')
-      .setDescription(`Added ${amount} cookies to ${targetUser.tag}. They now have ${user.cookies} cookies.`)
+      .setTitle('🍪 Cookies Granted')
+      .setDescription(`Successfully baked **${amount} cookies** for ${targetUser}!`)
+      .addFields(
+        { name: 'New Cookie Count', value: `${user.cookies} cookies 🍪`, inline: true }
+      )
       .setColor(0x00FF00)
       .setTimestamp();
 
