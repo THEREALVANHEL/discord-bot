@@ -1,12 +1,13 @@
-// commands/addxp.js
+// commands/addxp.js (REPLACE - Premium GUI + Level Up Channel)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
+const Settings = require('../models/Settings');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('addxp')
     .setDescription('Add XP to a user.')
-    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
+    .addUserOption(option =>
       option.setName('target')
         .setDescription('The user to add XP to')
         .setRequired(true))
@@ -19,7 +20,7 @@ module.exports = {
     const amount = interaction.options.getInteger('amount');
 
     if (amount <= 0) {
-      return interaction.reply({ content: 'Amount must be a positive number.', ephemeral: true });
+      return interaction.reply({ content: '❌ **Error:** Amount must be a positive number.', ephemeral: true });
     }
 
     let user = await User.findOne({ userId: targetUser.id });
@@ -28,14 +29,19 @@ module.exports = {
     }
 
     user.xp += amount;
+    let leveledUpMsg = '';
 
     // Check for level up
+    const settings = await Settings.findOne({ guildId: interaction.guild.id });
+    const levelUpChannel = settings?.levelUpChannelId ? 
+      interaction.guild.channels.cache.get(settings.levelUpChannelId) : 
+      interaction.channel;
+
     const nextLevelXp = Math.floor(100 * Math.pow(user.level + 1, 1.5));
     if (user.xp >= nextLevelXp) {
       user.level++;
       user.xp -= nextLevelXp; // Carry over excess XP
-
-      // Assign leveling roles
+      
       const member = interaction.guild.members.cache.get(targetUser.id);
       if (member) {
         const levelingRoles = interaction.client.config.levelingRoles;
@@ -51,15 +57,33 @@ module.exports = {
           await member.roles.add(newLevelRole.roleId).catch(() => {});
         }
       }
-      await interaction.channel.send(`${targetUser}, congratulations! You leveled up to level ${user.level}! 🎉`);
+      
+      leveledUpMsg = `\n\n**🚀 Level UP!** ${targetUser} has leveled up to **Level ${user.level}**!`;
+
+      // Send level-up message to the configured channel or the current channel
+      if (levelUpChannel) {
+        const levelUpEmbed = new EmbedBuilder()
+          .setTitle('🚀 Level UP!')
+          .setDescription(`${targetUser}, congratulations! You've leveled up to **Level ${user.level}**! 🎉`)
+          .setThumbnail(targetUser.displayAvatarURL({ dynamic: true }))
+          .setColor(0xFFD700) // Gold
+          .setTimestamp();
+        
+        await levelUpChannel.send({ content: `${targetUser}`, embeds: [levelUpEmbed] });
+      }
     }
 
     await user.save();
 
     const embed = new EmbedBuilder()
-      .setTitle('XP Added')
-      .setDescription(`Added ${amount} XP to ${targetUser.tag}. They now have ${user.xp} XP (Level ${user.level}).`)
-      .setColor(0x00FF00)
+      .setTitle('✨ XP Granted')
+      .setDescription(`Successfully added **${amount} XP** to ${targetUser}.\n\nNew Status:`)
+      .addFields(
+        { name: 'Current XP', value: `${user.xp}`, inline: true },
+        { name: 'Current Level', value: `${user.level}`, inline: true },
+      )
+      .setFooter({ text: `Next Level: ${nextLevelXp} XP Needed` })
+      .setColor(0x7289DA)
       .setTimestamp();
 
     await interaction.reply({ embeds: [embed] });
