@@ -1,4 +1,4 @@
-// events/guildMemberRemove.js (REPLACE - Premium leave + DM to rejoin)
+// events/guildMemberRemove.js (REPLACE - Premium leave + DM to rejoin, Fixed timestamp format)
 const Settings = require('../models/Settings');
 const { EmbedBuilder } = require('discord.js');
 
@@ -16,7 +16,8 @@ module.exports = {
             .setTitle('🚪 Member Left the Server')
             .setDescription(`**${member.user.tag}** has departed. We now have **${member.guild.memberCount}** members remaining.`)
             .addFields(
-              { name: 'Joined', value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>`, inline: true },
+              // FIX: Use full timestamp (:F) instead of relative (:R)
+              { name: 'Joined', value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:F>`, inline: true },
               { name: 'Goodbye!', value: 'We hope to see you again soon.', inline: true }
             )
             .setColor(0xFF0000) // Red
