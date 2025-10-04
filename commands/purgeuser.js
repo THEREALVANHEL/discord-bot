@@ -5,7 +5,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('purgeuser')
     .setDescription('Delete a specified number of messages from a user in the channel.')
-    .addUser Option(option =>
+    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
       option.setName('target')
         .setDescription('User  whose messages to delete')
         .setRequired(true))
@@ -14,7 +14,7 @@ module.exports = {
         .setDescription('Number of messages to delete (1-100)')
         .setRequired(true)),
   async execute(interaction, client, logModerationAction) {
-    const target = interaction.options.getUser ('target');
+    const target = interaction.options.getUser('target');
     const amount = interaction.options.getInteger('amount');
 
     if (amount < 1 || amount > 100) {
@@ -49,9 +49,9 @@ module.exports = {
       await interaction.channel.bulkDelete(messagesToDelete, true);
 
       // Public confirmation (visible to everyone)
-      await interaction.reply({ 
-        content: `🧹 **User  Purge Executed:** ${messagesToDelete.length} messages from ${target.tag} have been deleted by ${interaction.user.tag}.`, 
-        ephemeral: false 
+      await interaction.reply({
+        content: `🧹 **User  Purge Executed:** ${messagesToDelete.length} messages from ${target.tag} have been deleted by ${interaction.user.tag}.`,
+        ephemeral: false
       }).then(msg => {
         // Auto-delete the reply after 5 seconds
         setTimeout(() => msg.delete().catch(() => {}), 5000);
