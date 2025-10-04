@@ -1,4 +1,4 @@
-// MultipleFiles/messageDelete.js
+// events/messageDelete.js
 const Settings = require('../models/Settings');
 
 module.exports = {
