@@ -1,10 +1,10 @@
-// index.js (REPLACE - Updated roles, removed shop item, cleaned config)
+// index.js (REPLACE - Updated roles, removed shop item, cleaned config, FIXED TYPO)
 require('dotenv').config();
-const { Client, GatewayIntentBits, Partials, Collection } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder } = require('discord.js'); // Added EmbedBuilder for reminder loading logic
 const mongoose = require('mongoose');
 const fs = require('fs');
 const path = require('path');
-const express = require('express');
+const express = require('express'); // Add this for the dummy HTTP server
 
 const client = new Client({
   intents: [
@@ -22,7 +22,7 @@ const client = new Client({
 client.commands = new Collection();
 client.cooldowns = new Collection();
 client.giveaways = new Map();
-client.locks = new new Map();
+client.locks = new Map(); // FIXED: Removed extra 'new'
 client.reminders = new Map(); // New map for in-memory reminders
 
 client.config = {
@@ -65,7 +65,6 @@ client.config = {
     { level: 450, title: 'CTO', xpReward: 75, coinReward: 40 },
     { level: 1000, title: 'Tech Legend', xpReward: 100, coinReward: 50 },
   ],
-  // Removed 'cookie_pack_small'
   shopItems: [
     { id: 'xp_boost_1h', name: '1 Hour XP Boost', description: 'Gain 2x XP for 1 hour.', price: 500, type: 'boost' },
     { id: 'rename_ticket', name: 'Nickname Change Ticket', description: 'Change your nickname once.', price: 1000, type: 'utility' },
@@ -107,6 +106,7 @@ mongoose.connect(process.env.MONGODB_URI, {
         if (timeUntil > 0) {
           const timeout = setTimeout(async () => {
             try {
+              // Note: EmbedBuilder is required here, ensuring it is imported at the top now.
               const reminderEmbed = new EmbedBuilder()
                 .setTitle('🔔 Personal Reminder!')
                 .setDescription(`You asked to be reminded about: **${reminder.message}**`)
