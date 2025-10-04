@@ -1,58 +1,69 @@
-// commands/purgeuser.js
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const Settings = require('../models/Settings');
+// commands/purgeuser.js (NEW or REPLACE - Delete messages from a specific user)
+const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('purgeuser')
-    .setDescription('Delete a specified number of messages from a specific user in the current channel.')
-    .addUserOption(option =>
+    .setDescription('Delete a specified number of messages from a user in the channel.')
+    .addUser Option(option =>
       option.setName('target')
-        .setDescription('The user whose messages to delete')
+        .setDescription('User  whose messages to delete')
         .setRequired(true))
     .addIntegerOption(option =>
       option.setName('amount')
-        .setDescription('The number of messages to delete (1-99)')
+        .setDescription('Number of messages to delete (1-100)')
         .setRequired(true)),
   async execute(interaction, client, logModerationAction) {
-    const targetUser = interaction.options.getUser('target');
+    const target = interaction.options.getUser ('target');
     const amount = interaction.options.getInteger('amount');
 
-    if (amount < 1 || amount > 99) {
-      return interaction.reply({ content: 'You can only delete between 1 and 99 messages.', ephemeral: true });
+    if (amount < 1 || amount > 100) {
+      return interaction.reply({ content: 'Amount must be between 1 and 100.', ephemeral: true });
+    }
+
+    if (target.id === interaction.user.id) {
+      return interaction.reply({ content: 'You cannot purge your own messages.', ephemeral: true });
+    }
+
+    if (!interaction.channel.manageable) {
+      return interaction.reply({ content: 'I cannot manage messages in this channel.', ephemeral: true });
     }
 
     try {
-      const fetchedMessages = await interaction.channel.messages.fetch({ limit: 100 }); // Fetch more to find user's messages
-      const userMessages = fetchedMessages.filter(msg => msg.author.id === targetUser.id).first(amount);
-
-      if (userMessages.length === 0) {
-        return interaction.reply({ content: `No messages found from ${targetUser.tag} in the last 100 messages.`, ephemeral: true });
+      // Fetch user's messages
+      const userMessages = [];
+      let lastId;
+      for (let i = 0; i < amount; i += 100) {
+        const fetched = await interaction.channel.messages.fetch({ limit: 100, before: lastId });
+        const userMsgs = fetched.filter(msg => msg.author.id === target.id);
+        userMessages.push(...userMsgs.values());
+        if (userMsgs.size < 100) break;
+        lastId = fetched.last().id;
       }
 
-      const deletedMessages = await interaction.channel.bulkDelete(userMessages, true);
+      const messagesToDelete = userMessages.slice(0, amount);
+      if (messagesToDelete.length === 0) {
+        return interaction.reply({ content: `No recent messages found from ${target.tag}.`, ephemeral: true });
+      }
 
-      const embed = new EmbedBuilder()
-        .setTitle('User Messages Purged')
-        .setDescription(`Successfully deleted ${deletedMessages.size} messages from ${targetUser.tag} in ${interaction.channel}.`)
-        .setColor(0xFF0000)
-        .setTimestamp();
+      await interaction.channel.bulkDelete(messagesToDelete, true);
 
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      // Public confirmation (visible to everyone)
+      await interaction.reply({ 
+        content: `🧹 **User  Purge Executed:** ${messagesToDelete.length} messages from ${target.tag} have been deleted by ${interaction.user.tag}.`, 
+        ephemeral: false 
+      }).then(msg => {
+        // Auto-delete the reply after 5 seconds
+        setTimeout(() => msg.delete().catch(() => {}), 5000);
+      });
 
-      // Log the action
-      await logModerationAction(
-        interaction.guild,
-        await Settings.findOne({ guildId: interaction.guild.id }),
-        'User Messages Purged',
-        targetUser, // Target is the user
-        interaction.user,
-        `Deleted ${deletedMessages.size} messages from ${targetUser.tag} in ${interaction.channel.name}`
-      );
+      // Log
+      const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
+      await logModerationAction(interaction.guild, settings, 'User  Purge', target, interaction.user, `Deleted ${messagesToDelete.length} messages`, 'Targeted purge');
 
     } catch (error) {
-      console.error('Error purging user messages:', error);
-      await interaction.reply({ content: 'Failed to purge user messages. Do I have "Manage Messages" permission?', ephemeral: true });
+      console.error('Purgeuser error:', error);
+      await interaction.reply({ content: 'Failed to purge user messages. Ensure the bot has "Manage Messages" permission.', ephemeral: true });
     }
   },
 };
