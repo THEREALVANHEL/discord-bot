@@ -1,4 +1,4 @@
-// events/guildAuditLogEntryCreate.js
+// events/guildAuditLogEntryCreate.js (REPLACE - Removed MemberBanAdd to prevent double logging with softban/custom ban commands)
 const Settings = require('../models/Settings');
 const { AuditLogEvent, EmbedBuilder } = require('discord.js');
 
@@ -54,18 +54,12 @@ module.exports = {
         color = 0xFFA500;
         break;
       case AuditLogEvent.MemberBanAdd:
-        // Handled by guildBanAdd, but this is a fallback/additional info
-        title = 'Member Banned (Audit Log)';
-        description = `Member: ${target.tag} (${target.id})`;
-        color = 0xFF0000;
-        break;
+        // FIX: Removed to prevent double-logging with softban and custom ban commands
+        return; 
       case AuditLogEvent.MemberUpdate:
-        // This can be very noisy, only log specific changes if needed
-        // For example, nickname changes, avatar changes, etc.
-        // For now, we'll keep it general or skip to avoid spam.
-        return; // Skip for now to avoid spam
+        // This can be very noisy, skip to avoid spam.
+        return; 
       case AuditLogEvent.MessageDelete:
-        // This can be noisy if not filtered, messageDelete event is usually sufficient
         // Only log if the executor is different from the message author (e.g., mod deleting)
         if (auditLogEntry.extra && auditLogEntry.extra.channel && auditLogEntry.extra.count) {
           title = 'Messages Purged';
