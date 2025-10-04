@@ -1,4 +1,4 @@
-// models/User.js (REPLACE - Added reminders array)
+// models/User.js (REPLACE - Added reminders array and currentJob)
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
@@ -24,6 +24,7 @@ const userSchema = new mongoose.Schema({
     remindAt: { type: Date, required: true },
     channelId: { type: String, required: true },
   }],
+  currentJob: { type: String, default: null }, // NEW
 });
 
 module.exports = mongoose.model('User ', userSchema);
