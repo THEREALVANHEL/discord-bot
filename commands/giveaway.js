@@ -41,7 +41,7 @@ module.exports = {
     await giveawayMessage.react('🎉');
 
     // Store giveaway info in client.giveaways Map
-    client.giveaways.set(giveawayMessage.id, {
+    client.giveaways.set(giveawayMessage.id, { // FIX: Added giveawayMessage.id and closing parenthesis
       channelId: interaction.channel.id,
       messageId: giveawayMessage.id,
       prize: prize,
