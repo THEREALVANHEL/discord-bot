@@ -1,10 +1,10 @@
-// index.js (Fixed syntax error in roles object + Dummy HTTP server for Render Web Service)
+// index.js (REPLACE - Updated roles, removed shop item, cleaned config)
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, Collection } = require('discord.js');
 const mongoose = require('mongoose');
 const fs = require('fs');
 const path = require('path');
-const express = require('express'); // Add this for the dummy HTTP server
+const express = require('express');
 
 const client = new Client({
   intents: [
@@ -16,13 +16,14 @@ const client = new Client({
     GatewayIntentBits.GuildBans,
     GatewayIntentBits.GuildModeration,
   ],
-  partials: [Partials.Message, Partials.Channel, Partials.Reaction],
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.GuildMember], // Added GuildMember partial for robust fetching
 });
 
 client.commands = new Collection();
 client.cooldowns = new Collection();
 client.giveaways = new Map();
-client.locks = new Map(); // For temporary channel locks
+client.locks = new new Map();
+client.reminders = new Map(); // New map for in-memory reminders
 
 client.config = {
   guildId: process.env.GUILD_ID,
@@ -33,7 +34,8 @@ client.config = {
     cookiesManager: '1372121024841125888',
     forgottenOne: '1376574861333495910', // Admin
     overseer: '1371004219875917875',     // Admin
-    gamelog: '1371003310223654974',       // Fixed: Removed invalid "User   " and made it a string key-value
+    gamelogUser: '1371003310223654974',   // Renamed for clarity
+    headHost: '1378338515791904808',      // New Role ID for Gamelog
   },
   levelingRoles: [
     { level: 30, roleId: '1371032270361853962' },
@@ -63,9 +65,9 @@ client.config = {
     { level: 450, title: 'CTO', xpReward: 75, coinReward: 40 },
     { level: 1000, title: 'Tech Legend', xpReward: 100, coinReward: 50 },
   ],
+  // Removed 'cookie_pack_small'
   shopItems: [
     { id: 'xp_boost_1h', name: '1 Hour XP Boost', description: 'Gain 2x XP for 1 hour.', price: 500, type: 'boost' },
-    { id: 'cookie_pack_small', name: 'Small Cookie Pack', description: 'Get 100 cookies instantly.', price: 200, type: 'item', cookies: 100 },
     { id: 'rename_ticket', name: 'Nickname Change Ticket', description: 'Change your nickname once.', price: 1000, type: 'utility' },
   ],
 };
@@ -95,6 +97,43 @@ mongoose.connect(process.env.MONGODB_URI, {
   useUnifiedTopology: true,
 }).then(() => {
   console.log('Connected to MongoDB');
+
+  // Load reminders from DB on startup
+  const User = require('./models/User');
+  User.find({ 'reminders.0': { $exists: true } }).then(users => {
+    users.forEach(user => {
+      user.reminders.forEach(reminder => {
+        const timeUntil = reminder.remindAt.getTime() - Date.now();
+        if (timeUntil > 0) {
+          const timeout = setTimeout(async () => {
+            try {
+              const reminderEmbed = new EmbedBuilder()
+                .setTitle('🔔 Personal Reminder!')
+                .setDescription(`You asked to be reminded about: **${reminder.message}**`)
+                .setColor(0xFF4500)
+                .setTimestamp();
+
+              const fetchedUser = await client.users.fetch(user.userId);
+              await fetchedUser.send({ embeds: [reminderEmbed] });
+
+              // Remove from DB after sending
+              user.reminders = user.reminders.filter(r => r._id.toString() !== reminder._id.toString());
+              await user.save();
+            } catch (error) {
+              console.error(`Could not send loaded reminder to ${user.userId}:`, error);
+              // In this case, we don't have the original channel to fall back to.
+            }
+          }, timeUntil);
+          client.reminders.set(reminder._id.toString(), timeout);
+        } else {
+          // Remove outdated reminder immediately
+          user.reminders = user.reminders.filter(r => r._id.toString() !== reminder._id.toString());
+          user.save();
+        }
+      });
+    });
+  });
+
 }).catch(console.error);
 
 // Dummy HTTP server for Render Web Service (binds to $PORT for health checks)
@@ -102,7 +141,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-  res.send('Discord Bot is running!'); // Simple health check response
+  res.send('Discord Bot is running!');
 });
 
 app.listen(PORT, () => {
