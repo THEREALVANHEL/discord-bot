@@ -1,4 +1,4 @@
-// models/User.js (REPLACE - Added warnings and dailyGives)
+// models/User.js (REPLACE - Added reminders array)
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
@@ -19,6 +19,11 @@ const userSchema = new mongoose.Schema({
     count: { type: Number, default: 0 },
     lastGive: { type: Date, default: null },
   },
+  reminders: [{ // NEW
+    message: { type: String, required: true },
+    remindAt: { type: Date, required: true },
+    channelId: { type: String, required: true },
+  }],
 });
 
 module.exports = mongoose.model('User ', userSchema);
