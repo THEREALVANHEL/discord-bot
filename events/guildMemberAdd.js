@@ -1,4 +1,6 @@
-// MultipleFiles/guildMemberAdd.js
+// events/guildMemberAdd.js
+const Settings = require('../models/Settings');
+
 module.exports = {
   name: 'guildMemberAdd',
   async execute(member, client) {
@@ -9,18 +11,23 @@ module.exports = {
         await member.roles.add(autoJoinRoleId).catch(console.error);
       }
 
-      // Welcome message
-      const Settings = require('../models/Settings'); // Require here to avoid circular dependency if Settings also requires User
+      // Welcome message in channel
       const settings = await Settings.findOne({ guildId: member.guild.id });
       if (settings && settings.welcomeChannelId) {
         const channel = member.guild.channels.cache.get(settings.welcomeChannelId);
         if (channel) {
           channel.send({
             content: `Welcome ${member} to the server! Joined on <t:${Math.floor(member.joinedTimestamp / 1000)}:F>`,
-            files: ['https://tenor.com/view/meow-dancing-cat-cat-dancing-meow-meow-meow-gif-14608759981751543562.gif'],
+            files: ['https://tenor.com/view/catdance-gangnam-style-cute-cat-gif-11020797830010762324.gif'],
           });
         }
       }
+
+      // Send DM to user
+      try {
+        await member.send(`Welcome to ${member.guild.name}! We're glad to have you here.`);
+      } catch {}
+
     } catch (error) {
       console.error('Error in guildMemberAdd event:', error);
     }
