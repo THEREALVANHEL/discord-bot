@@ -1,3 +1,4 @@
+// MultipleFiles/models/Settings.js
 const mongoose = require('mongoose');
 
 const settingsSchema = new mongoose.Schema({
@@ -5,7 +6,8 @@ const settingsSchema = new mongoose.Schema({
   welcomeChannelId: { type: String, default: null },
   leaveChannelId: { type: String, default: null },
   suggestionChannelId: { type: String, default: null },
-  autologChannelId: { type: String, default: null },
+  autologChannelId: { type: String, default: null }, // For message edits/deletes
+  modlogChannelId: { type: String, default: null }, // For moderation actions
   noXpChannels: { type: [String], default: [] },
   reactionRoles: [{
     messageId: String,
@@ -13,6 +15,7 @@ const settingsSchema = new mongoose.Schema({
     roleId: String,
   }],
   ticketPanelChannelId: { type: String, default: null },
+  ticketCategoryId: { type: String, default: null }, // Category for new tickets
   // Add more settings as needed
 });
 
