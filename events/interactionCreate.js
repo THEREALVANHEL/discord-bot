@@ -1,4 +1,4 @@
-// events/interactionCreate.js (REPLACE - Added permission checks for lock/unlock, beg, etc.)
+// events/interactionCreate.js (REPLACE - Updated permissions and roles)
 const { EmbedBuilder } = require('discord.js');
 const Settings = require('../models/Settings');
 
@@ -10,7 +10,7 @@ async function logModerationAction(guild, settings, action, target, moderator, r
 
   const embed = new EmbedBuilder()
     .setTitle(`Moderation Action: ${action}`)
-    .setColor(0x00FFFF)
+    .setColor(0x7289DA) // Blurple
     .addFields(
       { name: 'Target', value: target ? `${target.tag || target} (${target.id || 'N/A'})` : 'N/A' },
       { name: 'Moderator', value: `${moderator.tag} (${moderator.id})` },
@@ -33,10 +33,11 @@ module.exports = {
 
     // Admin roles
     const isAdmin = member.roles.cache.has(config.roles.forgottenOne) || member.roles.cache.has(config.roles.overseer);
-    // Lead mod role (specific for lock/unlock)
-    const isLeadMod = member.roles.cache.has(config.roles.leadMod);
     // Mod roles
+    const isLeadMod = member.roles.cache.has(config.roles.leadMod);
     const isMod = isLeadMod || member.roles.cache.has(config.roles.mod);
+    // Gamelog roles
+    const isHost = member.roles.cache.has(config.roles.gamelogUser) || member.roles.cache.has(config.roles.headHost);
 
     // Cooldown system (existing)
     const command = client.commands.get(interaction.commandName);
@@ -53,7 +54,7 @@ module.exports = {
         const expirationTime = timestamps.get(interaction.user.id) + cooldownAmount;
         if (now < expirationTime) {
           const timeLeft = (expirationTime - now) / 1000;
-          return interaction.reply({ content: `Please wait ${timeLeft.toFixed(1)} more second(s) before reusing the \`${command.data.name}\` command.`, ephemeral: true });
+          return interaction.reply({ content: `⏱️ Please wait ${timeLeft.toFixed(1)} more second(s) before reusing the \`${command.data.name}\` command.`, ephemeral: true });
         }
       }
 
@@ -67,33 +68,62 @@ module.exports = {
 
       // Lock/Unlock: Only lead mod or admin
       if (['lock', 'unlock'].includes(cmdName) && !isLeadMod && !isAdmin) {
-        return interaction.reply({ content: 'Only lead moderators can use this command.', ephemeral: true });
+        return interaction.reply({ content: '🔒 Only lead moderators can use this command.', ephemeral: true });
       }
 
-      // Existing checks (warn, softban, etc.)
-      if (['warn', 'warnlist', 'removewarn', 'softban', 'timeout', 'giveaway'].includes(cmdName) && !isMod && !isAdmin) {
-        return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      // Announce/Poll: Only mod or admin
+      if (['announce', 'poll'].includes(cmdName) && !isMod && !isAdmin) {
+        return interaction.reply({ content: '📢 Only moderators can use this command.', ephemeral: true });
       }
 
-      if (['addcookies', 'removecookies', 'addcookiesall', 'removecookiesall'].includes(cmdName) && !member.roles.cache.has(config.roles.cookiesManager) && !isAdmin) {
-        return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      // Gamelog: Only host roles or admin
+      if (cmdName === 'gamelog' && !isHost && !isAdmin) {
+        return interaction.reply({ content: '🎮 Only Host roles can use this command.', ephemeral: true });
       }
 
-      if (cmdName === 'gamelog' && !member.roles.cache.has(config.roles.gamelogUser ) && !isAdmin) {
-        return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      // Moderation checks (warn, softban, etc.)
+      if (['warn', 'warnlist', 'removewarn', 'softban', 'timeout', 'giveaway', 'purge', 'purgeuser'].includes(cmdName) && !isMod && !isAdmin) {
+        return interaction.reply({ content: '🛡️ You do not have permission to use this moderation command.', ephemeral: true });
       }
 
-      if (['purge', 'purgeuser'].includes(cmdName) && !isMod && !isAdmin) {
-        return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      // Cookie/XP Manager checks
+      if (['addcookies', 'removecookies', 'addcookiesall', 'removecookiesall', 'addxp', 'removexp', 'addcoins', 'removecoins'].includes(cmdName) && !member.roles.cache.has(config.roles.cookiesManager) && !isAdmin) {
+        return interaction.reply({ content: '🍪 You do not have permission to use this currency command.', ephemeral: true });
       }
 
       if (cmdName === 'quicksetup' && !isAdmin) {
-        return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+        return interaction.reply({ content: '👑 Only Administrators can use this command.', ephemeral: true });
       }
     }
 
     // Handle Button Interactions (existing ticket logic)
     if (interaction.isButton()) {
+      // Handle reminder removal
+      if (interaction.customId.startsWith('remove_reminder_')) {
+          const reminderId = interaction.customId.split('_')[2];
+          const User = require('../models/User');
+
+          let user = await User.findOne({ userId: interaction.user.id });
+          if (user) {
+              const initialCount = user.reminders.length;
+              user.reminders = user.reminders.filter(r => r._id.toString() !== reminderId);
+
+              if (user.reminders.length < initialCount) {
+                  await user.save();
+                  // Clear the timeout from the client map
+                  const timeout = client.reminders.get(reminderId);
+                  if (timeout) clearTimeout(timeout);
+                  client.reminders.delete(reminderId);
+
+                  await interaction.update({ content: '✅ **Reminder Removed!** Your reminder has been cancelled.', components: [], embeds: [] });
+              } else {
+                  await interaction.reply({ content: '❌ **Reminder Not Found!** This reminder may have already been removed or triggered.', ephemeral: true });
+              }
+          }
+          return;
+      }
+      
+      // Existing ticket logic
       if (interaction.customId === 'create_ticket') {
         const Ticket = require('../models/Ticket');
         if (!settings || !settings.ticketCategoryId) {
@@ -129,14 +159,23 @@ module.exports = {
         });
         await newTicket.save();
 
+        const ticketEmbed = new EmbedBuilder()
+          .setTitle('🎫 New Support Ticket')
+          .setDescription(`Thank you for creating a ticket, ${interaction.user}! A staff member will be with you shortly. Please describe your issue clearly.`)
+          .addFields(
+            { name: 'User', value: `${interaction.user.tag} (${interaction.user.id})` },
+            { name: 'Status', value: 'Open' }
+          )
+          .setColor(0x0099FF)
+          .setTimestamp();
+          
+        const modPings = [config.roles.leadMod, config.roles.mod]
+                          .filter(id => id)
+                          .map(id => `<@&${id}>`).join(' ');
+
         ticketChannel.send({
-          content: `${interaction.user}, welcome to your ticket! A staff member will be with you shortly. Please describe your issue.\n${config.roles.leadMod ? `<@&${config.roles.leadMod}>` : ''} ${config.roles.mod ? `<@&${config.roles.mod}>` : ''}`,
-          embeds: [{
-            title: 'New Ticket Created',
-            description: `:User  ${interaction.user.tag}\nIssue: Please describe your issue.`,
-            color: 0x00FF00,
-            timestamp: new Date(),
-          }],
+          content: `${interaction.user} ${modPings}`,
+          embeds: [ticketEmbed],
         });
 
         return interaction.reply({ content: `Your ticket has been created: ${ticketChannel}`, ephemeral: true });
@@ -151,9 +190,9 @@ module.exports = {
       } catch (error) {
         console.error(error);
         if (interaction.replied || interaction.deferred) {
-          await interaction.followUp({ content: 'There was an error executing that command!', ephemeral: true });
+          await interaction.followUp({ content: '❌ **Command Error:** There was an error executing that command!', ephemeral: true });
         } else {
-          await interaction.reply({ content: 'There was an error executing that command!', ephemeral: true });
+          await interaction.reply({ content: '❌ **Command Error:** There was an error executing that command!', ephemeral: true });
         }
       }
     }
