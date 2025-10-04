@@ -1,4 +1,4 @@
-// events/guildMemberAdd.js (REPLACE - Premium welcome)
+// events/guildMemberAdd.js (REPLACE - Premium welcome, Fixed timestamp format)
 const Settings = require('../models/Settings');
 const { EmbedBuilder } = require('discord.js');
 
@@ -22,7 +22,8 @@ module.exports = {
             .setTitle('👋 A New Challenger Appears!')
             .setDescription(`**${member.user.tag}** has joined the ranks of **${member.guild.name}**! We are now **${member.guild.memberCount}** strong.`)
             .addFields(
-              { name: 'Account Age', value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`, inline: true },
+              // FIX: Use full timestamp (:F) instead of relative (:R)
+              { name: 'Account Age', value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:F>`, inline: true },
               { name: 'Welcome!', value: `Read the rules and enjoy your stay, ${member}!`, inline: true }
             )
             .setColor(0x00FF00) // Green
