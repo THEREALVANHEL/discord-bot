@@ -1,4 +1,4 @@
-// MultipleFiles/index.js
+// index.js
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, Collection } = require('discord.js');
 const mongoose = require('mongoose');
@@ -12,12 +12,15 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildBans,
+    GatewayIntentBits.GuildModeration,
   ],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
 client.commands = new Collection();
 client.cooldowns = new Collection();
+
 client.config = {
   guildId: process.env.GUILD_ID,
   roles: {
@@ -27,7 +30,7 @@ client.config = {
     cookiesManager: '1372121024841125888',
     forgottenOne: '1376574861333495910', // Admin
     overseer: '1371004219875917875',     // Admin
-    gamelogUser: '1371003310223654974',
+    gamelog:User  '1371003310223654974',
   },
   levelingRoles: [
     { level: 30, roleId: '1371032270361853962' },
@@ -45,7 +48,6 @@ client.config = {
     { cookies: 3000, roleId: '1371001806930579518' },
     { cookies: 5000, roleId: '1371004762761461770' },
   ],
-  // Add other configurations here, e.g., shop items, work command progression
   workProgression: [
     { level: 0, title: 'Intern', xpReward: 10, coinReward: 5 },
     { level: 10, title: 'Junior Developer', xpReward: 15, coinReward: 8 },
@@ -57,6 +59,11 @@ client.config = {
     { level: 300, title: 'VP of Engineering', xpReward: 60, coinReward: 35 },
     { level: 450, title: 'CTO', xpReward: 75, coinReward: 40 },
     { level: 1000, title: 'Tech Legend', xpReward: 100, coinReward: 50 },
+  ],
+  shopItems: [
+    { id: 'xp_boost_1h', name: '1 Hour XP Boost', description: 'Gain 2x XP for 1 hour.', price: 500, type: 'boost' },
+    { id: 'cookie_pack_small', name: 'Small Cookie Pack', description: 'Get 100 cookies instantly.', price: 200, type: 'item', cookies: 100 },
+    { id: 'rename_ticket', name: 'Nickname Change Ticket', description: 'Change your nickname once.', price: 1000, type: 'utility' },
   ],
 };
 
