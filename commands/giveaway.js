@@ -40,5 +40,58 @@ module.exports = {
     const giveawayMessage = await interaction.channel.send({ embeds: [embed] });
     await giveawayMessage.react('🎉');
 
-    // Store giveaway info
-    client.giveaways.set(giveaway
+    // Store giveaway info in client.giveaways Map
+    client.giveaways.set(giveawayMessage.id, {
+      channelId: interaction.channel.id,
+      messageId: giveawayMessage.id,
+      prize: prize,
+      winnersCount: winnersCount,
+      endTime: Date.now() + durationMs,
+      participants: new Set(),
+    });
+
+    interaction.reply({ content: `Giveaway started for **${prize}**!`, ephemeral: true });
+
+    // Set timeout to end giveaway
+    setTimeout(async () => {
+      const giveaway = client.giveaways.get(giveawayMessage.id);
+      if (!giveaway) return;
+
+      // Fetch the message again to get reactions
+      const channel = await client.channels.fetch(giveaway.channelId);
+      const message = await channel.messages.fetch(giveaway.messageId);
+      const reaction = message.reactions.cache.get('🎉');
+
+      if (!reaction) {
+        return channel.send('No one participated in the giveaway.');
+      }
+
+      const users = await reaction.users.fetch();
+      const participants = users.filter(user => !user.bot).map(user => user.id);
+
+      if (participants.length === 0) {
+        return channel.send('No valid participants for the giveaway.');
+      }
+
+      // Pick winners randomly
+      const winners = [];
+      while (winners.length < giveaway.winnersCount && participants.length > 0) {
+        const winnerIndex = Math.floor(Math.random() * participants.length);
+        winners.push(participants.splice(winnerIndex, 1)[0]);
+      }
+
+      const winnerMentions = winners.map(id => `<@${id}>`).join(', ');
+
+      const endEmbed = new EmbedBuilder()
+        .setTitle('🎉 Giveaway Ended!')
+        .setDescription(`Prize: **${giveaway.prize}**\nWinners: ${winnerMentions}`)
+        .setColor(0x00FF00)
+        .setTimestamp();
+
+      await message.edit({ embeds: [endEmbed] });
+      channel.send(`Congratulations to the winner(s): ${winnerMentions}`);
+
+      client.giveaways.delete(giveawayMessage.id);
+    }, durationMs);
+  },
+};
