@@ -1,4 +1,26 @@
-// MultipleFiles/interactionCreate.js
+// Add this at the top of interactionCreate.js
+const cooldowns = new Map();
+
+// Inside interactionCreate execute function, before command execution:
+const now = Date.now();
+const cooldownAmount = (command.cooldown || 3) * 1000; // default 3 seconds cooldown
+
+if (!cooldowns.has(command.data.name)) {
+  cooldowns.set(command.data.name, new Map());
+}
+
+const timestamps = cooldowns.get(command.data.name);
+if (timestamps.has(interaction.user.id)) {
+  const expirationTime = timestamps.get(interaction.user.id) + cooldownAmount;
+
+  if (now < expirationTime) {
+    const timeLeft = (expirationTime - now) / 1000;
+    return interaction.reply({ content: `Please wait ${timeLeft.toFixed(1)} more second(s) before reusing the \`${command.data.name}\` command.`, ephemeral: true });
+  }
+}
+
+timestamps.set(interaction.user.id, now);
+setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);// MultipleFiles/interactionCreate.js
 const Settings = require('../models/Settings');
 const { EmbedBuilder } = require('discord.js');
 
