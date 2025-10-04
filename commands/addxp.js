@@ -6,7 +6,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('addxp')
     .setDescription('Add XP to a user.')
-    .addUserOption(option =>
+    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
       option.setName('target')
         .setDescription('The user to add XP to')
         .setRequired(true))
