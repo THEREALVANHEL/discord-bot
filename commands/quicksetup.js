@@ -1,4 +1,4 @@
-// commands/quicksetup.js
+// commands/quicksetup.js (REPLACE - Added levelUpChannel option)
 const { SlashCommandBuilder, ChannelType, EmbedBuilder } = require('discord.js');
 const Settings = require('../models/Settings');
 
@@ -40,6 +40,11 @@ module.exports = {
       option.setName('ticket_category')
         .setDescription('Category for new ticket channels')
         .addChannelTypes(ChannelType.GuildCategory)
+        .setRequired(false))
+    .addChannelOption(option => // NEW
+      option.setName('level_up_channel')
+        .setDescription('Channel for level up messages (defaults to current channel)')
+        .addChannelTypes(ChannelType.GuildText)
         .setRequired(false))
     .addChannelOption(option =>
       option.setName('no_xp_channel_1')
@@ -102,6 +107,13 @@ module.exports = {
       settings.ticketCategoryId = ticketCategory.id;
       updatedFields.push(`Ticket Category: ${ticketCategory}`);
     }
+    
+    // NEW
+    const levelUpChannel = interaction.options.getChannel('level_up_channel');
+    if (levelUpChannel) {
+      settings.levelUpChannelId = levelUpChannel.id;
+      updatedFields.push(`Level Up Channel: ${levelUpChannel}`);
+    }
 
     const noXpChannels = [];
     const noXpChannel1 = interaction.options.getChannel('no_xp_channel_1');
@@ -110,19 +122,19 @@ module.exports = {
     if (noXpChannel2) noXpChannels.push(noXpChannel2.id);
 
     if (noXpChannels.length > 0) {
-      settings.noXpChannels = [...new Set([...settings.noXpChannels, ...noXpChannels])]; // Add unique new channels
+      settings.noXpChannels = [...new Set([...settings.noXpChannels, ...noXpChannels])];
       updatedFields.push(`No-XP Channels added: ${noXpChannels.map(id => `<#${id}>`).join(', ')}`);
     }
 
     await settings.save();
 
     const embed = new EmbedBuilder()
-      .setTitle('Quick Setup Complete')
-      .setDescription('The following settings have been updated:')
+      .setTitle('⚙️ Quick Setup Complete')
+      .setDescription('The essential channels have been configured successfully.')
       .addFields(
         { name: 'Updated Settings', value: updatedFields.length > 0 ? updatedFields.join('\n') : 'No settings were updated.' }
       )
-      .setColor(0x2ECC71) // Emerald Green
+      .setColor(0x7289DA)
       .setTimestamp();
 
     await interaction.editReply({ embeds: [embed] });
