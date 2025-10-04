@@ -1,43 +1,78 @@
-// commands/profile.js
+// commands/profile.js (REPLACE - Premium GUI, Progress Bar)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
+
+// Function to calculate XP needed for the next level (Harder formula)
+const getNextLevelXp = (level) => {
+    // New (Harder): 150 * Math.pow(level + 1, 1.8)
+    return Math.floor(150 * Math.pow(level + 1, 1.8));
+};
+
+// Function to generate the visual progress bar
+const createProgressBar = (current, needed, length = 15) => {
+    const percent = current / needed;
+    const filledLength = Math.round(length * percent);
+    const emptyLength = length - filledLength;
+    const filled = '█'.repeat(filledLength); // Filled block
+    const empty = '░'.repeat(emptyLength); // Empty block
+    const progress = (percent * 100).toFixed(1);
+
+    return `\`[${filled}${empty}]\` **${progress}%**`;
+};
+
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('profile')
     .setDescription('View your or another user\'s profile.')
-    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
+    .addUserOption(option =>
       option.setName('target')
         .setDescription('The user whose profile you want to view')
         .setRequired(false)),
   async execute(interaction) {
+    await interaction.deferReply();
+    
     const targetUser = interaction.options.getUser('target') || interaction.user;
-    const member = interaction.guild.members.cache.get(targetUser.id);
+    const member = interaction.guild.members.cache.get(targetUser.id) || await interaction.guild.members.fetch(targetUser.id).catch(() => null);
 
     let user = await User.findOne({ userId: targetUser.id });
     if (!user) {
-      user = new User({ userId: targetUser.id }); // Create a new user if not found
+      user = new User({ userId: targetUser.id });
       await user.save();
     }
 
-    const nextLevelXp = Math.floor(100 * Math.pow(user.level + 1, 1.5));
+    const nextLevelXp = getNextLevelXp(user.level);
     const xpProgress = user.xp;
-    const xpNeeded = nextLevelXp;
+    const totalXpInLevel = user.level > 0 ? getNextLevelXp(user.level - 1) : 0;
+    const xpNeededForNext = nextLevelXp;
+
+    const progressBar = createProgressBar(xpProgress, xpNeededForNext);
+    
+    // Get the highest role color or default
+    const color = member?.displayColor === 0 ? 0x7289DA : member?.displayColor || 0x7289DA; 
 
     const embed = new EmbedBuilder()
-      .setTitle(`${targetUser.username}'s Profile`)
-      .setThumbnail(targetUser.displayAvatarURL({ dynamic: true }))
-      .setColor(member?.displayColor || 0x00AE86) // Use member's role color or green
+      .setTitle(`⭐ ${targetUser.username}'s Profile Card`)
+      .setThumbnail(targetUser.displayAvatarURL({ dynamic: true, size: 512 }))
+      .setColor(color) 
+      .setDescription(`Welcome to **${targetUser.username}'s** current standing!`)
       .addFields(
-        { name: 'Level', value: `${user.level}`, inline: true },
-        { name: 'XP', value: `${xpProgress}/${xpNeeded}`, inline: true },
-        { name: 'Cookies 🍪', value: `${user.cookies}`, inline: true },
-        { name: 'Coins 💰', value: `${user.coins}`, inline: true },
-        { name: 'Joined Discord', value: `<t:${Math.floor(targetUser.createdAt.getTime() / 1000)}:D>`, inline: true },
-        { name: 'Joined Server', value: member ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:D>` : 'N/A', inline: true },
+        // Level Progress Bar
+        { name: `Level ${user.level} Progress:`, 
+          value: `${progressBar}\n(XP: **${xpProgress} / ${xpNeededForNext}** needed for Level ${user.level + 1})`, 
+          inline: false 
+        },
+        // Currency
+        { name: 'Coins 💰', value: `\`${user.coins.toLocaleString()}\``, inline: true },
+        { name: 'Cookies 🍪', value: `\`${user.cookies.toLocaleString()}\``, inline: true },
+        { name: 'Daily Streak 🔥', value: `\`${user.dailyStreak || 0} days\``, inline: true },
+        // Dates
+        { name: 'Joined Discord', value: `<t:${Math.floor(targetUser.createdAt.getTime() / 1000)}:D> (\`<t:${Math.floor(targetUser.createdAt.getTime() / 1000)}:R>\`)`, inline: false },
+        { name: 'Joined Server', value: member ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:D> (\`<t:${Math.floor(member.joinedTimestamp / 1000)}:R>\`)` : 'N/A', inline: false },
       )
+      .setFooter({ text: `User ID: ${targetUser.id}` })
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   },
 };
