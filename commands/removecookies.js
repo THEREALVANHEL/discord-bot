@@ -6,7 +6,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('removecookies')
     .setDescription('Remove cookies from a user.')
-    .addUserOption(option =>
+    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
       option.setName('target')
         .setDescription('The user to remove cookies from')
         .setRequired(true))
