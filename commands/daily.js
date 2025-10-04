@@ -1,8 +1,13 @@
-// commands/daily.js (REPLACE - Premium GUI + Level Up Channel)
+// commands/daily.js (REPLACE - Premium GUI + Level Up Channel + Harder XP Formula)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const ms = require('ms');
+
+// Function to calculate XP needed for the next level (Harder formula)
+const getNextLevelXp = (level) => {
+    return Math.floor(150 * Math.pow(level + 1, 1.8));
+};
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -11,6 +16,7 @@ module.exports = {
   async execute(interaction) {
     const cooldown = ms('24h');
     let user = await User.findOne({ userId: interaction.user.id });
+    await interaction.deferReply();
 
     if (!user) {
       user = new User({ userId: interaction.user.id });
@@ -18,17 +24,16 @@ module.exports = {
 
     if (user.lastDaily && cooldown - (Date.now() - user.lastDaily.getTime()) > 0) {
       const timeLeft = ms(cooldown - (Date.now() - user.lastDaily.getTime()), { long: true });
-      return interaction.reply({ content: `⏱️ You can claim your daily reward again in **${timeLeft}**.`, ephemeral: true });
+      return interaction.editReply({ content: `⏱️ You can claim your daily reward again in **${timeLeft}**.`, ephemeral: true });
     }
 
     const coinsEarned = Math.floor(Math.random() * 50) + 50;
     const xpEarned = Math.floor(Math.random() * 20) + 10;
     
-    // Streak logic (daily streak not mentioned, but good practice for daily)
+    // Streak logic
     const now = new Date();
     if (user.lastDaily) {
         const lastDailyTime = user.lastDaily.getTime();
-        // Check if 24-48 hours passed (allowing a 24h grace period for streak)
         if (now.getTime() - lastDailyTime < ms('48h')) {
             user.dailyStreak = (user.dailyStreak || 0) + 1;
         } else {
@@ -48,10 +53,10 @@ module.exports = {
       interaction.guild.channels.cache.get(settings.levelUpChannelId) : 
       interaction.channel;
 
-    const nextLevelXp = Math.floor(100 * Math.pow(user.level + 1, 1.5));
-    if (user.xp >= nextLevelXp) {
+    const nextLevelXpCheck = getNextLevelXp(user.level);
+    if (user.xp >= nextLevelXpCheck) {
       user.level++;
-      user.xp -= nextLevelXp;
+      user.xp -= nextLevelXpCheck;
 
       const member = interaction.guild.members.cache.get(interaction.user.id);
       if (member) {
@@ -95,6 +100,6 @@ module.exports = {
       .setColor(0x32CD32)
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   },
 };
