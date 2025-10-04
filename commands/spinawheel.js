@@ -1,53 +1,130 @@
-// commands/spinawheel.js
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+// commands/spinawheel.js (REPLACE - Visual spinning wheel with Canvas)
+const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
+const { createCanvas, loadImage, registerFont } = require('canvas');
+const User = require('../models/User');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('spinawheel')
-    .setDescription('Spin a wheel with up to 10 options to pick a winner.')
-    .addStringOption(option =>
-      option.setName('title')
-        .setDescription('The title of the wheel spin')
-        .setRequired(true))
+    .setDescription('Spin the wheel for a random prize! Costs 50 coins.')
     .addStringOption(option =>
       option.setName('options')
-        .setDescription('Options for the wheel, separated by commas (e.g., Option A, Option B)')
-        .setRequired(true)),
+        .setDescription('Comma-separated options (2-10, e.g., "Red,Blue,Green")')
+        .setRequired(false)),
   async execute(interaction) {
-    const title = interaction.options.getString('title');
-    const optionsString = interaction.options.getString('options');
-    const options = optionsString.split(',').map(opt => opt.trim()).filter(opt => opt.length > 0);
-
-    if (options.length < 2 || options.length > 10) {
-      return interaction.reply({ content: 'Please provide between 2 and 10 options for the wheel.', ephemeral: true });
+    let user = await User.findOne({ userId: interaction.user.id });
+    if (!user) {
+      user = new User({ userId: interaction.user.id });
     }
 
-    await interaction.deferReply(); // Defer reply as we'll "spin"
-
-    // Simulate spinning
-    const spinningMessages = [
-      'Spinning the wheel...',
-      'And the wheel goes round and round...',
-      'Almost there...',
-      'The tension is building!',
-    ];
-
-    for (let i = 0; i < spinningMessages.length; i++) {
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
-      await interaction.editReply({ content: spinningMessages[i] });
+    if (user.coins < 50) {
+      return interaction.reply({ content: 'You need 50 coins to spin the wheel!', ephemeral: true });
     }
 
-    const winner = options[Math.floor(Math.random() * options.length)];
+    let options = interaction.options.getString('options') ? interaction.options.getString('options').split(',').map(o => o.trim()) : ['Win 100 coins', 'Level Boost +10 XP', 'Nothing :(', 'Cookie +5', 'Rare Item!', 'Lose 20 coins'];
+    options = options.slice(0, 10); // Limit to 10
+    if (options.length < 2) options = ['Win 100 coins', 'Nothing :(']; // Minimum 2
 
-    const embed = new EmbedBuilder()
-      .setTitle(`🎡 ${title} - Winner!`)
-      .setDescription(`The wheel landed on... **${winner}**! Congratulations!`)
-      .setColor(0xFFD700) // Gold color
-      .addFields(
-        { name: 'All Options', value: options.join(', ') },
-      )
-      .setTimestamp();
+    user.coins -= 50;
+    await user.save();
 
-    await interaction.editReply({ content: ' ', embeds: [embed] });
-  },
-};
+    try {
+      // Create canvas (800x800)
+      const canvas = createCanvas(800, 800);
+      const ctx = canvas.getContext('2d');
+
+      // Wheel radius and center
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      const radius = 350;
+
+      // Colors for segments
+      const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'];
+
+      // Draw wheel segments
+      const segmentAngle = (2 * Math.PI) / options.length;
+      let startAngle = 0;
+
+      options.forEach((option, index) => {
+        const color = colors[index % colors.length];
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.arc(centerX, centerY, radius, startAngle, startAngle + segmentAngle);
+        ctx.closePath();
+        ctx.fill();
+
+        // Text on segment
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.rotate(startAngle + segmentAngle / 2);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 16px Arial';
+        ctx.fillText(option, radius / 2 - 50, 5);
+        ctx.restore();
+
+        startAngle += segmentAngle;
+      });
+
+      // Draw border
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = '#000';
+      ctx.stroke();
+
+      // Draw arrow (pointer at top)
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY - radius - 20);
+      ctx.lineTo(centerX - 20, centerY - radius + 10);
+      ctx.lineTo(centerX + 20, centerY - radius + 10);
+      ctx.closePath();
+      ctx.fillStyle = '#000';
+      ctx.fill();
+
+      // Random spin (simulate rotation by choosing segment)
+      const randomAngle = Math.random() * 2 * Math.PI;
+      const selectedIndex = Math.floor((randomAngle % (2 * Math.PI)) / segmentAngle);
+      const selectedOption = options[selectedIndex];
+
+      // Apply prize (simple logic)
+      let prizeMsg = '';
+      if (selectedOption.includes('coins')) {
+        const prizeCoins = 100;
+        user.coins += prizeCoins;
+        await user.save();
+        prizeMsg = `You won 100 coins! Total: ${user.coins}`;
+      } else if (selectedOption.includes('XP')) {
+        user.xp += 10;
+        await user.save();
+        prizeMsg = 'You won +10 XP!';
+      } else if (selectedOption.includes('Cookie')) {
+        user.cookies += 5;
+        await user.save();
+        prizeMsg = 'You won 5 cookies!';
+      } else if (selectedOption.includes('Lose')) {
+        user.coins = Math.max(0, user.coins - 20);
+        await user.save();
+        prizeMsg = 'You lost 20 coins! Total: ${user.coins}';
+      } else {
+        prizeMsg = 'You won a rare item! (Placeholder)';
+      }
+
+      // Create attachment
+      const attachment = new AttachmentBuilder(canvas.toBuffer(), { name: 'wheel.png' });
+
+      const embed = new EmbedBuilder()
+        .setTitle('🎡 Wheel Spun!')
+        .setDescription(`You spent 50 coins to spin.\n**Result:** ${selectedOption}\n${prizeMsg}`)
+        .setColor(0xFFD700)
+        .setImage('attachment://wheel.png')
+        .setTimestamp();
+
+      await interaction.reply({ embeds: [embed], files: [attachment] });
+
+    } catch (error) {
+      console.error('Wheel error:', error);
+      // Fallback to text if Canvas fails
+      const selectedOption = options[Math.floor(Math.random() * options.length)];
+      const embed =
