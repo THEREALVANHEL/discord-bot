@@ -1,15 +1,17 @@
+// MultipleFiles/guildMemberAdd.js
 module.exports = {
   name: 'guildMemberAdd',
   async execute(member, client) {
     try {
       // Auto assign join role
       const autoJoinRoleId = client.config.roles.autoJoin;
-      if (!member.roles.cache.has(autoJoinRoleId)) {
-        await member.roles.add(autoJoinRoleId);
+      if (autoJoinRoleId && !member.roles.cache.has(autoJoinRoleId)) {
+        await member.roles.add(autoJoinRoleId).catch(console.error);
       }
 
       // Welcome message
-      const settings = await require('../models/Settings').findOne({ guildId: member.guild.id });
+      const Settings = require('../models/Settings'); // Require here to avoid circular dependency if Settings also requires User
+      const settings = await Settings.findOne({ guildId: member.guild.id });
       if (settings && settings.welcomeChannelId) {
         const channel = member.guild.channels.cache.get(settings.welcomeChannelId);
         if (channel) {
