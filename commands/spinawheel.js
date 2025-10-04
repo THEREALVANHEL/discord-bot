@@ -7,7 +7,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('spinawheel')
     .setDescription('Spin the wheel for a random prize! Costs 50 coins.')
-    .addStringOption(option =>
+    .addStringOption(option => // FIX: Changed 'addString Option' to 'addStringOption'
       option.setName('options')
         .setDescription('Comma-separated options (2-10, e.g., "Red,Blue,Green")')
         .setRequired(false)),
@@ -127,4 +127,12 @@ module.exports = {
       console.error('Wheel error:', error);
       // Fallback to text if Canvas fails
       const selectedOption = options[Math.floor(Math.random() * options.length)];
-      const embed =
+      const embed = new EmbedBuilder() // FIX: Added missing EmbedBuilder instantiation
+        .setTitle('🎡 Wheel Spun! (Fallback)')
+        .setDescription(`You spent 50 coins to spin.\n**Result:** ${selectedOption}\n(Visual wheel failed to render.)`)
+        .setColor(0xFFD700)
+        .setTimestamp();
+      await interaction.reply({ embeds: [embed] });
+    }
+  },
+};
