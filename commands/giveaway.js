@@ -1,4 +1,4 @@
-// commands/giveaway.js
+// commands/giveaway.js (REPLACE - Fixed winner pings)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const ms = require('ms');
 
@@ -25,73 +25,85 @@ module.exports = {
 
     const durationMs = ms(durationStr);
     if (!durationMs || durationMs < 10000) {
-      return interaction.reply({ content: 'Please provide a valid duration of at least 10 seconds.', ephemeral: true });
+      return interaction.reply({ content: '❌ **Error:** Please provide a valid duration of at least 10 seconds.', ephemeral: true });
     }
     if (winnersCount < 1 || winnersCount > 10) {
-      return interaction.reply({ content: 'Number of winners must be between 1 and 10.', ephemeral: true });
+      return interaction.reply({ content: '❌ **Error:** Number of winners must be between 1 and 10.', ephemeral: true });
     }
 
     const embed = new EmbedBuilder()
-      .setTitle('🎉 Giveaway!')
-      .setDescription(`Prize: **${prize}**\nReact with 🎉 to enter!\nEnds <t:${Math.floor((Date.now() + durationMs) / 1000)}:R>`)
+      .setTitle('🎁 Official Giveaway!')
+      .setDescription(`**Prize:** ${prize}\n\n**To Enter:** React with 🎁\n**Ends:** <t:${Math.floor((Date.now() + durationMs) / 1000)}:R>`)
+      .addFields(
+        { name: 'Winners', value: `${winnersCount}` }
+      )
       .setColor(0xFFD700)
-      .setTimestamp();
+      .setTimestamp()
+      .setFooter({ text: `Hosted by ${interaction.user.tag}` });
 
     const giveawayMessage = await interaction.channel.send({ embeds: [embed] });
-    await giveawayMessage.react('🎉');
+    await giveawayMessage.react('🎁'); // Changed to 🎁 from 脂
 
     // Store giveaway info in client.giveaways Map
-    client.giveaways.set(giveawayMessage.id, { // FIX: Added giveawayMessage.id and closing parenthesis
+    client.giveaways.set(giveawayMessage.id, {
       channelId: interaction.channel.id,
       messageId: giveawayMessage.id,
       prize: prize,
       winnersCount: winnersCount,
       endTime: Date.now() + durationMs,
-      participants: new Set(),
     });
 
-    interaction.reply({ content: `Giveaway started for **${prize}**!`, ephemeral: true });
+    interaction.reply({ content: `✅ **Giveaway Started!** For **${prize}**.`, ephemeral: true });
 
     // Set timeout to end giveaway
     setTimeout(async () => {
       const giveaway = client.giveaways.get(giveawayMessage.id);
       if (!giveaway) return;
 
-      // Fetch the message again to get reactions
+      client.giveaways.delete(giveawayMessage.id);
+      
       const channel = await client.channels.fetch(giveaway.channelId);
-      const message = await channel.messages.fetch(giveaway.messageId);
-      const reaction = message.reactions.cache.get('🎉');
+      if (!channel) return;
+      
+      let message;
+      try {
+          message = await channel.messages.fetch(giveaway.messageId);
+      } catch {
+          return channel.send(`❌ **Error:** Giveaway message not found for prize: **${giveaway.prize}**.`);
+      }
 
+      const reaction = message.reactions.cache.get('🎁');
       if (!reaction) {
-        return channel.send('No one participated in the giveaway.');
+        return channel.send(`⚠️ **Giveaway Ended:** No one participated in the giveaway for **${giveaway.prize}**.`);
       }
 
       const users = await reaction.users.fetch();
       const participants = users.filter(user => !user.bot).map(user => user.id);
 
       if (participants.length === 0) {
-        return channel.send('No valid participants for the giveaway.');
+        return channel.send(`⚠️ **Giveaway Ended:** No valid participants for **${giveaway.prize}**.`);
       }
 
       // Pick winners randomly
       const winners = [];
-      while (winners.length < giveaway.winnersCount && participants.length > 0) {
-        const winnerIndex = Math.floor(Math.random() * participants.length);
-        winners.push(participants.splice(winnerIndex, 1)[0]);
+      const shuffled = participants.sort(() => Math.random() - 0.5);
+      while (winners.length < giveaway.winnersCount && shuffled.length > 0) {
+        winners.push(shuffled.pop());
       }
 
       const winnerMentions = winners.map(id => `<@${id}>`).join(', ');
-
+      
       const endEmbed = new EmbedBuilder()
-        .setTitle('🎉 Giveaway Ended!')
-        .setDescription(`Prize: **${giveaway.prize}**\nWinners: ${winnerMentions}`)
+        .setTitle('🎉 Giveaway Concluded!')
+        .setDescription(`**Prize:** ${giveaway.prize}\n\n**Winner(s):** ${winnerMentions}`)
         .setColor(0x00FF00)
-        .setTimestamp();
+        .setTimestamp()
+        .setFooter({ text: 'Congratulations!' });
 
       await message.edit({ embeds: [endEmbed] });
-      channel.send(`Congratulations to the winner(s): ${winnerMentions}`);
+      // Send winner pings in the content field to ensure they are properly notified
+      channel.send(`**CONGRATULATIONS!** ${winnerMentions} won **${giveaway.prize}**! Please contact the host to claim your prize.`);
 
-      client.giveaways.delete(giveawayMessage.id);
     }, durationMs);
   },
 };
