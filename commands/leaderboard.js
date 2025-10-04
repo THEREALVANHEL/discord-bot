@@ -1,4 +1,4 @@
-// commands/leaderboard.js (REPLACE - Upgraded with streak subcommand)
+// commands/leaderboard.js (REPLACE - Added cookies leaderboard)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -13,47 +13,65 @@ module.exports = {
         .addChoices(
           { name: 'XP/Level', value: 'xp' },
           { name: 'Coins', value: 'coins' },
+          { name: 'Cookies', value: 'cookies' }, // NEW
           { name: 'Daily Streak', value: 'streak' },
         )),
   async execute(interaction) {
     const type = interaction.options.getString('type');
+    await interaction.deferReply();
 
     let users;
     let title;
-    let sortField;
+    let emoji;
 
     if (type === 'xp') {
       users = await User.find().sort({ level: -1, xp: -1 }).limit(10);
-      title = 'XP/Level Leaderboard';
-      sortField = 'level';
+      title = '🚀 XP/Level Leaderboard';
+      emoji = '✨';
     } else if (type === 'coins') {
       users = await User.find().sort({ coins: -1 }).limit(10);
-      title = 'Coins Leaderboard';
-      sortField = 'coins';
+      title = '💰 Coins Leaderboard';
+      emoji = '🪙';
+    } else if (type === 'cookies') {
+      users = await User.find().sort({ cookies: -1 }).limit(10);
+      title = '🍪 Cookie Leaderboard';
+      emoji = '🍪';
     } else if (type === 'streak') {
       users = await User.find().sort({ dailyStreak: -1 }).limit(10);
-      title = 'Daily Streak Leaderboard';
-      sortField = 'dailyStreak';
+      title = '🔥 Daily Streak Leaderboard';
+      emoji = '🔥';
     }
 
     if (!users.length) {
-      return interaction.reply({ content: 'No data available for this leaderboard.', ephemeral: true });
+      return interaction.editReply({ content: '⚠️ No data available for this leaderboard.' });
     }
 
     const embed = new EmbedBuilder()
       .setTitle(title)
-      .setColor(0x00FF00)
+      .setColor(0x7289DA)
       .setTimestamp();
 
     let description = '';
     users.forEach((user, index) => {
+      const rankEmoji = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '🔹';
       const displayName = interaction.guild.members.cache.get(user.userId)?.displayName || user.userId;
-      const value = type === 'xp' ? `Level ${user.level} (${user.xp} XP)` : type === 'coins' ? `${user.coins} coins` : `${user.dailyStreak} days`;
-      description += `${index + 1}. ${displayName}: ${value}\n`;
+      
+      let value;
+      if (type === 'xp') {
+          value = `Level ${user.level} (${user.xp} XP)`;
+      } else if (type === 'coins') {
+          value = `${user.coins} coins`;
+      } else if (type === 'cookies') {
+          value = `${user.cookies} cookies`;
+      } else if (type === 'streak') {
+          value = `${user.dailyStreak} days`;
+      }
+      
+      description += `${rankEmoji} **#${index + 1}** ${displayName}: **${value}**\n`;
     });
 
     embed.setDescription(description);
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   },
 };
