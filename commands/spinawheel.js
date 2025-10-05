@@ -39,11 +39,44 @@ module.exports = {
     let user = await User.findOne({ userId: interaction.user.id });
     if (!user) {
       user = new User({ userId: interaction.user.id });
+      await user.save(); // Ensure user exists before saving changes
     }
 
     let options = interaction.options.getString('options') ? interaction.options.getString('options').split(',').map(o => o.trim()) : ['Win 100 coins', 'Level Boost +10 XP', 'Nothing :(', 'Cookie +5', 'Rare Item!', 'Lose 20 coins'];
     options = options.filter(Boolean).slice(0, 10); // Filter empty strings and limit to 10
     if (options.length < 2) options = ['Win 100 coins', 'Nothing :('];
+
+    // Randomly select the winning index before drawing the wheel
+    const selectedIndex = Math.floor(Math.random() * options.length);
+    const selectedOption = options[selectedIndex];
+
+    // Apply prize logic early to ensure prizeMsg is available for fallback
+    let prizeMsg = 'No prize awarded.';
+    if (selectedOption.toLowerCase().includes('coins')) {
+        const match = selectedOption.match(/(\d+)/);
+        const prizeCoins = match ? parseInt(match[1]) : 0;
+        
+        if (selectedOption.toLowerCase().includes('lose')) {
+             user.coins = Math.max(0, user.coins - prizeCoins);
+             prizeMsg = `**-${prizeCoins} coins** 💰! Total: ${user.coins} coins.`;
+        } else {
+             user.coins += prizeCoins;
+             prizeMsg = `**+${prizeCoins} coins** 💰! Total: ${user.coins} coins.`;
+        }
+    } else if (selectedOption.toLowerCase().includes('xp')) {
+        const match = selectedOption.match(/(\d+)/);
+        const prizeXp = match ? parseInt(match[1]) : 0;
+        user.xp += prizeXp;
+        prizeMsg = `**+${prizeXp} XP** ✨!`;
+    } else if (selectedOption.toLowerCase().includes('cookie')) {
+        const match = selectedOption.match(/(\d+)/);
+        const prizeCookies = match ? parseInt(match[1]) : 0;
+        user.cookies += prizeCookies;
+        prizeMsg = `**+${prizeCookies} cookies** 🍪!`;
+    } else {
+        prizeMsg = `You won **${selectedOption}**! (Item effect is pending implementation)`;
+    }
+    await user.save(); // Save the result
 
     try {
       const canvas = createCanvas(800, 800);
@@ -61,13 +94,8 @@ module.exports = {
       const segmentAngle = (2 * Math.PI) / options.length;
       let startAngle = 0;
 
-      // Randomly select the winning index (fixed at the top of the canvas, 12 o'clock)
-      const selectedIndex = Math.floor(Math.random() * options.length);
-      const selectedOption = options[selectedIndex];
-
-      // Calculate the rotation needed to make the selected segment appear at the top (start at 1.5 * PI - center of segment)
+      // Calculate the rotation needed to make the *selected* segment appear at the top (3/2 * PI)
       const winningCenterAngle = selectedIndex * segmentAngle + segmentAngle / 2;
-      // We want the final draw to have the center of the winning segment at 1.5 * PI (top)
       const rotationToApply = (3 * Math.PI / 2) - winningCenterAngle;
 
 
@@ -113,36 +141,6 @@ module.exports = {
       // Draw pointer (arrow at top center, fixed)
       drawPointer(ctx, centerX, centerY, radius, '#FF4500'); // Red pointer
 
-      // Apply prize
-      let prizeMsg = '';
-      if (selectedOption.toLowerCase().includes('coins')) {
-        // Attempt to extract number
-        const match = selectedOption.match(/(\d+)/);
-        const prizeCoins = match ? parseInt(match[1]) : 0;
-        
-        if (selectedOption.toLowerCase().includes('lose')) {
-             user.coins = Math.max(0, user.coins - prizeCoins);
-             prizeMsg = `**-${prizeCoins} coins** 💰! Total: ${user.coins} coins.`;
-        } else {
-             user.coins += prizeCoins;
-             prizeMsg = `**+${prizeCoins} coins** 💰! Total: ${user.coins} coins.`;
-        }
-      } else if (selectedOption.toLowerCase().includes('xp')) {
-        const match = selectedOption.match(/(\d+)/);
-        const prizeXp = match ? parseInt(match[1]) : 0;
-        user.xp += prizeXp;
-        prizeMsg = `**+${prizeXp} XP** ✨!`;
-      } else if (selectedOption.toLowerCase().includes('cookie')) {
-        const match = selectedOption.match(/(\d+)/);
-        const prizeCookies = match ? parseInt(match[1]) : 0;
-        user.cookies += prizeCookies;
-        prizeMsg = `**+${prizeCookies} cookies** 🍪!`;
-      } else {
-        prizeMsg = `You won **${selectedOption}**! (Item effect is pending implementation)`;
-      }
-
-      await user.save();
-
       const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'wheel.png' });
 
       const embed = new EmbedBuilder()
@@ -163,7 +161,6 @@ module.exports = {
     } catch (error) {
       console.error('Wheel error:', error);
       // Fallback to text if Canvas fails
-      const selectedOption = options[Math.floor(Math.random() * options.length)];
       const fallbackEmbed = new EmbedBuilder()
         .setTitle('🎰 Wheel Spun! (Fallback)')
         .setDescription(`**Result:** **${selectedOption}**\n\n**Note:** The wheel visual failed to render. Prize was still applied: ${prizeMsg}.`)
