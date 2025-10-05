@@ -1,20 +1,17 @@
-// commands/spinawheel.js (REPLACE - Improved visual robustness and result clarity)
+// commands/spinawheel.js (REPLACE - Simple, non-rotating pie chart for reliability)
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
-const { createCanvas } = require('canvas'); // Removed loadImage and registerFont for better portability
+const { createCanvas } = require('canvas'); 
 const User = require('../models/User');
 
-// Function to draw a winning arrow pointing to a specific angle
+// Function to draw a winning arrow pointing to a specific segment
 function drawPointer(ctx, centerX, centerY, radius, color) {
     ctx.save();
     ctx.translate(centerX, centerY);
 
-    // Draw a small arrow at the top
+    // Draw an arrow pointing to the 12 o'clock position (where the fixed winner will be)
     ctx.beginPath();
-    // Start slightly above the wheel
     ctx.moveTo(0, -radius - 30);
-    // Left tip
     ctx.lineTo(-20, -radius + 10);
-    // Right tip
     ctx.lineTo(20, -radius + 10);
     ctx.closePath();
     ctx.fillStyle = color;
@@ -55,7 +52,7 @@ module.exports = {
       const centerY = canvas.height / 2;
       const radius = 350;
 
-      // FIX: Ensure white background explicitly to prevent black image issues
+      // Ensure white background explicitly to prevent black image issues
       ctx.fillStyle = '#FFFFFF'; 
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -64,13 +61,15 @@ module.exports = {
       const segmentAngle = (2 * Math.PI) / options.length;
       let startAngle = 0;
 
-      // Random spin (simulate rotation by choosing segment)
+      // Randomly select the winning index (fixed at the top of the canvas, 12 o'clock)
       const selectedIndex = Math.floor(Math.random() * options.length);
       const selectedOption = options[selectedIndex];
 
-      // Calculate the angle required to show the winning segment at the top (3/2 * PI)
+      // Calculate the rotation needed to make the selected segment appear at the top (start at 1.5 * PI - center of segment)
       const winningCenterAngle = selectedIndex * segmentAngle + segmentAngle / 2;
-      const rotationAngle = (3 * Math.PI / 2) - winningCenterAngle;
+      // We want the final draw to have the center of the winning segment at 1.5 * PI (top)
+      const rotationToApply = (3 * Math.PI / 2) - winningCenterAngle;
+
 
       // Draw wheel segments
       options.forEach((option, index) => {
@@ -78,21 +77,20 @@ module.exports = {
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.moveTo(centerX, centerY);
-        // Apply rotation to the starting and ending angle
-        ctx.arc(centerX, centerY, radius, startAngle + rotationAngle, startAngle + segmentAngle + rotationAngle);
+        
+        // Draw the segment with the applied rotation
+        ctx.arc(centerX, centerY, radius, startAngle + rotationToApply, startAngle + segmentAngle + rotationToApply);
         ctx.closePath();
         ctx.fill();
 
         // Text on segment
         ctx.save();
         ctx.translate(centerX, centerY);
-        // Rotate to the center of the segment + the wheel's rotation + 90 degrees (Math.PI/2) for horizontal text
-        ctx.rotate(startAngle + segmentAngle / 2 + rotationAngle + Math.PI / 2);
+        // Rotate to the center of the segment + rotation to make it point up (Math.PI/2)
+        ctx.rotate(startAngle + segmentAngle / 2 + rotationToApply + Math.PI / 2); 
         ctx.textAlign = 'center';
         ctx.fillStyle = '#000000'; // Ensure text is black/visible
-        // Set a standard font, hoping the system has it
         ctx.font = 'bold 24px sans-serif'; 
-        // Position text further out
         ctx.fillText(option.substring(0, 15), 0, -radius / 1.5); // Truncate long text
         ctx.restore();
 
@@ -112,12 +110,12 @@ module.exports = {
       ctx.fillStyle = '#FF4500';
       ctx.fill();
       
-      // Draw pointer (arrow at top center)
+      // Draw pointer (arrow at top center, fixed)
       drawPointer(ctx, centerX, centerY, radius, '#FF4500'); // Red pointer
 
       // Apply prize
       let prizeMsg = '';
-      if (selectedOption.includes('coins')) {
+      if (selectedOption.toLowerCase().includes('coins')) {
         // Attempt to extract number
         const match = selectedOption.match(/(\d+)/);
         const prizeCoins = match ? parseInt(match[1]) : 0;
@@ -129,18 +127,18 @@ module.exports = {
              user.coins += prizeCoins;
              prizeMsg = `**+${prizeCoins} coins** 💰! Total: ${user.coins} coins.`;
         }
-      } else if (selectedOption.includes('XP')) {
+      } else if (selectedOption.toLowerCase().includes('xp')) {
         const match = selectedOption.match(/(\d+)/);
         const prizeXp = match ? parseInt(match[1]) : 0;
         user.xp += prizeXp;
         prizeMsg = `**+${prizeXp} XP** ✨!`;
-      } else if (selectedOption.includes('Cookie')) {
+      } else if (selectedOption.toLowerCase().includes('cookie')) {
         const match = selectedOption.match(/(\d+)/);
         const prizeCookies = match ? parseInt(match[1]) : 0;
         user.cookies += prizeCookies;
         prizeMsg = `**+${prizeCookies} cookies** 🍪!`;
       } else {
-        prizeMsg = `You won **${selectedOption}**! (Effect TBD - Item needs manual application)`;
+        prizeMsg = `You won **${selectedOption}**! (Item effect is pending implementation)`;
       }
 
       await user.save();
@@ -148,14 +146,17 @@ module.exports = {
       const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'wheel.png' });
 
       const embed = new EmbedBuilder()
-        .setTitle(`🎡 ${title}`)
-        .setDescription(`The wheel spun and landed on:\n\n**🎯 ${selectedOption}**\n\n**Your Prize:** ${prizeMsg}`)
+        .setTitle(`🎰 ${title}`)
+        .setDescription(`The wheel spun and landed on the section pointed to by the red arrow.`)
         .addFields(
-            { name: 'Options', value: options.map((opt, i) => `${i + 1}. ${opt}`).join('\n').substring(0, 1024), inline: false} // Show all options
+            { name: '🎉 Winning Option', value: `**${selectedOption}**`, inline: true},
+            { name: '🎁 Your Reward', value: prizeMsg, inline: true},
+            { name: '⚙️ All Options', value: options.map((opt, i) => `${i + 1}. ${opt}`).join('\n').substring(0, 1024), inline: false}
         )
         .setColor(0xFFD700)
         .setImage('attachment://wheel.png')
-        .setTimestamp();
+        .setTimestamp()
+        .setFooter({ text: `Spin by ${interaction.user.tag}` });
 
       await interaction.editReply({ embeds: [embed], files: [attachment] });
 
@@ -164,8 +165,8 @@ module.exports = {
       // Fallback to text if Canvas fails
       const selectedOption = options[Math.floor(Math.random() * options.length)];
       const fallbackEmbed = new EmbedBuilder()
-        .setTitle('🎡 Wheel Spun! (Fallback)')
-        .setDescription(`**Result:** ${selectedOption}\n(Visual wheel failed to render. Please ensure 'canvas' dependency is correctly installed.)\n\n**Options Were:**\n${options.map((opt, i) => `${i + 1}. ${opt}`).join('\n')}`)
+        .setTitle('🎰 Wheel Spun! (Fallback)')
+        .setDescription(`**Result:** **${selectedOption}**\n\n**Note:** The wheel visual failed to render. Prize was still applied: ${prizeMsg}.`)
         .setColor(0xFFD700)
         .setTimestamp();
       await interaction.editReply({ embeds: [fallbackEmbed] });
