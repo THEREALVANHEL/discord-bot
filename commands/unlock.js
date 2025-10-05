@@ -1,4 +1,4 @@
-// commands/unlock.js (REPLACE - Premium GUI)
+// commands/unlock.js (REPLACE - Premium GUI, Fixed: Removed invalid thread permissions)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 module.exports = {
@@ -11,19 +11,21 @@ module.exports = {
         .setRequired(false)),
   async execute(interaction, client, logModerationAction) {
     const channel = interaction.options.getChannel('channel') || interaction.channel;
+    
+    // Defer for speed and to combat timeout issues
+    await interaction.deferReply();
 
     if (!channel.manageable) {
-      return interaction.reply({ content: '❌ **Error:** I cannot manage this channel.', ephemeral: true });
+      // Use editReply since we deferred
+      return interaction.editReply({ content: '❌ **Error:** I cannot manage this channel.', ephemeral: true });
     }
 
     try {
-      // Restore permissions for @everyone (null resets to default/inherits)
+      // FIX: Restore ONLY SendMessages and AddReactions. The thread permissions 
+      // (ViewThread, CreatePublicThreads, CreatePrivateThreads) are known to cause API errors.
       await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
         SendMessages: null,
         AddReactions: null,
-        ViewThread: null,
-        CreatePublicThreads: null,
-        CreatePrivateThreads: null,
       });
 
       // Remove from locks Map if present
@@ -31,12 +33,13 @@ module.exports = {
 
       const unlockEmbed = new EmbedBuilder()
         .setTitle('🔓 Channel Unlocked')
-        .setDescription(`${channel} has been unlocked by ${interaction.user}. Messaging and thread creation restored.`)
+        .setDescription(`${channel} has been unlocked by ${interaction.user}. Messaging restored.`)
         .setColor(0x00FF00)
         .setTimestamp()
         .setFooter({ text: `Unlocked by ${interaction.user.tag}` });
 
-      await interaction.reply({ embeds: [unlockEmbed] });
+      // Use editReply to send the public success message
+      await interaction.editReply({ embeds: [unlockEmbed] });
 
       // Log
       const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
@@ -44,7 +47,8 @@ module.exports = {
 
     } catch (error) {
       console.error('Unlock error:', error);
-      await interaction.reply({ content: '❌ **Error:** Failed to unlock channel. Check bot permissions (Manage Channels).', ephemeral: true });
+      // Send the ephemeral error message as a follow up
+      await interaction.followUp({ content: '❌ **Error:** Failed to unlock channel. Check bot permissions (Manage Channels).', ephemeral: true });
     }
   },
 };
