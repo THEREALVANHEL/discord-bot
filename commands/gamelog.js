@@ -5,31 +5,31 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('gamelog')
     .setDescription('Log details of a game session.')
-    .addStringOption(option => // 1. REQUIRED
+    .addStringOption(option => // 1. REQUIRED: host
       option.setName('host')
         .setDescription('The main host of the game')
         .setRequired(true))
-    .addStringOption(option => // 2. Optional (Moved up for clarity)
-        option.setName('cohost')
-          .setDescription('The co-host of the game (optional)')
-          .setRequired(false))
-    .addStringOption(option => // 3. REQUIRED
+    .addStringOption(option => // 2. REQUIRED: initial_members - MOVED UP
       option.setName('initial_members')
         .setDescription('Number or list of members at the start')
         .setRequired(true))
-    .addStringOption(option => // 4. REQUIRED
+    .addStringOption(option => // 3. REQUIRED: final_members - MOVED UP
       option.setName('final_members')
         .setDescription('Number or list of members at the end')
         .setRequired(true))
-    .addStringOption(option => // 5. Optional
+    .addStringOption(option => // 4. Optional: cohost - MOVED DOWN
+        option.setName('cohost')
+          .setDescription('The co-host of the game (optional)')
+          .setRequired(false))
+    .addStringOption(option => // 5. Optional: guide
       option.setName('guide')
         .setDescription('The guide for the game')
         .setRequired(false))
-    .addStringOption(option => // 6. Optional
+    .addStringOption(option => // 6. Optional: medic
       option.setName('medic')
         .setDescription('The medic for the game')
         .setRequired(false))
-    .addAttachmentOption(option => // 7. Optional
+    .addAttachmentOption(option => // 7. Optional: image
       option.setName('image')
         .setDescription('An image related to the game session')
         .setRequired(false)),
