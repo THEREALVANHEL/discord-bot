@@ -1,4 +1,4 @@
-// commands/addcookies.js (REPLACE - Premium GUI)
+// commands/addcookies.js (REPLACE - Premium GUI + User Tagging)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -49,9 +49,11 @@ module.exports = {
 
     const embed = new EmbedBuilder()
       .setTitle('🍪 Cookies Granted')
-      .setDescription(`Successfully baked **${amount} cookies** for ${targetUser}!`)
+      .setDescription(`Admin ${interaction.user} baked **${amount} cookies** for ${targetUser}.`)
       .addFields(
-        { name: 'New Cookie Count', value: `${user.cookies} cookies 🍪`, inline: true }
+        { name: 'Target User', value: `${targetUser}`, inline: true },
+        { name: 'Amount Added', value: `**+${amount}** 🍪`, inline: true },
+        { name: 'New Cookie Count', value: `**${user.cookies}** 🍪`, inline: true }
       )
       .setColor(0x00FF00)
       .setTimestamp();
