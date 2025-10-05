@@ -1,5 +1,5 @@
 // commands/purge.js (NEW or REPLACE - Bulk delete messages in channel)
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionsBitField } = require('discord.js'); // Added PermissionsBitField
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -8,7 +8,8 @@ module.exports = {
     .addIntegerOption(option =>
       option.setName('amount')
         .setDescription('Number of messages to delete (1-100)')
-        .setRequired(true)),
+        .setRequired(true))
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageMessages), // Added required permission for visibility/use
   async execute(interaction, client, logModerationAction) {
     const amount = interaction.options.getInteger('amount');
 
