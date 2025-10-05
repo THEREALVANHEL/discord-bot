@@ -1,4 +1,4 @@
-// commands/removewarn.js (REPLACE - Added modlog for single and all removals)
+// commands/removewarn.js (REPLACE - Added modlog for single and all removals + Fixed Syntax)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -18,7 +18,7 @@ module.exports = {
       option.setName('all_warns')
         .setDescription('Type "all" to remove all warnings.')
         .setRequired(false)),
-  async execute(interaction, client, logModerationAction) { // Added logModerationAction
+  execute: async (interaction, client, logModerationAction) => { // FIX: Added logModerationAction + Fixed Syntax
     const target = interaction.options.getUser('target');
     const index = interaction.options.getInteger('index');
     const allWarns = interaction.options.getString('all_warns')?.toLowerCase();
