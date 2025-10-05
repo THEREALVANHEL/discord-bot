@@ -1,4 +1,4 @@
-// commands/removewarn.js (REPLACE - Success reply now visible to everyone, added 'all' option + GUI Update + User Tagging)
+// commands/removewarn.js (REPLACE - Added modlog for single and all removals)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -18,14 +18,20 @@ module.exports = {
       option.setName('all_warns')
         .setDescription('Type "all" to remove all warnings.')
         .setRequired(false)),
-  async execute(interaction) {
+  async execute(interaction, client, logModerationAction) { // Added logModerationAction
     const target = interaction.options.getUser('target');
     const index = interaction.options.getInteger('index');
     const allWarns = interaction.options.getString('all_warns')?.toLowerCase();
+    
+    // Defer reply as we will need to fetch settings for logging
+    await interaction.deferReply({ ephemeral: true });
 
     let user = await User.findOne({ userId: target.id });
     if (!user || !user.warnings.length) {
-      return interaction.reply({ content: `${target} has **no warnings** on record. ✅`, ephemeral: true });
+      return interaction.editReply({ 
+        content: `${target} has **no warnings** on record. ✅`, 
+        ephemeral: true // Keep ephemeral since it's informational/admin-only confirmation
+      });
     }
 
     if (allWarns === 'all') {
@@ -43,11 +49,17 @@ module.exports = {
         .setColor(0x00FF00)
         .setTimestamp();
 
+      // Log the moderation action: Clear All Warnings
+      const Settings = require('../models/Settings');
+      const settings = await Settings.findOne({ guildId: interaction.guild.id });
+      await logModerationAction(interaction.guild, settings, 'Warnings Cleared', target, interaction.user, 'All warnings removed', `Count: ${removedCount}`);
+
       // Public confirmation (visible to everyone)
-      await interaction.reply({ embeds: [embed], ephemeral: false });
+      await interaction.editReply({ embeds: [embed], ephemeral: false });
+
     } else if (index !== null) {
       if (index < 1 || index > user.warnings.length) {
-        return interaction.reply({ content: `❌ **Error:** Invalid warning number (1-${user.warnings.length}).`, ephemeral: true });
+        return interaction.editReply({ content: `❌ **Error:** Invalid warning number (1-${user.warnings.length}).`, ephemeral: true });
       }
 
       const removedWarn = user.warnings.splice(index - 1, 1)[0];
@@ -64,11 +76,17 @@ module.exports = {
         )
         .setColor(0x32CD32) // Lime Green
         .setTimestamp();
+        
+      // Log the moderation action: Single Warning Removed
+      const Settings = require('../models/Settings');
+      const settings = await Settings.findOne({ guildId: interaction.guild.id });
+      await logModerationAction(interaction.guild, settings, 'Warning Removed', target, interaction.user, removedWarn.reason, `Warning Index: #${index}`);
 
       // Public confirmation (visible to everyone)
-      await interaction.reply({ embeds: [embed], ephemeral: false });
+      await interaction.editReply({ embeds: [embed], ephemeral: false });
+
     } else {
-         return interaction.reply({ content: `❌ **Error:** Please specify a warning \`index\` (e.g., 1) or type \`all\` for the \`all_warns\` option.`, ephemeral: true });
+         return interaction.editReply({ content: `❌ **Error:** Please specify a warning \`index\` (e.g., 1) or type \`all\` for the \`all_warns\` option.`, ephemeral: true });
     }
   },
 };
