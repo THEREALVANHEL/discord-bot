@@ -1,14 +1,11 @@
+// commands/spinawheel.js (REPLACE - Fixed Black Image/Font Issue)
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createCanvas, registerFont } = require('canvas');
 const path = require('path');
 const User = require('../models/User');
 
-// Optional: Register custom font if available
-try {
-  registerFont(path.join(__dirname, '../assets/fonts/Poppins-Bold.ttf'), { family: 'Poppins' });
-} catch {
-  console.warn('⚠️ Poppins font not found, using default sans-serif.');
-}
+// REMOVED FONT REGISTRATION: It appears the deployment environment is not loading the font correctly, 
+// causing rendering issues. We will rely on a safer font stack in ctx.font instead.
 
 // Function to draw a winning arrow pointer
 function drawPointer(ctx, centerX, centerY, radius, color) {
@@ -98,7 +95,7 @@ module.exports = {
       const centerY = canvas.height / 2;
       const radius = 350;
 
-      // White background fix
+      // White background fix is vital for rendering issues
       ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -129,8 +126,8 @@ module.exports = {
         ctx.rotate(startAngle + segmentAngle / 2 + rotationToApply);
         ctx.textAlign = 'right';
         ctx.fillStyle = '#000000';
-        // FIX: Added quotes around 'Poppins' and ensured a safe fallback for rendering stability
-        ctx.font = 'bold 26px "Poppins", sans-serif'; 
+        // FINAL FIX: Using a simple, non-aliased font stack for reliability
+        ctx.font = 'bold 26px sans-serif'; 
         ctx.fillText(option.substring(0, 25), radius - 40, 10);
         ctx.restore();
 
