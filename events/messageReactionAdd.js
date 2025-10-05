@@ -1,10 +1,10 @@
-// events/messageReactionAdd.js (REPLACE - Added Poll Single-Choice Enforcement)
+// events/messageReactionAdd.js (REPLACE - Added null check for client.polls and fixed syntax)
 const Settings = require('../models/Settings');
 const emojiList = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
 
 module.exports = {
   name: 'messageReactionAdd',
-  async execute(reaction, user, client) {
+  execute: async (reaction, user, client) => { // FIX: Changed syntax for stability
     if (user.bot) return;
     if (!reaction.message.guild) return;
     
@@ -42,6 +42,8 @@ module.exports = {
 
 
     // --- 2. Poll Single-Choice Enforcement Logic ---
+    if (!client.polls) return; // FIX: Added null check to prevent TypeError crash
+
     const pollData = client.polls.get(reaction.message.id);
     if (pollData && !pollData.multiChoice) {
         // Only enforce for poll emojis
