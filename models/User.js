@@ -1,4 +1,4 @@
-// models/User.js (REPLACE - Added reminders array and currentJob)
+// models/User.js (REPLACE - Added successfulWorks, lastResigned, and currentJob)
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
@@ -19,12 +19,14 @@ const userSchema = new mongoose.Schema({
     count: { type: Number, default: 0 },
     lastGive: { type: Date, default: null },
   },
-  reminders: [{ // NEW
+  reminders: [{
     message: { type: String, required: true },
     remindAt: { type: Date, required: true },
     channelId: { type: String, required: true },
   }],
-  currentJob: { type: String, default: null }, // NEW
+  currentJob: { type: String, default: null },
+  successfulWorks: { type: Number, default: 0 }, // NEW: Track successful work attempts
+  lastResigned: { type: Date, default: null },   // NEW: Track last resignation time for cooldown
 });
 
 module.exports = mongoose.model('User ', userSchema);
