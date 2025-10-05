@@ -1,8 +1,19 @@
 // commands/purgeuser.js (REPLACE - Delete messages from a specific user + GUI Update + User Tagging + Improved Fetching)
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js');
 
 module.exports = {
-// ... (data block)
+  data: new SlashCommandBuilder()
+    .setName('purgeuser')
+    .setDescription('Delete a specified number of messages from a specific user in the channel.')
+    .addUserOption(option =>
+      option.setName('target')
+        .setDescription('The user whose messages should be deleted')
+        .setRequired(true))
+    .addIntegerOption(option =>
+      option.setName('amount')
+        .setDescription('Number of messages to delete (1-100)')
+        .setRequired(true))
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageMessages), // Added required permission for visibility/use
   async execute(interaction, client, logModerationAction) {
     const target = interaction.options.getUser('target');
     const amount = interaction.options.getInteger('amount');
@@ -25,7 +36,7 @@ module.exports = {
       // Fetch user's messages
       const userMessages = [];
       let lastId;
-      // FIX: Fetch up to 500 messages total (5 fetches of 100) to find the target's messages
+      // Fetch up to 500 messages total (5 fetches of 100) to find the target's messages
       const maxFetches = 5; 
       let totalFetches = 0;
       
@@ -48,16 +59,33 @@ module.exports = {
         return interaction.editReply({ content: `✅ **Success:** No recent messages found from ${target} in this channel to delete (searched up to ${totalFetches * 100} messages).` });
       }
 
+      const deletedCount = messagesToDelete.length; // Capture the actual count
       await interaction.channel.bulkDelete(messagesToDelete, true);
 
       // Log
-// ... (log and embed creation)
+      const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
+      await logModerationAction(interaction.guild, settings, 'Purge User', target, interaction.user, `Deleted ${deletedCount} messages by user`, `Channel: <#${interaction.channel.id}>`);
         
-      await interaction.editReply({ content: `Successfully purged ${messagesToDelete.length} messages.`, ephemeral: true }); // Edit the deferred reply
+      await interaction.editReply({ content: `Successfully purged ${deletedCount} messages by ${target.tag}.`, ephemeral: true }); // Edit the deferred reply
 
-// ... (public reply creation and auto-delete)
+      // Public confirmation (visible to everyone)
+      const publicEmbed = new EmbedBuilder()
+          .setTitle('🧹 User Purge Executed')
+          .setDescription(`Moderator ${interaction.user} purged **${deletedCount}** messages from **${target}** in this channel.`)
+          .setColor(0xDC143C)
+          .setTimestamp();
+
+      // Send the public message (as a followUp, since the reply was ephemeral deferred)
+      interaction.channel.send({ embeds: [publicEmbed] })
+          .then(msg => {
+            // Auto-delete the public reply after 5 seconds to clean up
+            setTimeout(() => msg.delete().catch(() => {}), 5000);
+          })
+          .catch(() => {});
+          
     } catch (error) {
-// ... (error handling)
+      console.error('Purge User error:', error);
+      await interaction.editReply({ content: '❌ **Error:** Failed to purge messages. Ensure the bot has "Manage Messages" permission.', ephemeral: true });
     }
   },
 };
