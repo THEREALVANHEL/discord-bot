@@ -1,4 +1,4 @@
-// commands/spinawheel.js (REPLACE - Fixed Winner Display + Syntax fix)
+// commands/spinawheel.js (REPLACE - Fixed Winner Display + Syntax fix + Robust Deferral)
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createCanvas } = require('canvas'); 
 const User = require('../models/User');
@@ -33,7 +33,7 @@ module.exports = {
         .setDescription('Comma-separated options (2-10, e.g., "Red,Blue,Green")')
         .setRequired(false)),
   execute: async (interaction) => { // FIX: Changed 'async execute(interaction)' to 'execute: async (interaction) =>'
-    await interaction.deferReply();
+    await interaction.deferReply({ ephemeral: false }); // FIX: Ensure robust deferral with ephemeral: false
     const title = interaction.options.getString('title');
 
     let user = await User.findOne({ userId: interaction.user.id });
