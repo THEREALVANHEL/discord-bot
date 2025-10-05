@@ -1,4 +1,4 @@
-// commands/daily.js (REPLACE - Added 7-Day Streak Bonus Logic)
+// commands/daily.js (REPLACE - Added 7-Day Streak Bonus Logic + Fixed Syntax)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -13,7 +13,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('daily')
     .setDescription('Claim your daily coins and XP!'),
-  async execute(interaction) {
+  execute: async (interaction) => { // FIX: Changed 'async execute(interaction)' to 'execute: async (interaction) =>' for deployment stability
     const cooldown = ms('24h');
     let user = await User.findOne({ userId: interaction.user.id });
     await interaction.deferReply();
@@ -52,13 +52,10 @@ module.exports = {
         coinsEarned *= 2; // Double the reward
         xpEarned *= 2;     // Double the reward
         streakBonus = `\n\n**✨ 7-Day Mega-Bonus!** You received **double** rewards!`;
-        
-        // Keep the high streak in DB for leaderboard, but reset to 1 for the next reward cycle
-        user.dailyStreak = currentStreak; 
-        currentStreak = 1; // Set current streak to 1 for the reward calculation in the next day
-    } else {
-        user.dailyStreak = currentStreak;
     }
+    
+    // Update the highest streak achieved for the leaderboard
+    user.dailyStreak = currentStreak; 
 
 
     user.coins += coinsEarned;
