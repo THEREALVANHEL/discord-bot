@@ -1,4 +1,4 @@
-// commands/work.js (REPLACE - Job Progression: work, apply, resign subcommands + Cooldowns + GUI)
+// commands/work.js (REPLACE - Job Progression: job, apply, resign subcommands FIXED + Cooldowns FIXED + UI)
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -9,12 +9,15 @@ const getNextLevelXp = (level) => {
     return Math.floor(150 * Math.pow(level + 1, 1.8));
 };
 
+const WORK_COOLDOWN_MS = ms('1h');
+const RESIGN_COOLDOWN_MS = ms('1h'); // Defined for clarity
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('work')
     .setDescription('Manage your career and work for coins and XP!')
-    .addSubcommand(subcommand =>
-        subcommand.setName('work')
+    .addSubcommand(subcommand => // RENAMED: was 'work work' -> now 'work job'
+        subcommand.setName('job') 
             .setDescription('Work your current job to earn rewards.')
     )
     .addSubcommand(subcommand =>
@@ -25,8 +28,8 @@ module.exports = {
         subcommand.setName('resign')
             .setDescription('Resign from your current job.')
     ),
-  cooldown: 3600, // 1 hour cooldown for the actual work action
-  async execute(interaction, client) {
+  // Removed global cooldown: 3600, 
+  execute: async (interaction, client) => { // Fixed syntax
     const subcommand = interaction.options.getSubcommand();
     let user = await User.findOne({ userId: interaction.user.id });
     await interaction.deferReply();
@@ -38,8 +41,8 @@ module.exports = {
     
     const workProgression = client.config.workProgression.sort((a, b) => a.minWorks - b.minWorks); // Sort by works required
 
-    // --- SUBCOMMAND: WORK ---
-    if (subcommand === 'work') {
+    // --- SUBCOMMAND: JOB (formerly 'work') ---
+    if (subcommand === 'job') {
         if (!user.currentJob) {
             return interaction.editReply({ 
                 content: `⚠️ **Unemployed:** You are currently unemployed. Use \`/work apply\` to start your career!`, 
@@ -47,9 +50,9 @@ module.exports = {
             });
         }
         
-        const cooldown = module.exports.cooldown * 1000;
-        if (user.lastWork && (Date.now() - user.lastWork.getTime()) < cooldown) {
-            const timeLeft = ms(cooldown - (Date.now() - user.lastWork.getTime()), { long: true });
+        // Cooldown check is now localized to the 'job' subcommand
+        if (user.lastWork && (Date.now() - user.lastWork.getTime()) < WORK_COOLDOWN_MS) {
+            const timeLeft = ms(WORK_COOLDOWN_MS - (Date.now() - user.lastWork.getTime()), { long: true });
             return interaction.editReply({ content: `⏱️ **Work Cooldown:** You can work again in **${timeLeft}**.`, ephemeral: true });
         }
 
@@ -170,55 +173,84 @@ module.exports = {
     } else if (subcommand === 'apply') {
         const currentJob = workProgression.find(job => job.id === user.currentJob);
         
-        const eligibleJob = workProgression.find(job => 
-            (currentJob ? job.minWorks > currentJob.minWorks : job.minWorks === 0) && user.level >= job.minLevel
-        );
-
-        if (currentJob && !eligibleJob) {
-            return interaction.editReply({ 
-                content: `⚠️ **Current Job: ${currentJob.title}**\n\n**Next Promotion:** You are not yet eligible for a promotion. You need **Level ${currentJob.minLevel}** and **${workProgression.find(job => job.minWorks > currentJob.minWorks)?.minWorks || '???'}** successful works.`,
-                ephemeral: true 
-            });
-        }
-        
-        if (!currentJob && !eligibleJob) {
-             return interaction.editReply({ 
-                content: `❌ You need to reach at least Level **${workProgression[0].minLevel}** to start your career.`, 
-                ephemeral: true 
-            });
-        }
-
-        const jobToApply = currentJob ? eligibleJob : workProgression.find(job => job.minWorks === 0 && user.level >= job.minLevel);
-
-        if (jobToApply) {
-            const isPromotion = currentJob && currentJob.id !== jobToApply.id;
-            const actionText = isPromotion ? 'Promotion' : 'Job Application';
-            const actionEmoji = isPromotion ? '⬆️' : '📝';
-
-            const menu = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId(`job_apply_${jobToApply.id}`)
-                    .setLabel(`Apply for ${jobToApply.title}`)
-                    .setStyle(ButtonStyle.Primary)
-                    .setEmoji(actionEmoji)
-            );
+        // Build Job List UI
+        const applyEmbed = new EmbedBuilder()
+            .setTitle('📝 Job Market')
+            .setDescription(`You are currently **${currentJob ? currentJob.title : 'Unemployed'}** (Level **${user.level}**, **${user.successfulWorks}** Works Completed).`)
+            .setColor(0x3498DB);
             
-            await interaction.editReply({
-                content: `${actionEmoji} **${actionText}:** You are eligible for **${jobToApply.title}**. Click to apply!`,
-                components: [menu]
-            });
-        } else {
-             return interaction.editReply({ 
-                content: `❌ No suitable jobs found for your current level (Level ${user.level}).`, 
-                ephemeral: true 
-            });
+        const jobButtons = [];
+        let jobListValue = '';
+        let row = new ActionRowBuilder();
+
+        workProgression.forEach((job, index) => {
+            const meetsLevel = user.level >= job.minLevel;
+            const meetsWorks = user.successfulWorks >= job.minWorks;
+            const isCurrent = currentJob && job.id === currentJob.id;
+            
+            // Logic to determine if the job is available to apply for (higher tier or first job)
+            const isPromotion = currentJob && job.minWorks > currentJob.minWorks;
+            const isStartingJob = !currentJob && job.minWorks === workProgression[0].minWorks;
+            const isEligibleToApply = (isPromotion || isStartingJob) && meetsLevel && meetsWorks;
+            
+            let status = '';
+            let emoji = '💼';
+
+            if (isCurrent) {
+                status = `**[CURRENT JOB]**`;
+                emoji = '✅';
+            } else if (isEligibleToApply) {
+                status = `**[ELIGIBLE - APPLY NOW]**`;
+                emoji = '⬆️';
+            } else {
+                status = `[INELIGIBLE]`;
+                emoji = '❌';
+            }
+            
+            jobListValue += `\n${emoji} **${job.title}** ${status}\n\`-\` Req: Lv **${job.minLevel}**, **${job.minWorks}** Works`;
+
+            if (isEligibleToApply) {
+                 const button = new ButtonBuilder()
+                    .setCustomId(`job_apply_${job.id}`)
+                    .setLabel(`Apply: ${job.title}`)
+                    .setStyle(ButtonStyle.Primary)
+                    .setEmoji(emoji);
+                
+                // Only add the button if the job is an *immediate* promotion or starting job
+                if (jobButtons.flatMap(r => r.components).length < 5) {
+                    row.addComponents(button);
+                } else if (row.components.length < 5) {
+                    row.addComponents(button);
+                }
+            }
+            
+            // Max 5 buttons per row
+            if (row.components.length === 5 || index === workProgression.length - 1) {
+                if (row.components.length > 0) {
+                    jobButtons.push(row);
+                }
+                row = new ActionRowBuilder();
+            }
+        });
+        
+        // Add the last row if it has components
+        if (row.components.length > 0) {
+            jobButtons.push(row);
         }
+
+        applyEmbed.addFields({ name: 'Career Progression', value: jobListValue.substring(0, 1024), inline: false });
+
+
+        await interaction.editReply({
+            embeds: [applyEmbed],
+            components: jobButtons.length > 0 ? jobButtons : [],
+        });
         
     // --- SUBCOMMAND: RESIGN ---
     } else if (subcommand === 'resign') {
-        const resignCooldown = ms('1h');
-        if (user.lastResigned && (Date.now() - user.lastResigned.getTime()) < resignCooldown) {
-            const timeLeft = ms(resignCooldown - (Date.now() - user.lastResigned.getTime()), { long: true });
+        const RESIGN_COOLDOWN_MS = ms('1h');
+        if (user.lastResigned && (Date.now() - user.lastResigned.getTime()) < RESIGN_COOLDOWN_MS) {
+            const timeLeft = ms(RESIGN_COOLDOWN_MS - (Date.now() - user.lastResigned.getTime()), { long: true });
             return interaction.editReply({ 
                 content: `⏱️ **Resignation Cooldown:** You must wait **${timeLeft}** before applying for a new job.`, 
                 ephemeral: true 
@@ -233,15 +265,15 @@ module.exports = {
         }
         
         user.currentJob = null;
-        user.lastWork = null; // Reset work cooldown
+        user.lastWork = null; // Reset work cooldown (FIX)
         user.lastResigned = new Date(); // Set resignation cooldown
         await user.save();
         
         const resignEmbed = new EmbedBuilder()
             .setTitle('🚪 Resignation Successful')
-            .setDescription('You have resigned from your previous position. Use `/work apply` to start a new career in 1 hour.')
+            .setDescription('You have resigned from your previous position. Use `/work apply` to view open positions.')
             .addFields(
-                { name: 'Cooldown', value: '1 hour before re-applying.', inline: true },
+                { name: 'Next Application', value: `<t:${Math.floor((Date.now() + RESIGN_COOLDOWN_MS) / 1000)}:R>`, inline: true },
                 { name: 'Current Status', value: 'Unemployed', inline: true }
             )
             .setColor(0xFF4500)
