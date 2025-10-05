@@ -1,19 +1,46 @@
-// commands/spinawheel.js (REPLACE - Fixed Winner Display)
+// commands/spinawheel.js (REPLACE - Fixed Winner Display + Syntax fix)
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createCanvas } = require('canvas'); 
 const User = require('../models/User');
 
-// ... (drawPointer function remains the same)
+// Function to draw a winning arrow pointing to a specific segment
+function drawPointer(ctx, centerX, centerY, radius, color) {
+    ctx.save();
+    ctx.translate(centerX, centerY);
+
+    // Draw an arrow pointing to the 12 o'clock position (where the fixed winner will be)
+    ctx.beginPath();
+    ctx.moveTo(0, -radius - 30);
+    ctx.lineTo(-20, -radius + 10);
+    ctx.lineTo(20, -radius + 10);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    
+    ctx.restore();
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
-// ... (data remains the same)
-  async execute(interaction) {
+    .setName('spinawheel')
+    .setDescription('Spin the wheel for a random prize!')
+    .addStringOption(option =>
+        option.setName('title')
+            .setDescription('The title for the wheel.')
+            .setRequired(true))
+    .addStringOption(option =>
+      option.setName('options')
+        .setDescription('Comma-separated options (2-10, e.g., "Red,Blue,Green")')
+        .setRequired(false)),
+  execute: async (interaction) => { // FIX: Changed 'async execute(interaction)' to 'execute: async (interaction) =>'
     await interaction.deferReply();
     const title = interaction.options.getString('title');
 
     let user = await User.findOne({ userId: interaction.user.id });
-// ... (user creation remains the same)
+    if (!user) {
+      user = new User({ userId: interaction.user.id });
+      await user.save(); // Ensure user exists before saving changes
+    }
 
     let options = interaction.options.getString('options') ? interaction.options.getString('options').split(',').map(o => o.trim()) : ['Win 100 coins', 'Level Boost +10 XP', 'Nothing :(', 'Cookie +5', 'Rare Item!', 'Lose 20 coins'];
     options = options.filter(Boolean).slice(0, 10); // Filter empty strings and limit to 10
@@ -21,24 +48,98 @@ module.exports = {
 
     // Randomly select the winning index before drawing the wheel
     const selectedIndex = Math.floor(Math.random() * options.length);
-    const selectedOption = options[selectedIndex]; // This is the string we need to use
-    
+    const selectedOption = options[selectedIndex];
+
     // Apply prize logic early to ensure prizeMsg is available for fallback
     let prizeMsg = 'No prize awarded.';
     if (selectedOption.toLowerCase().includes('coins')) {
-// ... (prize logic remains the same)
+        const match = selectedOption.match(/(\d+)/);
+        const prizeCoins = match ? parseInt(match[1]) : 0;
+        
+        if (selectedOption.toLowerCase().includes('lose')) {
+             user.coins = Math.max(0, user.coins - prizeCoins);
+             prizeMsg = `**-${prizeCoins} coins** 💰! Total: ${user.coins} coins.`;
+        } else {
+             user.coins += prizeCoins;
+             prizeMsg = `**+${prizeCoins} coins** 💰! Total: ${user.coins} coins.`;
+        }
     } else if (selectedOption.toLowerCase().includes('xp')) {
-// ... (prize logic remains the same)
+        const match = selectedOption.match(/(\d+)/);
+        const prizeXp = match ? parseInt(match[1]) : 0;
+        user.xp += prizeXp;
+        prizeMsg = `**+${prizeXp} XP** ✨!`;
     } else if (selectedOption.toLowerCase().includes('cookie')) {
-// ... (prize logic remains the same)
+        const match = selectedOption.match(/(\d+)/);
+        const prizeCookies = match ? parseInt(match[1]) : 0;
+        user.cookies += prizeCookies;
+        prizeMsg = `**+${prizeCookies} cookies** 🍪!`;
     } else {
-        // FIX: Ensure this fallback uses the full selectedOption string
         prizeMsg = `You won **${selectedOption}**! (Item effect is pending implementation)`;
     }
     await user.save(); // Save the result
 
     try {
-// ... (canvas drawing logic remains the same)
+      const canvas = createCanvas(800, 800);
+      const ctx = canvas.getContext('2d');
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      const radius = 350;
+
+      // Ensure white background explicitly to prevent black image issues
+      ctx.fillStyle = '#FFFFFF'; 
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'];
+
+      const segmentAngle = (2 * Math.PI) / options.length;
+      let startAngle = 0;
+
+      // Calculate the rotation needed to make the *selected* segment appear at the top (3/2 * PI)
+      const winningCenterAngle = selectedIndex * segmentAngle + segmentAngle / 2;
+      const rotationToApply = (3 * Math.PI / 2) - winningCenterAngle;
+
+
+      // Draw wheel segments
+      options.forEach((option, index) => {
+        const color = colors[index % colors.length];
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        
+        // Draw the segment with the applied rotation
+        ctx.arc(centerX, centerY, radius, startAngle + rotationToApply, startAngle + segmentAngle + rotationToApply);
+        ctx.closePath();
+        ctx.fill();
+
+        // Text on segment
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        // Rotate to the center of the segment + rotation to make it point up (Math.PI/2)
+        ctx.rotate(startAngle + segmentAngle / 2 + rotationToApply + Math.PI / 2); 
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#000000'; // Ensure text is black/visible
+        ctx.font = 'bold 24px sans-serif'; 
+        ctx.fillText(option.substring(0, 15), 0, -radius / 1.5); // Truncate long text
+        ctx.restore();
+
+        startAngle += segmentAngle;
+      });
+
+      // Draw border
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+      ctx.lineWidth = 15; // Thicker border
+      ctx.strokeStyle = '#333333';
+      ctx.stroke();
+      
+      // Draw center circle
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, 50, 0, 2 * Math.PI);
+      ctx.fillStyle = '#FF4500';
+      ctx.fill();
+      
+      // Draw pointer (arrow at top center, fixed)
+      drawPointer(ctx, centerX, centerY, radius, '#FF4500'); // Red pointer
 
       const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'wheel.png' });
 
@@ -46,15 +147,26 @@ module.exports = {
         .setTitle(`🎰 ${title}`)
         .setDescription(`The wheel spun and landed on the section pointed to by the red arrow.`)
         .addFields(
-            { name: '🎉 Winning Option', value: `**${selectedOption}**`, inline: true}, // FIX: Use selectedOption here
+            { name: '🎉 Winning Option', value: `**${selectedOption}**`, inline: true},
             { name: '🎁 Your Reward', value: prizeMsg, inline: true},
             { name: '⚙️ All Options', value: options.map((opt, i) => `${i + 1}. ${opt}`).join('\n').substring(0, 1024), inline: false}
         )
-// ... (rest of the embed remains the same)
+        .setColor(0xFFD700)
+        .setImage('attachment://wheel.png')
+        .setTimestamp()
+        .setFooter({ text: `Spin by ${interaction.user.tag}` });
+
       await interaction.editReply({ embeds: [embed], files: [attachment] });
 
     } catch (error) {
-// ... (fallback logic remains the same)
+      console.error('Wheel error:', error);
+      // Fallback to text if Canvas fails
+      const fallbackEmbed = new EmbedBuilder()
+        .setTitle('🎰 Wheel Spun! (Fallback)')
+        .setDescription(`**Result:** **${selectedOption}**\n\n**Note:** The wheel visual failed to render. Prize was still applied: ${prizeMsg}.`)
+        .setColor(0xFFD700)
+        .setTimestamp();
+      await interaction.editReply({ embeds: [fallbackEmbed] });
     }
   },
 };
