@@ -1,4 +1,4 @@
-// events/guildMemberRemove.js (REPLACE - Premium leave + DM to rejoin, Fixed timestamp format)
+// events/guildMemberRemove.js (REPLACE - Premium leave + DM to rejoin, Fixed timestamp format, Consolidated Joined Date)
 const Settings = require('../models/Settings');
 const { EmbedBuilder } = require('discord.js');
 
@@ -16,17 +16,17 @@ module.exports = {
             .setTitle('🚪 Member Left the Server')
             .setDescription(`**${member.user.tag}** has departed. We now have **${member.guild.memberCount}** members remaining.`)
             .addFields(
-              // FIX: Use full timestamp (:F) instead of relative (:R)
-              { name: 'Joined', value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:F>`, inline: true },
+              { name: 'Joined Server', value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:F>`, inline: false }, // Explicitly show time of joining
               { name: 'Goodbye!', value: 'We hope to see you again soon.', inline: true }
             )
             .setColor(0xFF0000) // Red
             .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 1024 }))
-            .setTimestamp();
+            .setTimestamp()
+            .setImage('https://tenor.com/view/flcl-mamimi-aaahhh-wtf-shocked-gif-24981847.gif'); // GIF EMBEDDED
 
           channel.send({
             embeds: [leaveEmbed],
-            files: ['https://tenor.com/view/flcl-mamimi-aaahhh-wtf-shocked-gif-24981847.gif'],
+            // Removed files: ['...gif'],
           });
         }
       }
