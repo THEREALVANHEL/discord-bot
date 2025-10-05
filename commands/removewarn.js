@@ -25,7 +25,7 @@ module.exports = {
 
     let user = await User.findOne({ userId: target.id });
     if (!user || !user.warnings.length) {
-      return interaction.reply({ content: `✅ **No Warnings:** ${target} has no warnings.`, ephemeral: true });
+      return interaction.reply({ content: `${target} has **no warnings** on record. ✅`, ephemeral: true });
     }
 
     if (allWarns === 'all') {
