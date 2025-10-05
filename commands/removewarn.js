@@ -1,5 +1,5 @@
-// commands/removewarn.js (REPLACE - Success reply now visible to everyone, added 'all' option)
-const { SlashCommandBuilder } = require('discord.js');
+// commands/removewarn.js (REPLACE - Success reply now visible to everyone, added 'all' option + GUI Update + User Tagging)
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
 module.exports = {
@@ -25,7 +25,7 @@ module.exports = {
 
     let user = await User.findOne({ userId: target.id });
     if (!user || !user.warnings.length) {
-      return interaction.reply({ content: `${target.tag} has no warnings.`, ephemeral: true });
+      return interaction.reply({ content: `✅ **No Warnings:** ${target} has no warnings.`, ephemeral: true });
     }
 
     if (allWarns === 'all') {
@@ -33,24 +33,40 @@ module.exports = {
       user.warnings = [];
       await user.save();
       
+      const embed = new EmbedBuilder()
+        .setTitle('✅ Warning Log Cleared')
+        .setDescription(`Moderator ${interaction.user} cleared all warnings for ${target}.`)
+        .addFields(
+            { name: 'Target', value: `${target} (\`${target.tag}\`)`, inline: true },
+            { name: 'Warnings Cleared', value: `**${removedCount}**`, inline: true }
+        )
+        .setColor(0x00FF00)
+        .setTimestamp();
+
       // Public confirmation (visible to everyone)
-      await interaction.reply({
-        content: `🗑️ **All Warnings Removed:** **${removedCount}** warnings have been cleared from ${target.tag} by ${interaction.user.tag}.`,
-        ephemeral: false
-      });
+      await interaction.reply({ embeds: [embed], ephemeral: false });
     } else if (index !== null) {
       if (index < 1 || index > user.warnings.length) {
-        return interaction.reply({ content: `Invalid warning number (1-${user.warnings.length}).`, ephemeral: true });
+        return interaction.reply({ content: `❌ **Error:** Invalid warning number (1-${user.warnings.length}).`, ephemeral: true });
       }
 
       const removedWarn = user.warnings.splice(index - 1, 1)[0];
       await user.save();
 
+      const embed = new EmbedBuilder()
+        .setTitle('✅ Warning Removed')
+        .setDescription(`Moderator ${interaction.user} removed a single warning from ${target}.`)
+        .addFields(
+            { name: 'Target', value: `${target} (\`${target.tag}\`)`, inline: true },
+            { name: 'Warning ID', value: `**#${index}**`, inline: true },
+            { name: 'Remaining Warnings', value: `**${user.warnings.length}**`, inline: true },
+            { name: 'Reason Removed', value: removedWarn.reason, inline: false }
+        )
+        .setColor(0x32CD32) // Lime Green
+        .setTimestamp();
+
       // Public confirmation (visible to everyone)
-      await interaction.reply({
-        content: `🗑️ **Warning Removed:** Warning #${index} has been removed from ${target.tag} by ${interaction.user.tag}. (Reason was: "${removedWarn.reason}") Remaining warnings: ${user.warnings.length}`,
-        ephemeral: false
-      });
+      await interaction.reply({ embeds: [embed], ephemeral: false });
     } else {
          return interaction.reply({ content: `❌ **Error:** Please specify a warning \`index\` (e.g., 1) or type \`all\` for the \`all_warns\` option.`, ephemeral: true });
     }
