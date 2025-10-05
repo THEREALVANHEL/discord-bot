@@ -31,8 +31,8 @@ module.exports = {
     }
 
     try {
-      // Ban without deleting messages (days: 0)
-      await member.ban({ deleteMessageSeconds: 0, reason }); // Changed days: 0 to deleteMessageSeconds: 0 as per latest d.js docs
+      // Ban without deleting messages (deleteMessageSeconds: 0)
+      await member.ban({ deleteMessageSeconds: 0, reason }); 
       // Immediate unban
       await interaction.guild.members.unban(target.id, 'Softban unban');
 
