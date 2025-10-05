@@ -1,4 +1,4 @@
-// commands/addcoins.js (REPLACE - Premium GUI)
+// commands/addcoins.js (REPLACE - Premium GUI + User Tagging)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -32,9 +32,11 @@ module.exports = {
 
     const embed = new EmbedBuilder()
       .setTitle('💰 Coins Granted')
-      .setDescription(`Successfully deposited **${amount} coins** into ${targetUser}'s wallet.`)
+      .setDescription(`Admin ${interaction.user} deposited **${amount} coins** into ${targetUser}'s wallet.`)
       .addFields(
-        { name: 'New Balance', value: `${user.coins} coins 💰`, inline: true }
+        { name: 'Target User', value: `${targetUser}`, inline: true },
+        { name: 'Amount Added', value: `**+${amount}** 💰`, inline: true },
+        { name: 'New Balance', value: `**${user.coins}** 💰`, inline: true }
       )
       .setColor(0x00FF00)
       .setTimestamp();
