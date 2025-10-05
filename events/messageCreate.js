@@ -1,4 +1,4 @@
-// events/messageCreate.js (REPLACE - Harder XP Formula + Level Up Channel)
+// events/messageCreate.js (REPLACE - Fixed infinite role add/remove loop in leveling and cookie role logic)
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { EmbedBuilder } = require('discord.js');
@@ -9,6 +9,34 @@ const getNextLevelXp = (level) => {
     // New (Harder): 150 * Math.pow(level + 1, 1.8)
     return Math.floor(150 * Math.pow(level + 1, 1.8));
 };
+
+// FIX: Helper function to manage a set of roles efficiently
+async function manageTieredRoles(member, userValue, roleConfigs, property) {
+    // 1. Determine the highest eligible role (the target role)
+    const targetRoleConfig = roleConfigs
+      .filter(r => r[property] <= userValue)
+      .sort((a, b) => b[property] - a[property])[0];
+      
+    const targetRoleId = targetRoleConfig ? targetRoleConfig.roleId : null;
+
+    for (const roleConfig of roleConfigs) {
+        const roleId = roleConfig.roleId;
+        const hasRole = member.roles.cache.has(roleId);
+        
+        if (roleId === targetRoleId) {
+            // If this is the correct role but the user doesn't have it, add it.
+            if (!hasRole) {
+                await member.roles.add(roleId).catch(() => {});
+            }
+        } else {
+            // If the user has a role that is NOT the target role (i.e., lower tier or invalid role), remove it.
+            if (hasRole) {
+                await member.roles.remove(roleId).catch(() => {});
+            }
+        }
+    }
+}
+
 
 module.exports = {
   name: 'messageCreate',
@@ -38,19 +66,9 @@ module.exports = {
 
       const member = message.member;
 
-      // Remove all leveling roles and add highest one
-      const levelingRoles = client.config.levelingRoles;
-      for (const roleConfig of levelingRoles) {
-        if (member.roles.cache.has(roleConfig.roleId)) {
-          await member.roles.remove(roleConfig.roleId).catch(() => {});
-        }
-      }
-
-      const newLevelRole = levelingRoles
-        .filter(r => r.level <= user.level)
-        .sort((a, b) => b.level - a.level)[0];
-      if (newLevelRole) {
-        await member.roles.add(newLevelRole.roleId).catch(() => {});
+      // FIX: Apply tiered role management on level up
+      if (member) {
+          await manageTieredRoles(member, user.level, client.config.levelingRoles, 'level');
       }
 
       // Send level-up message to the configured channel or the current channel
@@ -70,20 +88,12 @@ module.exports = {
       }
     }
 
-    // Cookie roles update (This block remains the same)
+    // FIX: Apply tiered role management for cookie roles on every message (unconditional block)
     const member = message.member;
-    const cookieRoles = client.config.cookieRoles;
-    for (const roleConfig of cookieRoles) {
-      if (member.roles.cache.has(roleConfig.roleId)) {
-        await member.roles.remove(roleConfig.roleId).catch(() => {});
-      }
+    if (member) {
+        await manageTieredRoles(member, user.cookies, client.config.cookieRoles, 'cookies');
     }
-    const newCookieRole = cookieRoles
-      .filter(r => r.cookies <= user.cookies)
-      .sort((a, b) => b.cookies - a.cookies)[0];
-    if (newCookieRole) {
-      await member.roles.add(newCookieRole.roleId).catch(() => {});
-    }
+    
 
     // Auto assign auto join role fallback
     const autoJoinRoleId = client.config.roles.autoJoin;
