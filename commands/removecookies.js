@@ -1,4 +1,4 @@
-// commands/removecookies.js (REPLACE - Premium GUI + User Tagging)
+// commands/removecookies.js (REPLACE - Fixed infinite role add/remove loop)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -30,20 +30,33 @@ module.exports = {
     user.cookies = Math.max(0, user.cookies - amount);
     await user.save();
 
-    // Update cookie roles
+    // Update cookie roles (FIXED logic)
     const member = interaction.guild.members.cache.get(targetUser.id);
     if (member) {
       const cookieRoles = interaction.client.config.cookieRoles;
-      for (const roleConfig of cookieRoles) {
-        if (member.roles.cache.has(roleConfig.roleId)) {
-          await member.roles.remove(roleConfig.roleId).catch(() => {});
-        }
-      }
-      const newCookieRole = cookieRoles
+
+      // FIX: Find the single highest eligible role
+      const targetCookieRole = cookieRoles
         .filter(r => r.cookies <= user.cookies)
         .sort((a, b) => b.cookies - a.cookies)[0];
-      if (newCookieRole) {
-        await member.roles.add(newCookieRole.roleId).catch(() => {});
+        
+      const targetCookieRoleId = targetCookieRole ? targetCookieRole.roleId : null;
+
+      for (const roleConfig of cookieRoles) {
+        const roleId = roleConfig.roleId;
+        const hasRole = member.roles.cache.has(roleId);
+        
+        if (roleId === targetCookieRoleId) {
+            // If this is the correct role but the user doesn't have it, add it.
+            if (!hasRole) {
+                await member.roles.add(roleId).catch(() => {});
+            }
+        } else {
+            // If the user has a different cookie role, remove it.
+            if (hasRole) {
+                await member.roles.remove(roleId).catch(() => {});
+            }
+        }
       }
     }
 
