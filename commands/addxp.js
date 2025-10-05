@@ -1,4 +1,4 @@
-// commands/addxp.js (REPLACE - Premium GUI + Level Up Channel + Harder XP Formula)
+// commands/addxp.js (REPLACE - Premium GUI + Level Up Channel + Harder XP Formula + User Tagging)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -36,6 +36,7 @@ module.exports = {
 
     user.xp += amount;
     let leveledUpMsg = '';
+    let oldLevel = user.level;
 
     // Check for level up
     const settings = await Settings.findOne({ guildId: interaction.guild.id });
@@ -79,7 +80,10 @@ module.exports = {
           .setColor(0xFFD700) // Gold
           .setTimestamp();
         
-        await levelUpChannel.send({ content: `${targetUser}`, embeds: [levelUpEmbed] });
+        // Check if the old level was different before sending the level up message
+        if (user.level > oldLevel) {
+            await levelUpChannel.send({ content: `${targetUser}`, embeds: [levelUpEmbed] });
+        }
       }
     }
 
@@ -87,12 +91,13 @@ module.exports = {
 
     const embed = new EmbedBuilder()
       .setTitle('✨ XP Granted')
-      .setDescription(`Successfully added **${amount} XP** to ${targetUser}.\n\nNew Status:`)
+      .setDescription(`Admin ${interaction.user} granted **${amount} XP** to ${targetUser}.${leveledUpMsg}`)
       .addFields(
-        { name: 'Current XP', value: `${user.xp}`, inline: true },
-        { name: 'Current Level', value: `${user.level}`, inline: true },
+        { name: 'Target User', value: `${targetUser}`, inline: true },
+        { name: 'Amount Added', value: `**+${amount}** ✨`, inline: true },
+        { name: 'Current Level', value: `**${user.level}**`, inline: true },
       )
-      .setFooter({ text: `Next Level: ${nextLevelXp} XP Needed` })
+      .setFooter({ text: `Current XP: ${user.xp} | Next Level: ${nextLevelXp} XP Needed` })
       .setColor(0x7289DA)
       .setTimestamp();
 
