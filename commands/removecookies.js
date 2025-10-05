@@ -1,4 +1,4 @@
-// commands/removecookies.js (REPLACE - Premium GUI)
+// commands/removecookies.js (REPLACE - Premium GUI + User Tagging)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -24,7 +24,7 @@ module.exports = {
 
     let user = await User.findOne({ userId: targetUser.id });
     if (!user) {
-      return interaction.reply({ content: `⚠️ ${targetUser.tag} does not have any cookies yet.`, ephemeral: true });
+      return interaction.reply({ content: `⚠️ **Warning:** ${targetUser} does not have any cookies yet.`, ephemeral: true });
     }
 
     user.cookies = Math.max(0, user.cookies - amount);
@@ -49,9 +49,11 @@ module.exports = {
 
     const embed = new EmbedBuilder()
       .setTitle('🔪 Cookies Smashed')
-      .setDescription(`Successfully removed **${amount} cookies** from ${targetUser}.`)
+      .setDescription(`Admin ${interaction.user} smashed **${amount} cookies** from ${targetUser}.`)
       .addFields(
-        { name: 'New Cookie Count', value: `${user.cookies} cookies 🍪`, inline: true }
+        { name: 'Target User', value: `${targetUser}`, inline: true },
+        { name: 'Amount Removed', value: `**-${amount}** 🍪`, inline: true },
+        { name: 'New Cookie Count', value: `**${user.cookies}** 🍪`, inline: true }
       )
       .setColor(0xFF0000)
       .setTimestamp();
