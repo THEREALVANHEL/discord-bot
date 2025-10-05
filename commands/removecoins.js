@@ -1,4 +1,4 @@
-// commands/removecoins.js (REPLACE - Premium GUI)
+// commands/removecoins.js (REPLACE - Premium GUI + User Tagging)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -24,7 +24,7 @@ module.exports = {
 
     let user = await User.findOne({ userId: targetUser.id });
     if (!user) {
-      return interaction.reply({ content: `⚠️ ${targetUser.tag} does not have any coins yet.`, ephemeral: true });
+      return interaction.reply({ content: `⚠️ **Warning:** ${targetUser} does not have any coins yet.`, ephemeral: true });
     }
 
     user.coins = Math.max(0, user.coins - amount);
@@ -32,9 +32,11 @@ module.exports = {
 
     const embed = new EmbedBuilder()
       .setTitle('💸 Coins Deducted')
-      .setDescription(`Successfully withdrew **${amount} coins** from ${targetUser}'s wallet.`)
+      .setDescription(`Admin ${interaction.user} withdrew **${amount} coins** from ${targetUser}'s wallet.`)
       .addFields(
-        { name: 'New Balance', value: `${user.coins} coins 💰`, inline: true }
+        { name: 'Target User', value: `${targetUser}`, inline: true },
+        { name: 'Amount Removed', value: `**-${amount}** 💰`, inline: true },
+        { name: 'New Balance', value: `**${user.coins}** 💰`, inline: true }
       )
       .setColor(0xFF0000)
       .setTimestamp();
