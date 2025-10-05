@@ -1,4 +1,4 @@
-// index.js (REPLACE - Updated roles, added client.polls, updated workProgression, removed shop item, cleaned config, FIXED TYPO)
+// index.js (REPLACE - Updated workProgression, added client.polls, cleaned config)
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder } = require('discord.js'); // Added EmbedBuilder for reminder loading logic
 const mongoose = require('mongoose');
@@ -54,7 +54,8 @@ client.config = {
     { cookies: 3000, roleId: '1371001806930579518' },
     { cookies: 5000, roleId: '1371004762761461770' },
   ],
-  // NEW Job Progression Structure based on successfulWorks for promotion
+  // UPDATED: New Job Progression Structure with 7 distinct jobs + Tech Legend.
+  // Progression is based on successfulWorks, not maxLevel.
   workProgression: [
     // Job Title | Min Level | Min Works for promotion | XP Reward Range | Coin Reward Range | Success Rate (%) | Job ID
     { title: 'Scavenger', minLevel: 0, minWorks: 0, xpReward: [5, 10], coinReward: [10, 20], successRate: 90, id: 'scavenger' },
