@@ -1,4 +1,4 @@
-// commands/avatar.js (REPLACE - Final Server vs. Global Avatar Distinction)
+// commands/avatar.js (REPLACE - Removed 'type' option, always shows server-preferred avatar)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 module.exports = {
@@ -12,20 +12,11 @@ module.exports = {
     .addStringOption(option => // Option to fetch by ID (works for non-members)
       option.setName('user_id')
         .setDescription('User ID to get avatar of (works for non-members)')
-        .setRequired(false))
-    .addStringOption(option => // Option to choose avatar type
-        option.setName('type')
-        .setDescription('Choose between the Server/Guild Avatar or the Global/User Avatar.')
-        .setRequired(false)
-        .addChoices(
-            { name: 'Server/Guild Avatar', value: 'server' },
-            { name: 'Global/User Avatar', value: 'global' }
-        )),
-  // FIX: Using arrow function syntax for robust deployment
+        .setRequired(false)),
+  
   execute: async (interaction) => {
     const targetUserMention = interaction.options.getUser('target');
     const targetUserId = interaction.options.getString('user_id');
-    const type = interaction.options.getString('type') || 'server'; 
     let user;
 
     await interaction.deferReply();
@@ -49,14 +40,8 @@ module.exports = {
     let avatarUrl;
     let avatarType;
 
-    // 3. Logic to select the correct URL
-    if (type === 'global' || !member) {
-        // Case 1: Global explicitly requested, OR the user is not a member of the guild.
-        // Use the user's primary global avatar.
-        avatarUrl = user.displayAvatarURL({ dynamic: true, size: 512 });
-        avatarType = 'Global/User';
-    } else {
-        // Case 2: Server requested AND member exists.
+    // Logic: Always show the server-preferred avatar, using global as fallback for non-members.
+    if (member) {
         // Use member.displayAvatarURL(), which gives the custom server avatar if set, 
         // or the global avatar as the server default fallback.
         avatarUrl = member.displayAvatarURL({ dynamic: true, size: 512 });
@@ -69,8 +54,12 @@ module.exports = {
             avatarType = 'Server/Guild';
         } else {
             // No custom server avatar set, so the image is their global avatar.
-            avatarType = 'Global/User (Server Default)';
+            avatarType = 'Server Profile (Global Default)';
         }
+    } else {
+        // Not a member, fallback to global user avatar
+        avatarUrl = user.displayAvatarURL({ dynamic: true, size: 512 });
+        avatarType = 'Global/User';
     }
     
     const embed = new EmbedBuilder()
