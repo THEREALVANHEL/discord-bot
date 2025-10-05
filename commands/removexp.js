@@ -1,4 +1,4 @@
-// commands/removexp.js (REPLACE - Premium GUI + Leveling + Harder XP Formula)
+// commands/removexp.js (REPLACE - Premium GUI + Leveling + Harder XP Formula + User Tagging)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -31,28 +31,27 @@ module.exports = {
 
     let user = await User.findOne({ userId: targetUser.id });
     if (!user) {
-      return interaction.editReply({ content: `⚠️ ${targetUser.tag} does not have any XP yet.`, ephemeral: true });
+      return interaction.editReply({ content: `⚠️ **Warning:** ${targetUser} does not have any XP yet.`, ephemeral: true });
     }
 
     user.xp = Math.max(0, user.xp - amount);
 
     let oldLevel = user.level;
+    let levelDownMsg = '';
 
     // Recalculate level
     if (user.level > 0) {
-        const previousLevelXpThreshold = user.level > 1 ? getNextLevelXp(user.level - 1) : 0;
-        
         // Drop level until XP is above the previous level's required total XP.
-        // Simplified check: if current XP is less than what was needed for the previous level, decrement level.
-        // A more robust way is calculating total XP, but here we stick to the current system structure.
         let tempLevel = user.level;
+        let leveledDown = false;
         while (tempLevel > 0 && user.xp < getNextLevelXp(tempLevel - 1)) {
             tempLevel--;
+            leveledDown = true;
         }
         user.level = tempLevel;
 
         // Assign leveling roles if level changed
-        if (oldLevel > user.level) {
+        if (leveledDown) {
             const member = interaction.guild.members.cache.get(targetUser.id);
             if (member) {
               const levelingRoles = interaction.client.config.levelingRoles;
@@ -68,6 +67,7 @@ module.exports = {
                 await member.roles.add(newLevelRole.roleId).catch(() => {});
               }
             }
+            levelDownMsg = `\n\n**📉 Level DOWN!** ${targetUser} has dropped to **Level ${user.level}**!`;
         }
     }
 
@@ -76,18 +76,16 @@ module.exports = {
 
     const embed = new EmbedBuilder()
       .setTitle('🔻 XP Deducted')
-      .setDescription(`Successfully removed **${amount} XP** from ${targetUser}.`)
+      .setDescription(`Admin ${interaction.user} deducted **${amount} XP** from ${targetUser}.${levelDownMsg}`)
       .addFields(
-        { name: 'Current XP', value: `${user.xp}`, inline: true },
-        { name: 'Current Level', value: `${user.level}`, inline: true },
+        { name: 'Target User', value: `${targetUser}`, inline: true },
+        { name: 'Amount Removed', value: `**-${amount}** ✨`, inline: true },
+        { name: 'Current Level', value: `**${user.level}**`, inline: true }
       )
-      .setFooter({ text: `Next Level: ${nextLevelXp} XP Needed` })
+      .setFooter({ text: `Current XP: ${user.xp} | Next Level: ${nextLevelXp} XP Needed` })
       .setColor(0xFF0000)
       .setTimestamp();
 
-    if (oldLevel > user.level) {
-        embed.setDescription(embed.data.description + `\n\n**📉 Level DOWN!** ${targetUser} has dropped to **Level ${user.level}**!`);
-    }
 
     await interaction.editReply({ embeds: [embed] });
   },
