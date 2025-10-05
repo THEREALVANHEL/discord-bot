@@ -1,5 +1,5 @@
 // commands/suggestion.js (REPLACE - Simplified: removed thread creation, Changed image option to Attachment)
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ChannelType } = require('discord.js'); // Added ChannelType
 const Settings = require('../models/Settings');
 
 module.exports = {
@@ -24,20 +24,20 @@ module.exports = {
     }
 
     const suggestionChannel = interaction.guild.channels.cache.get(settings.suggestionChannelId);
-    if (!suggestionChannel) {
-      return interaction.reply({ content: '❌ **Error:** The configured suggestion channel was not found.', ephemeral: true });
+    if (!suggestionChannel || suggestionChannel.type !== ChannelType.GuildText) {
+      return interaction.reply({ content: '❌ **Error:** The configured suggestion channel was not found or is not a text channel.', ephemeral: true });
     }
 
     const embed = new EmbedBuilder()
       .setTitle('💡 New Community Suggestion')
-      .setDescription(`> ${idea}`)
+      .setDescription(`> **${idea}**`) // Highlight the suggestion
       .addFields(
-        { name: 'Suggested By', value: interaction.user.tag, inline: true },
-        { name: 'Status', value: '📊 Pending Vote', inline: true },
+        { name: 'Suggested By', value: `${interaction.user}`, inline: true },
+        // Removed Status field
       )
-      .setColor(0xFFA500)
+      .setColor(0x3498DB) // Blue for suggestions
       .setTimestamp()
-      .setFooter({ text: `Use the reactions to vote! | Suggested by: ${interaction.user.tag}` });
+      .setFooter({ text: `Use the reactions to vote! | ID: ${interaction.user.id}` });
       
     if (imageAttachment) { // Use attachment URL
       embed.setImage(imageAttachment.url);
@@ -47,11 +47,18 @@ module.exports = {
       const suggestionMessage = await suggestionChannel.send({ embeds: [embed] });
       await suggestionMessage.react('👍');
       await suggestionMessage.react('👎');
+      
+      // Create a thread for discussion
+      await suggestionMessage.startThread({
+          name: `Discuss ${interaction.user.username}'s Idea`,
+          autoArchiveDuration: 60 * 24, // 24 hours
+          reason: 'Discussion thread for community suggestion',
+      }).catch(console.error); // Handle missing permissions for thread creation
 
-      await interaction.reply({ content: '✅ **Suggestion Submitted!** Your idea is now open for community voting.', ephemeral: true });
+      await interaction.reply({ content: '✅ **Suggestion Submitted!** Your idea is now open for community discussion and voting.', ephemeral: true });
     } catch (error) {
       console.error('Error submitting suggestion:', error);
-      await interaction.reply({ content: '❌ **Error:** Failed to submit suggestion. Check my permissions (send messages, add reactions).', ephemeral: true });
+      await interaction.reply({ content: '❌ **Error:** Failed to submit suggestion. Check my permissions (send messages, add reactions, manage threads).', ephemeral: true });
     }
   },
 };
