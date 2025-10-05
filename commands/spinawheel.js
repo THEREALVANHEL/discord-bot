@@ -129,7 +129,8 @@ module.exports = {
         ctx.rotate(startAngle + segmentAngle / 2 + rotationToApply);
         ctx.textAlign = 'right';
         ctx.fillStyle = '#000000';
-        ctx.font = 'bold 26px Poppins, sans-serif';
+        // FIX: Added quotes around 'Poppins' and ensured a safe fallback for rendering stability
+        ctx.font = 'bold 26px "Poppins", sans-serif'; 
         ctx.fillText(option.substring(0, 25), radius - 40, 10);
         ctx.restore();
 
