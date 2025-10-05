@@ -1,4 +1,4 @@
-// commands/warnlist.js (REPLACE - Removed ephemeral, Premium GUI)
+// commands/warnlist.js (REPLACE - Removed ephemeral, Premium GUI + User Tagging)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -8,7 +8,7 @@ module.exports = {
     .setDescription('View warnings of a user.')
     .addUserOption(option =>
       option.setName('target')
-        .setDescription('User  to view warnings for')
+        .setDescription('User to view warnings for')
         .setRequired(true)),
   async execute(interaction) {
     const targetUser = interaction.options.getUser('target');
@@ -16,7 +16,10 @@ module.exports = {
 
     let user = await User.findOne({ userId: targetUser.id });
     if (!user || !user.warnings.length) {
-      return interaction.editReply({ content: `✅ **No Warnings:** ${targetUser.tag} has no warnings on record.`, ephemeral: false });
+      return interaction.editReply({ 
+        content: `${targetUser} has **no warnings** on record. ✅`, 
+        ephemeral: false 
+      });
     }
 
     const embed = new EmbedBuilder()
@@ -28,11 +31,12 @@ module.exports = {
 
     user.warnings.forEach((warn, i) => {
         // Truncate long reasons
-        const reason = warn.reason.length > 50 ? warn.reason.substring(0, 47) + '...' : warn.reason;
+        const reason = warn.reason.length > 80 ? warn.reason.substring(0, 77) + '...' : warn.reason;
 
       embed.addFields({
         name: `Warning #${i + 1}`,
-        value: `Reason: \`${reason}\`\nModerator: <@${warn.moderatorId}>\nDate: <t:${Math.floor(new Date(warn.date).getTime() / 1000)}:F>`,
+        value: `**Reason:** \`${reason}\`\n**Moderator:** <@${warn.moderatorId}>\n**Date:** <t:${Math.floor(new Date(warn.date).getTime() / 1000)}:F>`,
+        inline: false
       });
     });
 
