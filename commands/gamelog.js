@@ -1,4 +1,4 @@
-// commands/gamelog.js (REPLACE - Fixed option order, Premium GUI)
+// commands/gamelog.js (REPLACE - Updated options and improved GUI)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 module.exports = {
@@ -7,20 +7,20 @@ module.exports = {
     .setDescription('Log details of a game session.')
     .addStringOption(option => // 1. REQUIRED
       option.setName('host')
-        .setDescription('The host of the game')
+        .setDescription('The main host of the game')
         .setRequired(true))
-    .addStringOption(option => // 2. REQUIRED (Moved up)
-      option.setName('participants')
-        .setDescription('List of participants (e.g., User1, User2, User3)')
+    .addStringOption(option => // 2. Optional (Moved up for clarity)
+        option.setName('cohost')
+          .setDescription('The co-host of the game (optional)')
+          .setRequired(false))
+    .addStringOption(option => // 3. REQUIRED
+      option.setName('initial_members')
+        .setDescription('Number or list of members at the start')
         .setRequired(true))
-    .addStringOption(option => // 3. REQUIRED (Moved up)
-      option.setName('time_hosted')
-        .setDescription('When the game was hosted (e.g., 2023-10-27 19:00 UTC)')
+    .addStringOption(option => // 4. REQUIRED
+      option.setName('final_members')
+        .setDescription('Number or list of members at the end')
         .setRequired(true))
-    .addStringOption(option => // 4. Optional
-      option.setName('cohost')
-        .setDescription('The co-host of the game')
-        .setRequired(false))
     .addStringOption(option => // 5. Optional
       option.setName('guide')
         .setDescription('The guide for the game')
@@ -38,25 +38,26 @@ module.exports = {
     await interaction.deferReply({ ephemeral: false }); 
 
     const host = interaction.options.getString('host');
-    const participants = interaction.options.getString('participants');
-    const timeHosted = interaction.options.getString('time_hosted');
     const cohost = interaction.options.getString('cohost');
+    const initialMembers = interaction.options.getString('initial_members');
+    const finalMembers = interaction.options.getString('final_members');
     const guide = interaction.options.getString('guide');
     const medic = interaction.options.getString('medic');
     const image = interaction.options.getAttachment('image');
 
     const embed = new EmbedBuilder()
-      .setTitle('📢 Official Game Session Log')
-      .setColor(0x3498DB)
-      .setAuthor({ name: interaction.guild.name, iconURL: interaction.guild.iconURL({ dynamic: true }) })
+      .setTitle('👑 Official Game Session Log')
+      .setColor(0xFFD700) // Gold
+      .setAuthor({ name: `Game Hosted by ${host}`, iconURL: interaction.guild.iconURL({ dynamic: true }) })
+      .setDescription(`A summary of the recent game session has been logged by ${interaction.user}.`)
       .addFields(
-        { name: 'Host(s) 👑', value: `${host}` + (cohost ? ` & ${cohost}` : ''), inline: false },
-        { name: 'Support Staff 🤝', value: `Guide: ${guide || 'N/A'}, Medic: ${medic || 'N/A'}`, inline: false },
-        { name: 'Time Hosted 🕒', value: timeHosted, inline: false },
-        { name: 'Participants 👥', value: participants },
+        { name: 'Host(s) 🧑‍💻', value: `Main Host: **${host}**\nCo-Host: **${cohost || 'N/A'}**`, inline: false },
+        { name: 'Attendance 📈', value: `Initial: **${initialMembers}**\nFinal: **${finalMembers}**`, inline: true },
+        { name: 'Support Staff 🤝', value: `Guide: **${guide || 'N/A'}**\nMedic: **${medic || 'N/A'}**`, inline: true },
+        // Removed: { name: 'Time Hosted 🕒', value: timeHosted, inline: false },
       )
       .setTimestamp()
-      .setFooter({ text: `Logged by ${interaction.user.tag}` });
+      .setFooter({ text: `Logged by ${interaction.user.tag} | Game Log System` });
 
     if (image) {
       embed.setImage(image.url);
