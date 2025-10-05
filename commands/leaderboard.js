@@ -1,12 +1,22 @@
-// commands/leaderboard.js (REPLACE - Fixed Member Display Name Logic)
+// commands/leaderboard.js (REPLACE - Fixed Member Display Name Logic + Syntax fix)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('leaderboard')
-// ... (data remains the same)
-  async execute(interaction) {
+    .setDescription('View leaderboards for XP, coins, or streaks.')
+    .addStringOption(option =>
+      option.setName('type')
+        .setDescription('Leaderboard type')
+        .setRequired(true)
+        .addChoices(
+          { name: 'XP/Level', value: 'xp' },
+          { name: 'Coins', value: 'coins' },
+          { name: 'Cookies', value: 'cookies' }, // NEW
+          { name: 'Daily Streak', value: 'streak' },
+        )),
+  execute: async (interaction) => { // FIX: Changed 'async execute(interaction)' to 'execute: async (interaction)'
     const type = interaction.options.getString('type');
     await interaction.deferReply();
 
@@ -14,7 +24,6 @@ module.exports = {
     let title;
     let emoji;
 
-    // ... (logic for fetching users and setting title/emoji remains the same)
     if (type === 'xp') {
       users = await User.find().sort({ level: -1, xp: -1 }).limit(10);
       title = '🚀 XP/Level Leaderboard';
