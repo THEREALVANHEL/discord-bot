@@ -45,11 +45,14 @@ async function endPoll(channel, messageId, client, interaction, isManual = false
         }
     }
     
+    // Sort results by vote count descending
+    results.sort((a, b) => b.count - a.count);
+
     const winnerText = winningOptions.map(w => w.text).join(' & ');
     
     // Final result embed
     const resultEmbed = new EmbedBuilder()
-        .setTitle(`✅ Poll Ended: ${message.embeds[0].title.substring(2).trim()}`)
+        .setTitle(`✅ Poll Ended: ${message.embeds[0].title.substring(5).trim()}`)
         .setDescription(results.map(r => 
             `**${r.emoji} ${r.text}:** ${r.count} votes (${((r.count / totalVotes) * 100).toFixed(1)}%)`
         ).join('\n') || 'No votes recorded.')
@@ -136,7 +139,7 @@ module.exports = {
 
         const pollOptions = options.map((opt, index) => `${emojiList[index]} **${opt}**`).join('\n');
         
-        const typeText = multiChoice ? 'Multi-Choice Allowed' : 'Single Choice';
+        const typeText = multiChoice ? 'Multi-Choice Allowed' : 'Single Choice Enforced';
 
         const embed = new EmbedBuilder()
             .setTitle(`🗳️ Poll: ${title}`)
