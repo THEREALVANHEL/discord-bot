@@ -37,7 +37,7 @@ module.exports = {
 
       const embed = new EmbedBuilder()
         .setTitle('💸 Robbery Successful!')
-        .setDescription(`${interaction.user} successfully pickpocketed **${amount} coins** from ${targetUser}!`)
+        .setDescription(`**${interaction.user}** successfully pickpocketed **${amount} coins** from **${targetUser}**!`)
         .addFields(
           { name: 'Gains', value: `+${amount} 💰`, inline: true },
           { name: 'Your New Balance', value: `${robber.coins} 💰`, inline: true },
@@ -55,7 +55,7 @@ module.exports = {
 
       const embed = new EmbedBuilder()
         .setTitle('🚨 Robbery Failed!')
-        .setDescription(`${interaction.user} tried to rob ${targetUser} but was caught and had to pay a **${penalty} coin** fine!`)
+        .setDescription(`**${interaction.user}** tried to rob **${targetUser}** but was caught and had to pay a **${penalty} coin** fine!`)
         .addFields(
           { name: 'Penalty', value: `-${penalty} 💰`, inline: true },
           { name: 'Your New Balance', value: `${robber.coins} 💰`, inline: true }
