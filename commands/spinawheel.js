@@ -1,4 +1,4 @@
-// commands/spinawheel.js (REPLACE - Fixed Winner Display + Syntax fix + Robust Deferral)
+// commands/spinawheel.js (REPLACE - Fixed Winner Display + Syntax fix + Robust Deferral + Canvas Image Fix)
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createCanvas } = require('canvas'); 
 const User = require('../models/User');
@@ -30,7 +30,7 @@ module.exports = {
             .setRequired(true))
     .addStringOption(option =>
       option.setName('options')
-        .setDescription('Comma-separated options (2-10, e.g., "Red,Blue,Green")')
+        .setDescription('Comma-separated options (2-10, e.g., "Red,Blue,Win 100 coins")')
         .setRequired(false)),
   execute: async (interaction) => { // FIX: Changed 'async execute(interaction)' to 'execute: async (interaction) =>'
     await interaction.deferReply({ ephemeral: false }); // FIX: Ensure robust deferral with ephemeral: false
@@ -52,6 +52,9 @@ module.exports = {
 
     // Apply prize logic early to ensure prizeMsg is available for fallback
     let prizeMsg = 'No prize awarded.';
+    let prizeApplied = false;
+    
+    // Apply prize logic
     if (selectedOption.toLowerCase().includes('coins')) {
         const match = selectedOption.match(/(\d+)/);
         const prizeCoins = match ? parseInt(match[1]) : 0;
@@ -63,18 +66,26 @@ module.exports = {
              user.coins += prizeCoins;
              prizeMsg = `**+${prizeCoins} coins** 💰! Total: ${user.coins} coins.`;
         }
+        prizeApplied = true;
     } else if (selectedOption.toLowerCase().includes('xp')) {
         const match = selectedOption.match(/(\d+)/);
         const prizeXp = match ? parseInt(match[1]) : 0;
         user.xp += prizeXp;
         prizeMsg = `**+${prizeXp} XP** ✨!`;
+        prizeApplied = true;
     } else if (selectedOption.toLowerCase().includes('cookie')) {
         const match = selectedOption.match(/(\d+)/);
         const prizeCookies = match ? parseInt(match[1]) : 0;
         user.cookies += prizeCookies;
         prizeMsg = `**+${prizeCookies} cookies** 🍪!`;
+        prizeApplied = true;
     } else {
-        prizeMsg = `You won **${selectedOption}**! (Item effect is pending implementation)`;
+        // NEW: Handle non-currency/xp options gracefully
+        if (selectedOption.toLowerCase().includes('nothing')) {
+            prizeMsg = 'You won nothing! Better luck next time.';
+        } else {
+            prizeMsg = `You won **${selectedOption}**! (Item effect for this text is pending implementation)`;
+        }
     }
     await user.save(); // Save the result
 
@@ -85,7 +96,7 @@ module.exports = {
       const centerY = canvas.height / 2;
       const radius = 350;
 
-      // Ensure white background explicitly to prevent black image issues
+      // FIX: Ensure white background explicitly to prevent black image issues
       ctx.fillStyle = '#FFFFFF'; 
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
