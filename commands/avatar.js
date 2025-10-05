@@ -21,7 +21,7 @@ module.exports = {
             { name: 'Server/Guild Avatar', value: 'server' },
             { name: 'Global/User Avatar', value: 'global' }
         )),
-  // FIX: Changed function declaration syntax to an arrow function for compatibility
+  // FIX: Using arrow function syntax for robust deployment
   execute: async (interaction) => {
     const targetUserMention = interaction.options.getUser('target');
     const targetUserId = interaction.options.getString('user_id');
@@ -57,18 +57,18 @@ module.exports = {
         avatarType = 'Global/User';
     } else {
         // Case 2: Server requested AND member exists.
-        // Get the URL that is *displayed* on the server (custom server avatar, or global fallback).
+        // Use member.displayAvatarURL(), which gives the custom server avatar if set, 
+        // or the global avatar as the server default fallback.
         avatarUrl = member.displayAvatarURL({ dynamic: true, size: 512 });
         
-        // Determine the actual type shown by checking for a *custom* server avatar.
-        // member.avatarURL() is used here specifically because it returns NULL if no custom server avatar is set.
+        // Determine the text description: is the current avatar a custom server avatar?
+        // member.avatarURL() returns the custom server avatar URL or null.
         const customServerAvatarUrl = member.avatarURL({ dynamic: true, size: 512 });
         
         if (customServerAvatarUrl) {
-            // User has a custom server avatar set.
             avatarType = 'Server/Guild';
         } else {
-            // User has no custom server avatar set, so the image is their global avatar.
+            // No custom server avatar set, so the image is their global avatar.
             avatarType = 'Global/User (Server Default)';
         }
     }
