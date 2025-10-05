@@ -54,19 +54,17 @@ client.config = {
     { cookies: 3000, roleId: '1371001806930579518' },
     { cookies: 5000, roleId: '1371004762761461770' },
   ],
-  // UPDATED: New Job Progression Structure
+  // NEW Job Progression Structure based on successfulWorks for promotion
   workProgression: [
-    // Level | Job Title | Min Level | Max Level | XP Reward Range | Coin Reward Range | Success Rate (%) | Job ID
-    { level: 0, title: 'Intern', minLevel: 0, maxLevel: 9, xpReward: [5, 10], coinReward: [5, 10], successRate: 95, id: 'intern' },
-    { level: 10, title: 'Junior Developer', minLevel: 10, maxLevel: 19, xpReward: [10, 15], coinReward: [10, 15], successRate: 90, id: 'junior_dev' },
-    { level: 20, title: 'Software Developer', minLevel: 20, maxLevel: 29, xpReward: [15, 25], coinReward: [15, 25], successRate: 85, id: 'software_dev' },
-    { level: 30, title: 'Senior Developer', minLevel: 30, maxLevel: 49, xpReward: [25, 40], coinReward: [25, 40], successRate: 75, id: 'senior_dev' },
-    { level: 50, title: 'Team Lead', minLevel: 50, maxLevel: 99, xpReward: [40, 60], coinReward: [40, 60], successRate: 65, id: 'team_lead' },
-    { level: 100, title: 'Engineering Manager', minLevel: 100, maxLevel: 199, xpReward: [60, 90], coinReward: [60, 90], successRate: 55, id: 'eng_manager' },
-    { level: 200, title: 'Director', minLevel: 200, maxLevel: 299, xpReward: [90, 130], coinReward: [90, 130], successRate: 45, id: 'director' },
-    { level: 300, title: 'VP of Engineering', minLevel: 300, maxLevel: 449, xpReward: [130, 180], coinReward: [130, 180], successRate: 35, id: 'vp_eng' },
-    { level: 450, title: 'CTO', minLevel: 450, maxLevel: 999, xpReward: [180, 250], coinReward: [180, 250], successRate: 25, id: 'cto' },
-    { level: 1000, title: 'Tech Legend', minLevel: 1000, maxLevel: Infinity, xpReward: [250, 400], coinReward: [250, 400], successRate: 15, id: 'tech_legend' },
+    // Job Title | Min Level | Min Works for promotion | XP Reward Range | Coin Reward Range | Success Rate (%) | Job ID
+    { title: 'Scavenger', minLevel: 0, minWorks: 0, xpReward: [5, 10], coinReward: [10, 20], successRate: 90, id: 'scavenger' },
+    { title: 'Miner', minLevel: 5, minWorks: 10, xpReward: [10, 15], coinReward: [25, 40], successRate: 85, id: 'miner' },
+    { title: 'Hunter', minLevel: 10, minWorks: 25, xpReward: [15, 25], coinReward: [40, 60], successRate: 80, id: 'hunter' },
+    { title: 'Courier', minLevel: 15, minWorks: 50, xpReward: [25, 40], coinReward: [60, 90], successRate: 75, id: 'courier' },
+    { title: 'Technician', minLevel: 25, minWorks: 100, xpReward: [40, 60], coinReward: [90, 130], successRate: 65, id: 'technician' },
+    { title: 'Engineer', minLevel: 40, minWorks: 200, xpReward: [60, 90], coinReward: [130, 180], successRate: 55, id: 'engineer' },
+    { title: 'Data Scientist', minLevel: 60, minWorks: 350, xpReward: [90, 130], coinReward: [180, 250], successRate: 45, id: 'data_scientist' },
+    { title: 'Tech Legend', minLevel: 100, minWorks: 550, xpReward: [130, 200], coinReward: [250, 400], successRate: 35, id: 'tech_legend' },
   ],
   shopItems: [
     { id: 'xp_boost_1h', name: '1 Hour XP Boost', description: 'Gain 2x XP for 1 hour.', price: 500, type: 'boost' },
