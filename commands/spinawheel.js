@@ -1,11 +1,8 @@
-// commands/spinawheel.js (REPLACE - Fixed Black Image/Font Issue)
+// commands/spinawheel.js (REPLACE - Made options compulsory, removed default/prize logic)
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createCanvas, registerFont } = require('canvas');
 const path = require('path');
 const User = require('../models/User');
-
-// REMOVED FONT REGISTRATION: It appears the deployment environment is not loading the font correctly, 
-// causing rendering issues. We will rely on a safer font stack in ctx.font instead.
 
 // Function to draw a winning arrow pointer
 function drawPointer(ctx, centerX, centerY, radius, color) {
@@ -32,7 +29,8 @@ module.exports = {
     .addStringOption(option =>
       option.setName('options')
         .setDescription('Comma-separated options (2–10, e.g., "Win 10 coins, Lose 5 coins, Nothing")')
-        .setRequired(false)
+        // FIX: Made options required
+        .setRequired(true) 
     ),
 
   execute: async (interaction) => {
@@ -40,13 +38,15 @@ module.exports = {
 
     const title = interaction.options.getString('title');
     const rawOptions = interaction.options.getString('options');
-    let options = rawOptions ? rawOptions.split(',').map(o => o.trim()) : [
-      'Win 100 coins', 'Lose 50 coins', 'Cookie +5', 'Nothing :(', 'XP +10', 'Rare Item'
-    ];
-    options = options.filter(Boolean).slice(0, 10);
-    if (options.length < 2) options = ['Win 100 coins', 'Nothing :('];
+    // FIX: Removed default options and min length checks
+    let options = rawOptions.split(',').map(o => o.trim()).filter(Boolean).slice(0, 10);
+    
+    if (options.length < 2) {
+      // Re-check for minimum length after processing, just in case user provides only one option
+      return interaction.editReply({ content: '❌ **Error:** Please provide at least two comma-separated options.', ephemeral: true });
+    }
 
-    // Fetch or create user in MongoDB
+    // Fetch or create user in MongoDB (kept for general consistency, even if coins/xp aren't directly used by this command anymore)
     let user = await User.findOne({ userId: interaction.user.id });
     if (!user) {
       user = new User({ userId: interaction.user.id, coins: 0, cookies: 0, xp: 0 });
@@ -58,34 +58,10 @@ module.exports = {
     const selectedOption = options[selectedIndex];
 
     // Prize logic
-    let prizeMsg = 'No prize awarded.';
-    if (selectedOption.toLowerCase().includes('coin')) {
-      const match = selectedOption.match(/(\d+)/);
-      const amount = match ? parseInt(match[1]) : 0;
-      if (selectedOption.toLowerCase().includes('lose')) {
-        user.coins = Math.max(0, user.coins - amount);
-        prizeMsg = `**-${amount} coins** 💰! Total: ${user.coins}`;
-      } else {
-        user.coins += amount;
-        prizeMsg = `**+${amount} coins** 💰! Total: ${user.coins}`;
-      }
-    } else if (selectedOption.toLowerCase().includes('cookie')) {
-      const match = selectedOption.match(/(\d+)/);
-      const amount = match ? parseInt(match[1]) : 0;
-      user.cookies += amount;
-      prizeMsg = `**+${amount} cookies** 🍪! Total: ${user.cookies}`;
-    } else if (selectedOption.toLowerCase().includes('xp')) {
-      const match = selectedOption.match(/(\d+)/);
-      const amount = match ? parseInt(match[1]) : 0;
-      user.xp += amount;
-      prizeMsg = `**+${amount} XP** ✨!`;
-    } else if (selectedOption.toLowerCase().includes('nothing')) {
-      prizeMsg = 'You won nothing! Better luck next time.';
-    } else {
-      prizeMsg = `You won **${selectedOption}**! (Item effect pending)`;
-    }
-
-    await user.save();
+    // FIX: Simplified prize logic to simply announce the result
+    const prizeMsg = `You won **${selectedOption}**! (Reward handled externally)`;
+    
+    // NOTE: Removed `await user.save()` as coins/cookies/xp are no longer modified here.
 
     try {
       // Canvas setup
@@ -126,7 +102,7 @@ module.exports = {
         ctx.rotate(startAngle + segmentAngle / 2 + rotationToApply);
         ctx.textAlign = 'right';
         ctx.fillStyle = '#000000';
-        // FINAL FIX: Using a simple, non-aliased font stack for reliability
+        // Using a simple, non-aliased font stack for reliability
         ctx.font = 'bold 26px sans-serif'; 
         ctx.fillText(option.substring(0, 25), radius - 40, 10);
         ctx.restore();
