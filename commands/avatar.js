@@ -1,3 +1,4 @@
+// commands/avatar.js (REPLACE - Fixed Server vs. Global Avatar Distinction)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 module.exports = {
@@ -12,7 +13,7 @@ module.exports = {
       option.setName('user_id')
         .setDescription('User ID to get avatar of (works for non-members)')
         .setRequired(false))
-    .addStringOption(option => // NEW: Option to choose avatar type
+    .addStringOption(option => // Option to choose avatar type
         option.setName('type')
         .setDescription('Choose between the Server/Guild Avatar or the Global/User Avatar.')
         .setRequired(false)
@@ -23,51 +24,49 @@ module.exports = {
   async execute(interaction) {
     const targetUserMention = interaction.options.getUser('target');
     const targetUserId = interaction.options.getString('user_id');
-    // Default to 'server' to show the most relevant avatar first
     const type = interaction.options.getString('type') || 'server'; 
     let user;
-    let member;
 
     await interaction.deferReply();
 
-    // Prioritize User ID lookup, then mention
+    // 1. Fetch User (Global Profile)
     if (targetUserId) {
         try {
             user = await interaction.client.users.fetch(targetUserId);
-            member = interaction.guild.members.cache.get(user.id) || await interaction.guild.members.fetch(user.id).catch(() => null);
         } catch (error) {
             return interaction.editReply({ content: '❌ **Error:** Could not find a user with that ID.', ephemeral: true });
         }
     } else if (targetUserMention) {
         user = targetUserMention; 
-        member = interaction.guild.members.cache.get(user.id) || await interaction.guild.members.fetch(user.id).catch(() => null);
     } else {
         user = interaction.user; 
-        member = interaction.member;
     }
     
+    // 2. Fetch Member (Server Profile) - Required for server-specific avatar logic
+    const member = interaction.guild.members.cache.get(user.id) || await interaction.guild.members.fetch(user.id).catch(() => null);
+
     let avatarUrl;
     let avatarType;
 
-    // Logic to select the correct URL
-    if (type === 'global' || !member || !member.avatarURL()) {
-        // 1. If 'global' is explicitly requested
-        // 2. If the user is not a member of the current guild (no member object)
-        // 3. If the user has no custom guild avatar set
+    // 3. Logic to select the correct URL
+    if (type === 'global' || !member) {
+        // Case 1: Global explicitly requested, OR the user is not a member of the guild.
+        // Use the user's primary global avatar.
         avatarUrl = user.displayAvatarURL({ dynamic: true, size: 512 });
         avatarType = 'Global/User';
     } else {
-        // If 'server' is requested AND the member exists AND has a custom guild avatar
-        // Note: member.displayAvatarURL() falls back to the guild avatar, but member.avatarURL()
-        // specifically returns the guild avatar URL or null if none is set. 
-        // We use member.displayAvatarURL() which is the most reliable source for the server-context avatar.
-        avatarUrl = member.displayAvatarURL({ dynamic: true, size: 512 });
+        // Case 2: Server requested AND member exists.
+        // member.avatarURL() returns the custom server avatar URL or null if none is set.
+        const customServerAvatarUrl = member.avatarURL({ dynamic: true, size: 512 });
         
-        // This checks if the guild avatar is DIFFERENT from the global one
-        if (member.avatarURL() && member.avatarURL() !== user.avatarURL()) {
-             avatarType = 'Server/Guild (Custom)';
+        if (customServerAvatarUrl) {
+            // User has a custom server avatar set.
+            avatarUrl = customServerAvatarUrl;
+            avatarType = 'Server/Guild';
         } else {
-             avatarType = 'Global/User (As Server)';
+            // User has no custom server avatar, so use their global one, but note the distinction.
+            avatarUrl = user.displayAvatarURL({ dynamic: true, size: 512 });
+            avatarType = 'Global/User (Default Server)';
         }
     }
     
