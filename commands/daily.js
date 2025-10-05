@@ -1,4 +1,4 @@
-// commands/daily.js (REPLACE - Premium GUI + Level Up Channel + Harder XP Formula)
+// commands/daily.js (REPLACE - Added 7-Day Streak Bonus Logic)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -27,21 +27,39 @@ module.exports = {
       return interaction.editReply({ content: `⏱️ You can claim your daily reward again in **${timeLeft}**.`, ephemeral: true });
     }
 
-    const coinsEarned = Math.floor(Math.random() * 50) + 50;
-    const xpEarned = Math.floor(Math.random() * 20) + 10;
+    let coinsEarned = Math.floor(Math.random() * 50) + 50;
+    let xpEarned = Math.floor(Math.random() * 20) + 10;
+    let streakBonus = '';
     
     // Streak logic
     const now = new Date();
+    let currentStreak = 1;
     if (user.lastDaily) {
         const lastDailyTime = user.lastDaily.getTime();
         if (now.getTime() - lastDailyTime < ms('48h')) {
-            user.dailyStreak = (user.dailyStreak || 0) + 1;
+            // Continued streak
+            currentStreak = (user.dailyStreak || 0) + 1;
         } else {
-            user.dailyStreak = 1;
+            // Broken streak, reset to 1
+            currentStreak = 1;
         }
     } else {
-        user.dailyStreak = 1;
+        currentStreak = 1;
     }
+    
+    // 7-Day Streak Bonus Logic
+    if (currentStreak % 7 === 0) {
+        coinsEarned *= 2; // Double the reward
+        xpEarned *= 2;     // Double the reward
+        streakBonus = `\n\n**✨ 7-Day Mega-Bonus!** You received **double** rewards!`;
+        
+        // Keep the high streak in DB for leaderboard, but reset to 1 for the next reward cycle
+        user.dailyStreak = currentStreak; 
+        currentStreak = 1; // Set current streak to 1 for the reward calculation in the next day
+    } else {
+        user.dailyStreak = currentStreak;
+    }
+
 
     user.coins += coinsEarned;
     user.xp += xpEarned;
@@ -91,7 +109,7 @@ module.exports = {
 
     const embed = new EmbedBuilder()
       .setTitle('🎁 Daily Reward Claimed!')
-      .setDescription(`You received your daily spoils!`)
+      .setDescription(`You received your daily spoils!${streakBonus}`)
       .addFields(
         { name: 'Coins Earned', value: `${coinsEarned} 💰`, inline: true },
         { name: 'XP Earned', value: `${xpEarned} ✨`, inline: true },
