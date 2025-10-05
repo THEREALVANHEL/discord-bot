@@ -1,4 +1,4 @@
-\// commands/removewarn.js (REPLACE - Added modlog for single and all removals + Fixed Syntax + Made Public)
+// commands/removewarn.js (REPLACE - Added modlog for single and all removals + Fixed Syntax + Made Public)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
