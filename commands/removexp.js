@@ -1,4 +1,4 @@
-// commands/removexp.js (REPLACE - Premium GUI + Leveling + Harder XP Formula + User Tagging)
+// commands/removexp.js (REPLACE - Fixed infinite role add/remove loop)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -50,21 +50,34 @@ module.exports = {
         }
         user.level = tempLevel;
 
-        // Assign leveling roles if level changed
+        // Assign leveling roles if level changed (FIXED logic)
         if (leveledDown) {
             const member = interaction.guild.members.cache.get(targetUser.id);
             if (member) {
               const levelingRoles = interaction.client.config.levelingRoles;
+              
+              // FIX: Find the single highest eligible role
+              const targetLevelRole = levelingRoles
+                  .filter(r => r.level <= user.level)
+                  .sort((a, b) => b.level - a.level)[0];
+              
+              const targetLevelRoleId = targetLevelRole ? targetLevelRole.roleId : null;
+
               for (const roleConfig of levelingRoles) {
-                if (member.roles.cache.has(roleConfig.roleId)) {
-                  await member.roles.remove(roleConfig.roleId).catch(() => {});
-                }
-              }
-              const newLevelRole = levelingRoles
-                .filter(r => r.level <= user.level)
-                .sort((a, b) => b.level - a.level)[0];
-              if (newLevelRole) {
-                await member.roles.add(newLevelRole.roleId).catch(() => {});
+                  const roleId = roleConfig.roleId;
+                  const hasRole = member.roles.cache.has(roleId);
+                  
+                  if (roleId === targetLevelRoleId) {
+                      // If this is the correct role but the user doesn't have it, add it.
+                      if (!hasRole) {
+                          await member.roles.add(roleId).catch(() => {});
+                      }
+                  } else {
+                      // If the user has a different leveling role, remove it.
+                      if (hasRole) {
+                          await member.roles.remove(roleId).catch(() => {});
+                      }
+                  }
               }
             }
             levelDownMsg = `\n\n**📉 Level DOWN!** ${targetUser} has dropped to **Level ${user.level}**!`;
