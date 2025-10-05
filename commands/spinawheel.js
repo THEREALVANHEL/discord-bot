@@ -1,166 +1,166 @@
-// commands/spinawheel.js (REPLACE - Fixed Winner Display + Syntax fix + Robust Deferral + Canvas Image Fix)
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
-const { createCanvas } = require('canvas'); 
+const { createCanvas, registerFont } = require('canvas');
+const path = require('path');
 const User = require('../models/User');
 
-// Function to draw a winning arrow pointing to a specific segment
-function drawPointer(ctx, centerX, centerY, radius, color) {
-    ctx.save();
-    ctx.translate(centerX, centerY);
+// Optional: Register custom font if available
+try {
+  registerFont(path.join(__dirname, '../assets/fonts/Poppins-Bold.ttf'), { family: 'Poppins' });
+} catch {
+  console.warn('⚠️ Poppins font not found, using default sans-serif.');
+}
 
-    // Draw an arrow pointing to the 12 o'clock position (where the fixed winner will be)
-    ctx.beginPath();
-    ctx.moveTo(0, -radius - 30);
-    ctx.lineTo(-20, -radius + 10);
-    ctx.lineTo(20, -radius + 10);
-    ctx.closePath();
-    ctx.fillStyle = color;
-    ctx.fill();
-    
-    ctx.restore();
+// Function to draw a winning arrow pointer
+function drawPointer(ctx, centerX, centerY, radius, color) {
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  ctx.beginPath();
+  ctx.moveTo(0, -radius - 25);
+  ctx.lineTo(-20, -radius + 10);
+  ctx.lineTo(20, -radius + 10);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.restore();
 }
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('spinawheel')
-    .setDescription('Spin the wheel for a random prize!')
+    .setDescription('Spin a colorful wheel for a random prize!')
     .addStringOption(option =>
-        option.setName('title')
-            .setDescription('The title for the wheel.')
-            .setRequired(true))
+      option.setName('title')
+        .setDescription('The title for the wheel.')
+        .setRequired(true))
     .addStringOption(option =>
       option.setName('options')
-        .setDescription('Comma-separated options (2-10, e.g., "Red,Blue,Win 100 coins")')
-        .setRequired(false)),
-  execute: async (interaction) => { // FIX: Changed 'async execute(interaction)' to 'execute: async (interaction) =>'
-    await interaction.deferReply({ ephemeral: false }); // FIX: Ensure robust deferral with ephemeral: false
+        .setDescription('Comma-separated options (2–10, e.g., "Win 10 coins, Lose 5 coins, Nothing")')
+        .setRequired(false)
+    ),
+
+  execute: async (interaction) => {
+    await interaction.deferReply({ ephemeral: false });
+
     const title = interaction.options.getString('title');
-
-    let user = await User.findOne({ userId: interaction.user.id });
-    if (!user) {
-      user = new User({ userId: interaction.user.id });
-      await user.save(); // Ensure user exists before saving changes
-    }
-
-    let options = interaction.options.getString('options') ? interaction.options.getString('options').split(',').map(o => o.trim()) : ['Win 100 coins', 'Level Boost +10 XP', 'Nothing :(', 'Cookie +5', 'Rare Item!', 'Lose 20 coins'];
-    options = options.filter(Boolean).slice(0, 10); // Filter empty strings and limit to 10
+    const rawOptions = interaction.options.getString('options');
+    let options = rawOptions ? rawOptions.split(',').map(o => o.trim()) : [
+      'Win 100 coins', 'Lose 50 coins', 'Cookie +5', 'Nothing :(', 'XP +10', 'Rare Item'
+    ];
+    options = options.filter(Boolean).slice(0, 10);
     if (options.length < 2) options = ['Win 100 coins', 'Nothing :('];
 
-    // Randomly select the winning index before drawing the wheel
+    // Fetch or create user in MongoDB
+    let user = await User.findOne({ userId: interaction.user.id });
+    if (!user) {
+      user = new User({ userId: interaction.user.id, coins: 0, cookies: 0, xp: 0 });
+      await user.save();
+    }
+
+    // Pick winner
     const selectedIndex = Math.floor(Math.random() * options.length);
     const selectedOption = options[selectedIndex];
 
-    // Apply prize logic early to ensure prizeMsg is available for fallback
+    // Prize logic
     let prizeMsg = 'No prize awarded.';
-    let prizeApplied = false;
-    
-    // Apply prize logic
-    if (selectedOption.toLowerCase().includes('coins')) {
-        const match = selectedOption.match(/(\d+)/);
-        const prizeCoins = match ? parseInt(match[1]) : 0;
-        
-        if (selectedOption.toLowerCase().includes('lose')) {
-             user.coins = Math.max(0, user.coins - prizeCoins);
-             prizeMsg = `**-${prizeCoins} coins** 💰! Total: ${user.coins} coins.`;
-        } else {
-             user.coins += prizeCoins;
-             prizeMsg = `**+${prizeCoins} coins** 💰! Total: ${user.coins} coins.`;
-        }
-        prizeApplied = true;
-    } else if (selectedOption.toLowerCase().includes('xp')) {
-        const match = selectedOption.match(/(\d+)/);
-        const prizeXp = match ? parseInt(match[1]) : 0;
-        user.xp += prizeXp;
-        prizeMsg = `**+${prizeXp} XP** ✨!`;
-        prizeApplied = true;
+    if (selectedOption.toLowerCase().includes('coin')) {
+      const match = selectedOption.match(/(\d+)/);
+      const amount = match ? parseInt(match[1]) : 0;
+      if (selectedOption.toLowerCase().includes('lose')) {
+        user.coins = Math.max(0, user.coins - amount);
+        prizeMsg = `**-${amount} coins** 💰! Total: ${user.coins}`;
+      } else {
+        user.coins += amount;
+        prizeMsg = `**+${amount} coins** 💰! Total: ${user.coins}`;
+      }
     } else if (selectedOption.toLowerCase().includes('cookie')) {
-        const match = selectedOption.match(/(\d+)/);
-        const prizeCookies = match ? parseInt(match[1]) : 0;
-        user.cookies += prizeCookies;
-        prizeMsg = `**+${prizeCookies} cookies** 🍪!`;
-        prizeApplied = true;
+      const match = selectedOption.match(/(\d+)/);
+      const amount = match ? parseInt(match[1]) : 0;
+      user.cookies += amount;
+      prizeMsg = `**+${amount} cookies** 🍪! Total: ${user.cookies}`;
+    } else if (selectedOption.toLowerCase().includes('xp')) {
+      const match = selectedOption.match(/(\d+)/);
+      const amount = match ? parseInt(match[1]) : 0;
+      user.xp += amount;
+      prizeMsg = `**+${amount} XP** ✨!`;
+    } else if (selectedOption.toLowerCase().includes('nothing')) {
+      prizeMsg = 'You won nothing! Better luck next time.';
     } else {
-        // NEW: Handle non-currency/xp options gracefully
-        if (selectedOption.toLowerCase().includes('nothing')) {
-            prizeMsg = 'You won nothing! Better luck next time.';
-        } else {
-            prizeMsg = `You won **${selectedOption}**! (Item effect for this text is pending implementation)`;
-        }
+      prizeMsg = `You won **${selectedOption}**! (Item effect pending)`;
     }
-    await user.save(); // Save the result
+
+    await user.save();
 
     try {
+      // Canvas setup
       const canvas = createCanvas(800, 800);
       const ctx = canvas.getContext('2d');
       const centerX = canvas.width / 2;
       const centerY = canvas.height / 2;
       const radius = 350;
 
-      // FIX: Ensure white background explicitly to prevent black image issues
-      ctx.fillStyle = '#FFFFFF'; 
+      // White background fix
+      ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'];
-
       const segmentAngle = (2 * Math.PI) / options.length;
-      let startAngle = 0;
 
-      // Calculate the rotation needed to make the *selected* segment appear at the top (3/2 * PI)
+      // Calculate rotation so winner aligns with arrow (top)
       const winningCenterAngle = selectedIndex * segmentAngle + segmentAngle / 2;
       const rotationToApply = (3 * Math.PI / 2) - winningCenterAngle;
 
+      let startAngle = 0;
 
-      // Draw wheel segments
-      options.forEach((option, index) => {
-        const color = colors[index % colors.length];
-        ctx.fillStyle = color;
+      // Draw segments + labels
+      for (let i = 0; i < options.length; i++) {
+        const color = colors[i % colors.length];
+        const option = options[i];
+
         ctx.beginPath();
         ctx.moveTo(centerX, centerY);
-        
-        // Draw the segment with the applied rotation
         ctx.arc(centerX, centerY, radius, startAngle + rotationToApply, startAngle + segmentAngle + rotationToApply);
         ctx.closePath();
+        ctx.fillStyle = color;
         ctx.fill();
 
-        // Text on segment
+        // Text
         ctx.save();
         ctx.translate(centerX, centerY);
-        // Rotate to the center of the segment + rotation to make it point up (Math.PI/2)
-        ctx.rotate(startAngle + segmentAngle / 2 + rotationToApply + Math.PI / 2); 
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#000000'; // Ensure text is black/visible
-        ctx.font = 'bold 24px sans-serif'; 
-        ctx.fillText(option.substring(0, 15), 0, -radius / 1.5); // Truncate long text
+        ctx.rotate(startAngle + segmentAngle / 2 + rotationToApply);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#000000';
+        ctx.font = 'bold 26px Poppins, sans-serif';
+        ctx.fillText(option.substring(0, 25), radius - 40, 10);
         ctx.restore();
 
         startAngle += segmentAngle;
-      });
+      }
 
-      // Draw border
+      // Border
+      ctx.lineWidth = 10;
+      ctx.strokeStyle = '#333';
       ctx.beginPath();
       ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
-      ctx.lineWidth = 15; // Thicker border
-      ctx.strokeStyle = '#333333';
       ctx.stroke();
-      
-      // Draw center circle
+
+      // Center circle
       ctx.beginPath();
       ctx.arc(centerX, centerY, 50, 0, 2 * Math.PI);
       ctx.fillStyle = '#FF4500';
       ctx.fill();
-      
-      // Draw pointer (arrow at top center, fixed)
-      drawPointer(ctx, centerX, centerY, radius, '#FF4500'); // Red pointer
+
+      // Pointer (arrow)
+      drawPointer(ctx, centerX, centerY, radius, '#FF4500');
 
       const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'wheel.png' });
 
       const embed = new EmbedBuilder()
         .setTitle(`🎰 ${title}`)
-        .setDescription(`The wheel spun and landed on the section pointed to by the red arrow.`)
+        .setDescription('The wheel spun and landed on the section pointed to by the red arrow.')
         .addFields(
-            { name: '🎉 Winning Option', value: `**${selectedOption}**`, inline: true},
-            { name: '🎁 Your Reward', value: prizeMsg, inline: true},
-            { name: '⚙️ All Options', value: options.map((opt, i) => `${i + 1}. ${opt}`).join('\n').substring(0, 1024), inline: false}
+          { name: '🎉 Winning Option', value: `**${selectedOption}**`, inline: true },
+          { name: '🎁 Your Reward', value: prizeMsg, inline: true },
+          { name: '⚙️ All Options', value: options.map((o, i) => `${i + 1}. ${o}`).join('\n').substring(0, 1024) }
         )
         .setColor(0xFFD700)
         .setImage('attachment://wheel.png')
@@ -169,15 +169,13 @@ module.exports = {
 
       await interaction.editReply({ embeds: [embed], files: [attachment] });
 
-    } catch (error) {
-      console.error('Wheel error:', error);
-      // Fallback to text if Canvas fails
+    } catch (err) {
+      console.error('❌ Wheel render failed:', err);
       const fallbackEmbed = new EmbedBuilder()
         .setTitle('🎰 Wheel Spun! (Fallback)')
-        .setDescription(`**Result:** **${selectedOption}**\n\n**Note:** The wheel visual failed to render. Prize was still applied: ${prizeMsg}.`)
-        .setColor(0xFFD700)
-        .setTimestamp();
+        .setDescription(`Result: **${selectedOption}**\n\nPrize applied: ${prizeMsg}`)
+        .setColor(0xFFD700);
       await interaction.editReply({ embeds: [fallbackEmbed] });
     }
-  },
+  }
 };
