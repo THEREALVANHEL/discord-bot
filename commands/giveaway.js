@@ -39,9 +39,11 @@ async function endGiveaway(client, giveaway) {
 
     const winnerMentions = winners.map(id => `<@${id}>`).join(', ');
 
+    const giveawayTitle = giveaway.title || giveaway.prize; // Use the stored title, fallback to prize if missing
+
     const endEmbed = new EmbedBuilder()
         // FIX: Title is now descriptive for the end result
-        .setTitle(`🎉 Giveaway Ended: ${giveaway.prize}`) 
+        .setTitle(`🎉 Giveaway Ended: ${giveawayTitle}`) 
         .setDescription(`**Prize:** ${giveaway.prize}\n\n**Winner(s):** ${winnerMentions}`)
         .addFields(
             // The final embed shows the true, filtered count
@@ -60,6 +62,10 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('giveaway')
     .setDescription('Start a giveaway.')
+    .addStringOption(option => // NEW: Title option
+      option.setName('title')
+        .setDescription('A custom title for the giveaway (e.g., Summer Event, Milestone)')
+        .setRequired(true))
     .addStringOption(option =>
       option.setName('duration')
         .setDescription('Duration (e.g., 1h, 30m)')
@@ -76,6 +82,8 @@ module.exports = {
     // FIX 1: Defer reply immediately for stability against Discord timeouts
     await interaction.deferReply({ ephemeral: true }); 
 
+    // Get the new title option
+    const title = interaction.options.getString('title'); 
     const durationStr = interaction.options.getString('duration');
     const prize = interaction.options.getString('prize');
     const winnersCount = interaction.options.getInteger('winners');
@@ -90,8 +98,8 @@ module.exports = {
     
     // Initial Embed: Set Total Entries to 0 to avoid unstable fetch/update logic
     const initialEmbed = new EmbedBuilder()
-      // FIX: Use a descriptive title for the live giveaway
-      .setTitle(`🎁 Official Giveaway for: ${prize}`) 
+      // FIX: Use a descriptive title for the live giveaway, incorporating the new title
+      .setTitle(`🎁 ${title}: ${prize}`) 
       .setDescription(`**Prize:** ${prize}\n\n**To Enter:** React with 🎁\n**Ends:** <t:${Math.floor((Date.now() + durationMs) / 1000)}:R>`)
       .addFields(
         { name: 'Winners', value: `${winnersCount}`, inline: true },
@@ -110,7 +118,8 @@ module.exports = {
     const giveawayData = {
         channelId: interaction.channel.id,
         messageId: giveawayMessage.id,
-        prize: prize, // Storing prize here
+        prize: prize, 
+        title: title, // NEW: Store the custom title
         winnersCount: winnersCount,
         endTime: Date.now() + durationMs,
     };
