@@ -4,6 +4,16 @@ const { createCanvas, registerFont } = require('canvas');
 const path = require('path');
 const User = require('../models/User');
 
+// FIX: Register the custom font from the assets folder once on load.
+try {
+    // path.join(__dirname, '../assets/fonts/Poppins-Bold.ttf') points to the uploaded font file.
+    registerFont(path.join(__dirname, '../assets/fonts/Poppins-Bold.ttf'), { family: 'Poppins-Bold' });
+} catch (e) {
+    console.error("Failed to register Poppins-Bold font. Falling back to default:", e);
+    // The fallback font below will be used if registration fails.
+}
+
+
 // Function to draw a winning arrow pointer
 function drawPointer(ctx, centerX, centerY, radius, color) {
   ctx.save();
@@ -102,8 +112,8 @@ module.exports = {
         ctx.rotate(startAngle + segmentAngle / 2 + rotationToApply);
         ctx.textAlign = 'right';
         ctx.fillStyle = '#000000';
-        // Using a simple, non-aliased font stack for reliability
-        ctx.font = 'bold 26px sans-serif'; 
+        // FIX: Use the registered font for stability
+        ctx.font = 'bold 26px Poppins-Bold, sans-serif'; 
         ctx.fillText(option.substring(0, 25), radius - 40, 10);
         ctx.restore();
 
