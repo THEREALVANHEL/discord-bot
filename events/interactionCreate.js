@@ -31,13 +31,16 @@ module.exports = {
     const config = client.config;
     const settings = await Settings.findOne({ guildId: interaction.guild.id });
 
+    // FIX: Safely access roles object to prevent TypeError
+    const roles = config.roles || {};
+    
     // Admin roles
-    const isAdmin = member.roles.cache.has(config.roles.forgottenOne) || member.roles.cache.has(config.roles.overseer);
+    const isAdmin = member.roles.cache.has(roles.forgottenOne) || member.roles.cache.has(roles.overseer);
     // Mod roles
-    const isLeadMod = member.roles.cache.has(config.roles.leadMod);
-    const isMod = isLeadMod || member.roles.cache.has(config.roles.mod);
+    const isLeadMod = member.roles.cache.has(roles.leadMod);
+    const isMod = isLeadMod || member.roles.cache.has(roles.mod);
     // Gamelog roles
-    const isHost = member.roles.cache.has(config.roles.gamelogUser) || member.roles.cache.has(config.roles.headHost);
+    const isHost = member.roles.cache.has(roles.gamelogUser) || member.roles.cache.has(roles.headHost);
 
     // Cooldown system (existing)
     const command = client.commands.get(interaction.commandName);
@@ -95,7 +98,7 @@ module.exports = {
       }
 
       // Cookie/XP Manager checks
-      if (['addcookies', 'removecookies', 'addcookiesall', 'removecookiesall', 'addxp', 'removexp', 'addcoins', 'removecoins'].includes(cmdName) && !member.roles.cache.has(config.roles.cookiesManager) && !isAdmin) {
+      if (['addcookies', 'removecookies', 'addcookiesall', 'removecookiesall', 'addxp', 'removexp', 'addcoins', 'removecoins'].includes(cmdName) && !member.roles.cache.has(roles.cookiesManager) && !isAdmin) {
         return interaction.reply({ content: '🍪 You do not have permission to use this currency command.', ephemeral: true });
       }
 
@@ -209,8 +212,8 @@ module.exports = {
           permissionOverwrites: [
             { id: interaction.guild.id, deny: ['ViewChannel'] },
             { id: interaction.user.id, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'] },
-            { id: config.roles.leadMod, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'] },
-            { id: config.roles.mod, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'] },
+            { id: roles.leadMod, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'] },
+            { id: roles.mod, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'] },
           ],
         });
 
@@ -231,7 +234,7 @@ module.exports = {
           .setColor(0x0099FF)
           .setTimestamp();
           
-        const modPings = [config.roles.leadMod, config.roles.mod]
+        const modPings = [roles.leadMod, roles.mod]
                           .filter(id => id)
                           .map(id => `<@&${id}>`).join(' ');
 
