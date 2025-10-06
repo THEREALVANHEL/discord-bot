@@ -1,9 +1,10 @@
-// commands/gamble.js (REPLACE - Premium GUI, Cooldown 30s)
+// commands/gamble.js (FIXED - Added missing .setName('gamble'))
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
 module.exports = {
   data: new SlashCommandBuilder()
+    .setName('gamble') // <-- FIXED: This was missing and caused the serialization error
     // FIX: Updated description to reflect RNG odds
     .setDescription('Gamble coins with completely random odds (5% to 75% win chance).')
     .addIntegerOption(option =>
