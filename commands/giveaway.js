@@ -107,8 +107,8 @@ module.exports = {
           const winnerMentions = winners.map(id => `<@${id}>`).join(', ');
           
           const endEmbed = new EmbedBuilder()
-            // FIX: Use the prize for the title
-            .setTitle(`🎉 Giveaway Concluded: ${giveaway.prize}`)
+            // FIX: Title changed from "Giveaway Concluded: [Prize]" to "Giveaway: [Prize]"
+            .setTitle(`🎉 Giveaway: ${giveaway.prize}`)
             .setDescription(`**Prize:** ${giveaway.prize}\n\n**Winner(s):** ${winnerMentions}`)
             .addFields(
                 // The final embed shows the true, filtered count
