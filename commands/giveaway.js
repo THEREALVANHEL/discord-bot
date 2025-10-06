@@ -57,7 +57,7 @@ module.exports = {
     client.giveaways.set(giveawayMessage.id, {
       channelId: interaction.channel.id,
       messageId: giveawayMessage.id,
-      prize: prize,
+      prize: prize, // Storing prize here
       winnersCount: winnersCount,
       endTime: Date.now() + durationMs,
     });
@@ -107,7 +107,8 @@ module.exports = {
           const winnerMentions = winners.map(id => `<@${id}>`).join(', ');
           
           const endEmbed = new EmbedBuilder()
-            .setTitle('🎉 Giveaway Concluded!')
+            // FIX: Use the prize for the title
+            .setTitle(`🎉 Giveaway Concluded: ${giveaway.prize}`)
             .setDescription(`**Prize:** ${giveaway.prize}\n\n**Winner(s):** ${winnerMentions}`)
             .addFields(
                 // The final embed shows the true, filtered count
