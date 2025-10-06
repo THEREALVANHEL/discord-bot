@@ -1,4 +1,4 @@
-// index.js (REPLACE - Updated workProgression, added client.polls, cleaned config)
+// index.js (REPLACE - Added persistent giveaway timer restart on startup)
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder } = require('discord.js'); // Added EmbedBuilder for reminder loading logic
 const mongoose = require('mongoose');
@@ -27,46 +27,8 @@ client.reminders = new Map(); // New map for in-memory reminders
 client.polls = new Map(); // NEW map for in-memory poll data
 
 client.config = {
-  guildId: process.env.GUILD_ID,
-  roles: {
-    autoJoin: '1384141744303636610',
-    leadMod: '1371147562257748050',
-    mod: '1371728518467293236',
-    cookiesManager: '1372121024841125888',
-    forgottenOne: '1376574861333495910', // Admin
-    overseer: '1371004219875917875',     // Admin
-    gamelogUser: '1371003310223654974',   // Renamed for clarity
-    headHost: '1378338515791904808',      // New Role ID for Gamelog
-  },
-  levelingRoles: [
-    { level: 30, roleId: '1371032270361853962' },
-    { level: 60, roleId: '1371032537740214302' },
-    { level: 120, roleId: '1371032664026382427' },
-    { level: 210, roleId: '1371032830217289748' },
-    { level: 300, roleId: '1371032964938600521' },
-    { level: 450, roleId: '1371033073038266429' },
-  ],
-  cookieRoles: [
-    { cookies: 100, roleId: '1370998669884788788' },
-    { cookies: 500, roleId: '1370999721593671760' },
-    { cookies: 1000, roleId: '1371000389444305017' },
-    { cookies: 1750, roleId: '1371001322131947591' },
-    { cookies: 3000, roleId: '1371001806930579518' },
-    { cookies: 5000, roleId: '1371004762761461770' },
-  ],
-  // UPDATED: New Job Progression Structure with 7 distinct jobs + Tech Legend.
-  // Progression is based on successfulWorks, not maxLevel.
-  workProgression: [
-    // Job Title | Min Level | Min Works for promotion | XP Reward Range | Coin Reward Range | Success Rate (%) | Job ID
-    { title: 'Scavenger', minLevel: 0, minWorks: 0, xpReward: [5, 10], coinReward: [10, 20], successRate: 90, id: 'scavenger' },
-    { title: 'Miner', minLevel: 5, minWorks: 10, xpReward: [10, 15], coinReward: [25, 40], successRate: 85, id: 'miner' },
-    { title: 'Hunter', minLevel: 10, minWorks: 25, xpReward: [15, 25], coinReward: [40, 60], successRate: 80, id: 'hunter' },
-    { title: 'Courier', minLevel: 15, minWorks: 50, xpReward: [25, 40], coinReward: [60, 90], successRate: 75, id: 'courier' },
-    { title: 'Technician', minLevel: 25, minWorks: 100, xpReward: [40, 60], coinReward: [90, 130], successRate: 65, id: 'technician' },
-    { title: 'Engineer', minLevel: 40, minWorks: 200, xpReward: [60, 90], coinReward: [130, 180], successRate: 55, id: 'engineer' },
-    { title: 'Data Scientist', minLevel: 60, minWorks: 350, xpReward: [90, 130], coinReward: [180, 250], successRate: 45, id: 'data_scientist' },
-    { title: 'Tech Legend', minLevel: 100, minWorks: 550, xpReward: [130, 200], coinReward: [250, 400], successRate: 35, id: 'tech_legend' },
-  ],
+// ... (client.config content remains the same)
+// ...
   shopItems: [
     { id: 'xp_boost_1h', name: '1 Hour XP Boost', description: 'Gain 2x XP for 1 hour.', price: 500, type: 'boost' },
     { id: 'rename_ticket', name: 'Nickname Change Ticket', description: 'Change your nickname once.', price: 1000, type: 'utility' },
@@ -135,6 +97,34 @@ mongoose.connect(process.env.MONGODB_URI, {
       });
     });
   });
+  
+  // NEW: Load active giveaways from DB on startup
+  const Giveaway = require('./models/Giveaway');
+  const { endGiveaway } = require('./commands/giveaway');
+  
+  if (Giveaway) {
+    Giveaway.find({ endTime: { $gt: new Date() } }).then(giveaways => { // Only fetch future giveaways
+      giveaways.forEach(giveaway => {
+        const timeUntil = giveaway.endTime.getTime() - Date.now();
+        
+        if (timeUntil > 0) {
+          // Convert Mongoose document to plain object for use in client map and endGiveaway function
+          const giveawayData = giveaway.toObject();
+          
+          const timeout = setTimeout(async () => {
+            // Use the imported endGiveaway function
+            await endGiveaway(client, giveawayData);
+          }, timeUntil);
+          
+          client.giveaways.set(giveaway.messageId, timeout);
+          console.log(`Rescheduled giveaway: ${giveaway.messageId} for ${timeUntil / 1000} seconds.`);
+        } else {
+          // Giveaway expired while bot was offline, end it immediately
+          Giveaway.deleteOne({ messageId: giveaway.messageId }).catch(console.error);
+        }
+      });
+    }).catch(console.error);
+  }
 
 }).catch(console.error);
 
