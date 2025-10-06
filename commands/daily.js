@@ -14,7 +14,7 @@ module.exports = {
     .setName('daily')
     .setDescription('Claim your daily coins and XP!'),
   execute: async (interaction) => { // FIX: Changed 'async execute(interaction)' to 'execute: async (interaction) =>' for deployment stability
-    const cooldown = ms('24h');
+    // REMOVED: const cooldown = ms('24h');
     let user = await User.findOne({ userId: interaction.user.id });
     await interaction.deferReply();
 
@@ -22,17 +22,28 @@ module.exports = {
       user = new User({ userId: interaction.user.id });
     }
 
-    if (user.lastDaily && cooldown - (Date.now() - user.lastDaily.getTime()) > 0) {
-      const timeLeft = ms(cooldown - (Date.now() - user.lastDaily.getTime()), { long: true });
-      return interaction.editReply({ content: `⏱️ You can claim your daily reward again in **${timeLeft}**.`, ephemeral: true });
+    // --- NEW: Midnight Reset Logic (UTC) ---
+    const now = new Date();
+    // Get the start of today in UTC (00:00:00.000 UTC of the current date)
+    const startOfTodayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+    if (user.lastDaily && user.lastDaily.getTime() >= startOfTodayUTC.getTime()) {
+      // Already claimed today (UTC date check)
+      
+      // Calculate time left until next UTC midnight (start of tomorrow UTC)
+      const startOfTomorrowUTC = new Date(startOfTodayUTC.getTime() + ms('24h'));
+      const timeLeft = ms(startOfTomorrowUTC.getTime() - now.getTime(), { long: true });
+
+      return interaction.editReply({ content: `⏱️ You can claim your daily reward again in **${timeLeft}** (resets at UTC midnight).`, ephemeral: true });
     }
+    // --- END NEW LOGIC ---
 
     let coinsEarned = Math.floor(Math.random() * 50) + 50;
     let xpEarned = Math.floor(Math.random() * 20) + 10;
     let streakBonus = '';
     
     // Streak logic
-    const now = new Date();
+    // const now = new Date(); // Moved to top for consistency
     let currentStreak = 1;
     if (user.lastDaily) {
         const lastDailyTime = user.lastDaily.getTime();
