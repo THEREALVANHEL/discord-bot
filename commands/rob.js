@@ -9,7 +9,7 @@ module.exports = {
     .addUserOption(option =>
       option.setName('target')
         .setDescription('User to rob')
-        .setRequired(true)), // <-- COMMA IS CRITICAL HERE
+        .setRequired(true)), // <-- FIXED: Comma added after data property
   // FIX: Cooldown property now correctly placed and delimited.
   cooldown: 600, // 10 minutes 
   async execute(interaction) {
