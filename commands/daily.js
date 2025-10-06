@@ -14,9 +14,12 @@ module.exports = {
     .setName('daily')
     .setDescription('Claim your daily coins and XP!'),
   execute: async (interaction) => { // FIX: Changed 'async execute(interaction)' to 'execute: async (interaction) =>' for deployment stability
+    
+    // FIX: Move deferral to the top to prevent 'Unknown interaction' due to latency.
+    await interaction.deferReply(); 
+
     // REMOVED: const cooldown = ms('24h');
     let user = await User.findOne({ userId: interaction.user.id });
-    await interaction.deferReply();
 
     if (!user) {
       user = new User({ userId: interaction.user.id });
