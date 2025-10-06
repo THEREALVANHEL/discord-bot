@@ -90,7 +90,6 @@ module.exports = {
       }
 
       // Moderation checks (warn, softban, reroll, etc.)
-      // FIX: Added 'reroll' to the moderation commands list
       if (['warn', 'warnlist', 'removewarn', 'softban', 'timeout', 'giveaway', 'purge', 'purgeuser', 'reroll'].includes(cmdName) && !isMod && !isAdmin) {
         return interaction.reply({ content: '🛡️ You do not have permission to use this moderation command.', ephemeral: true });
       }
