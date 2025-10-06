@@ -1,4 +1,4 @@
-// events/interactionCreate.js (REPLACED - Added early Admin exit and simplified giveaway/moderation checks)
+// events/interactionCreate.js (REPLACED - Final attempt at robust Admin bypass and streamlined permissions)
 const { EmbedBuilder } = require('discord.js');
 const Settings = require('../models/Settings');
 
@@ -32,7 +32,7 @@ module.exports = {
     const settings = await Settings.findOne({ guildId: interaction.guild.id });
     const command = client.commands.get(interaction.commandName);
 
-    // FIX (CRASH FIX): Safely access roles object to prevent TypeError
+    // Safely access roles object
     const roles = config.roles || {};
     
     // Admin roles
@@ -47,7 +47,9 @@ module.exports = {
     if (interaction.isChatInputCommand() && command) {
         const cmdName = interaction.commandName;
 
-        // 1. ADMIN BYPASS (Admins have permission to EVERY command)
+        // **CRITICAL FIX:** If Admin, skip all permission checks (the block below).
+        let permissionDenied = false;
+        
         if (!isAdmin) {
             // 2. PERMISSION CHECKS (for Non-Admins)
             
@@ -55,43 +57,72 @@ module.exports = {
             if (cmdName === 'poll') {
                 const subcommand = interaction.options.getSubcommand();
                 if (subcommand === 'result' && !isMod) {
-                  return interaction.reply({ content: '🗳️ Only moderators can manually end a poll and view results.', ephemeral: true });
+                     permissionDenied = true;
                 }
             }
 
             // Lock/Unlock: Only lead mod
-            if (['lock', 'unlock'].includes(cmdName) && !isLeadMod) {
-              return interaction.reply({ content: '🔒 Only lead moderators can use this command.', ephemeral: true });
+            else if (['lock', 'unlock'].includes(cmdName) && !isLeadMod) {
+                 permissionDenied = true;
             }
 
-            // Announce/Poll: Only mod (Applies to /poll create)
-            if (['announce', 'poll'].includes(cmdName) && !isMod) {
-              return interaction.reply({ content: '📢 Only moderators can use this command.', ephemeral: true });
+            // Announce/Poll (create): Only mod
+            else if (['announce', 'poll'].includes(cmdName) && !isMod) {
+                 permissionDenied = true;
             }
             
-            // MODERATION, GIVEAWAY (leadmod/mod now explicitly have /giveaway perm)
-            if (['warn', 'warnlist', 'removewarn', 'softban', 'timeout', 'giveaway', 'purge', 'purgeuser', 'reroll'].includes(cmdName)) {
+            // MODERATION, GIVEAWAY (leadmod/mod)
+            // This block explicitly gives /giveaway permission to Mods.
+            else if (['warn', 'warnlist', 'removewarn', 'softban', 'timeout', 'giveaway', 'purge', 'purgeuser', 'reroll'].includes(cmdName)) {
                 if (!isMod) {
-                    return interaction.reply({ content: '🛡️ You do not have permission to use this moderation command.', ephemeral: true });
+                     permissionDenied = true;
                 }
             }
 
-            // Gamelog: Only host roles
-            if (cmdName === 'gamelog' && !isHost) {
-              return interaction.reply({ content: '🎮 Only Host roles can use this command.', ephemeral: true });
+            // Gamelog
+            else if (cmdName === 'gamelog' && !isHost) {
+                 permissionDenied = true;
             }
 
             // Cookie/XP Manager checks
-            if (['addcookies', 'removecookies', 'addcookiesall', 'removecookiesall', 'addxp', 'removexp', 'addcoins', 'removecoins'].includes(cmdName) && !member.roles.cache.has(roles.cookiesManager)) {
-              return interaction.reply({ content: '🍪 You do not have permission to use this currency command.', ephemeral: true });
+            else if (['addcookies', 'removecookies', 'addcookiesall', 'removecookiesall', 'addxp', 'removexp', 'addcoins', 'removecoins'].includes(cmdName) && !member.roles.cache.has(roles.cookiesManager)) {
+                permissionDenied = true;
             }
 
-            if (cmdName === 'quicksetup') {
-              return interaction.reply({ content: '👑 Only Administrators can use this command.', ephemeral: true });
+            // Quicksetup
+            else if (cmdName === 'quicksetup') {
+                 // Quicksetup requires Admin (which failed in step 1)
+                permissionDenied = true;
             }
         }
         
-        // 3. COOLDOWN CHECK (applies to everyone)
+        // 3. APPLY DENIAL
+        if (permissionDenied) {
+            // Check which denial message to use based on the failed command category
+            const currencyCommands = ['addcookies', 'removecookies', 'addcookiesall', 'removecookiesall', 'addxp', 'removexp', 'addcoins', 'removecoins'];
+            const hostCommands = ['gamelog'];
+            const announceCommands = ['announce', 'poll'];
+            const lockCommands = ['lock', 'unlock'];
+            const quicksetupCommands = ['quicksetup'];
+
+            let denialMessage = '🛡️ You do not have permission to use this moderation command.'; // Default for the largest group
+
+            if (currencyCommands.includes(cmdName)) {
+                denialMessage = '🍪 You do not have permission to use this currency command.';
+            } else if (hostCommands.includes(cmdName)) {
+                denialMessage = '🎮 Only Host roles can use this command.';
+            } else if (announceCommands.includes(cmdName)) {
+                denialMessage = '📢 Only moderators can use this command.';
+            } else if (lockCommands.includes(cmdName)) {
+                denialMessage = '🔒 Only lead moderators can use this command.';
+            } else if (quicksetupCommands.includes(cmdName)) {
+                 denialMessage = '👑 Only Administrators can use this command.';
+            }
+            
+            return interaction.reply({ content: denialMessage, ephemeral: true });
+        }
+
+        // 4. COOLDOWN CHECK (applies to everyone)
         const now = Date.now();
         const cooldownAmount = (command.cooldown || 3) * 1000;
 
@@ -112,7 +143,7 @@ module.exports = {
         setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
 
 
-        // 4. EXECUTE
+        // 5. EXECUTE (Will be reached if permissionDenied is false or if isAdmin was true)
         try {
             await command.execute(interaction, client, logModerationAction);
         } catch (error) {
