@@ -1,10 +1,14 @@
-// commands/giveaway.js (REPLACE - Finalizing Title Strings)
+// commands/giveaway.js (REPLACE - Persistence Added)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const ms = require('ms');
+const Giveaway = require('../models/Giveaway'); // NEW: Import the model
 
 // Helper function to handle the end of a giveaway (external to execute)
 async function endGiveaway(client, giveaway) {
     client.giveaways.delete(giveaway.messageId);
+
+    // NEW: Delete from DB
+    await Giveaway.deleteOne({ messageId: giveaway.messageId }).catch(console.error);
 
     // Fetch the channel; if it fails, the giveaway simply ends without logging
     const channel = await client.channels.fetch(giveaway.channelId).catch(() => null);
@@ -12,6 +16,7 @@ async function endGiveaway(client, giveaway) {
 
     let message;
     try {
+        // Use client.channels.cache.get(giveaway.channelId).messages.fetch(giveaway.messageId) for robustness
         message = await channel.messages.fetch(giveaway.messageId);
     } catch {
         return channel.send(`❌ **Error:** Giveaway message not found for prize: **${giveaway.prize}**.`);
@@ -39,14 +44,12 @@ async function endGiveaway(client, giveaway) {
 
     const winnerMentions = winners.map(id => `<@${id}>`).join(', ');
 
-    const giveawayTitle = giveaway.title || giveaway.prize; // Use the stored title, fallback to prize if missing
+    const giveawayTitle = giveaway.title || giveaway.prize;
 
     const endEmbed = new EmbedBuilder()
-        // FIX: Title is now descriptive for the end result
         .setTitle(`🎉 Giveaway Ended: ${giveawayTitle}`) 
         .setDescription(`**Prize:** ${giveaway.prize}\n\n**Winner(s):** ${winnerMentions}`)
         .addFields(
-            // The final embed shows the true, filtered count
             { name: 'Total Entries', value: `${totalEntries}`, inline: true }
         )
         .setColor(0x00FF00)
@@ -59,10 +62,11 @@ async function endGiveaway(client, giveaway) {
 
 
 module.exports = {
+  endGiveaway: endGiveaway, 
   data: new SlashCommandBuilder()
     .setName('giveaway')
     .setDescription('Start a giveaway.')
-    .addStringOption(option => // NEW: Title option
+    .addStringOption(option => 
       option.setName('title')
         .setDescription('A custom title for the giveaway (e.g., Summer Event, Milestone)')
         .setRequired(true))
@@ -79,10 +83,8 @@ module.exports = {
         .setDescription('Number of winners')
         .setRequired(true)),
   async execute(interaction, client) {
-    // FIX 1: Defer reply immediately for stability against Discord timeouts
     await interaction.deferReply({ ephemeral: true }); 
 
-    // Get the new title option
     const title = interaction.options.getString('title'); 
     const durationStr = interaction.options.getString('duration');
     const prize = interaction.options.getString('prize');
@@ -98,12 +100,10 @@ module.exports = {
     
     // Initial Embed: Set Total Entries to 0 to avoid unstable fetch/update logic
     const initialEmbed = new EmbedBuilder()
-      // FIX: Use a descriptive title for the live giveaway, incorporating the new title
       .setTitle(`🎁 ${title}: ${prize}`) 
       .setDescription(`**Prize:** ${prize}\n\n**To Enter:** React with 🎁\n**Ends:** <t:${Math.floor((Date.now() + durationMs) / 1000)}:R>`)
       .addFields(
         { name: 'Winners', value: `${winnersCount}`, inline: true },
-        // Display 0 non-bot entries until the end result is calculated
         { name: 'Total Entries', value: '0 (Non-bot Participants)', inline: true } 
       )
       .setColor(0xFFD700)
@@ -119,15 +119,22 @@ module.exports = {
         channelId: interaction.channel.id,
         messageId: giveawayMessage.id,
         prize: prize, 
-        title: title, // NEW: Store the custom title
+        title: title, 
         winnersCount: winnersCount,
         endTime: Date.now() + durationMs,
     };
     
-    // Store giveaway info in client.giveaways Map
+    // NEW: Save to DB
+    const newGiveaway = new Giveaway({
+        ...giveawayData,
+        endTime: new Date(giveawayData.endTime), // Ensure Date object
+        creatorId: interaction.user.id,
+    });
+    await newGiveaway.save();
+
+    // Store giveaway info in client.giveaways Map (still used for live timers)
     client.giveaways.set(giveawayMessage.id, giveawayData);
 
-    // Use editReply to confirm the ephemeral deferral
     await interaction.editReply({ content: `✅ **Giveaway Started!** For **${prize}**!`, ephemeral: true });
 
     // FIX 2: Set timeout using the robust helper function pattern
