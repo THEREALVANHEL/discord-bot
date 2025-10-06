@@ -4,9 +4,8 @@ const User = require('../models/User');
 
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName('gamble')
     // FIX: Updated description to reflect RNG odds
-    .setDescription('Gamble coins with completely random odds each time you bet.')
+    .setDescription('Gamble coins with completely random odds (5% to 75% win chance).')
     .addIntegerOption(option =>
       option.setName('amount')
         .setDescription('Amount of coins to gamble')
@@ -21,8 +20,13 @@ module.exports = {
 
     if (user.coins < amount) return interaction.reply({ content: `❌ **Error:** You don't have enough coins. You have ${user.coins} coins.`, ephemeral: true });
 
-    // FIX: RNG odds calculation (generates a float between 0.01 and 0.99)
-    const winChance = Math.random() * 0.98 + 0.01;
+    // FIX: RNG odds calculation: 
+    // Generates a random win chance between 5% (0.05) and 75% (0.75). 
+    // Average win chance: 40% (skewed towards losing, as requested)
+    const MIN_WIN_CHANCE = 0.05; // 5%
+    const MAX_WIN_CHANCE = 0.75; // 75%
+    
+    const winChance = Math.random() * (MAX_WIN_CHANCE - MIN_WIN_CHANCE) + MIN_WIN_CHANCE;
     const winChancePercent = (winChance * 100).toFixed(1);
 
     if (Math.random() < winChance) {
