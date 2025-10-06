@@ -3,7 +3,22 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
 module.exports = {
-// ... (data block)
+  // FIX: Reconstructing and adding the complete data block for /removewarn
+  data: new SlashCommandBuilder()
+    .setName('removewarn')
+    .setDescription('Remove a specific warning or all warnings from a user.')
+    .addUserOption(option =>
+      option.setName('target')
+        .setDescription('The user to remove warnings from')
+        .setRequired(true))
+    .addIntegerOption(option =>
+      option.setName('index')
+        .setDescription('The number of the specific warning to remove (e.g., 1)')
+        .setRequired(false))
+    .addStringOption(option =>
+        option.setName('all_warns')
+          .setDescription('Type "all" to clear all warnings for the user.')
+          .setRequired(false)),
   execute: async (interaction, client, logModerationAction) => { // FIX: Added logModerationAction + Fixed Syntax
     const target = interaction.options.getUser('target');
     const index = interaction.options.getInteger('index');
