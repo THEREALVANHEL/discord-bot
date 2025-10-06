@@ -3,7 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
 module.exports = {
-  // FIX: Reconstructing and adding the complete data block for /removewarn
+  // FIX: Complete data block for /removewarn
   data: new SlashCommandBuilder()
     .setName('removewarn')
     .setDescription('Remove a specific warning or all warnings from a user.')
@@ -41,7 +41,14 @@ module.exports = {
       await user.save();
       
       const embed = new EmbedBuilder()
-// ... (embed creation code)
+        .setTitle('✅ Warnings Cleared')
+        .setDescription(`Moderator ${interaction.user} cleared all **${removedCount}** warnings for ${target}.`)
+        .addFields(
+            { name: 'Target', value: `${target} (\`${target.tag}\`)`, inline: true },
+            { name: 'Removed Warnings', value: `**${removedCount}**`, inline: true }
+        )
+        .setColor(0x00FF00)
+        .setTimestamp();
 
       // Log the moderation action: Clear All Warnings
       const Settings = require('../models/Settings');
@@ -52,13 +59,23 @@ module.exports = {
       await interaction.editReply({ embeds: [embed], ephemeral: false });
 
     } else if (index !== null) {
-// ... (validation code)
+        if (index < 1 || index > user.warnings.length) {
+            return interaction.editReply({ content: `❌ **Error:** Invalid warning index. Must be between 1 and ${user.warnings.length}.`, ephemeral: true });
+        }
+        
+        const removedWarn = user.warnings.splice(index - 1, 1)[0];
+        await user.save();
 
-      const removedWarn = user.warnings.splice(index - 1, 1)[0];
-      await user.save();
-
-      const embed = new EmbedBuilder()
-// ... (embed creation code)
+        const embed = new EmbedBuilder()
+          .setTitle('✅ Warning Removed')
+          .setDescription(`Moderator ${interaction.user} removed warning #${index} for ${target}.`)
+          .addFields(
+              { name: 'Target', value: `${target} (\`${target.tag}\`)`, inline: true },
+              { name: 'Remaining Warnings', value: `**${user.warnings.length}**`, inline: true },
+              { name: 'Reason', value: removedWarn.reason, inline: false }
+          )
+          .setColor(0x00FF00)
+          .setTimestamp();
         
       // Log the moderation action: Single Warning Removed
       const Settings = require('../models/Settings');
