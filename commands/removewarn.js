@@ -19,7 +19,8 @@ module.exports = {
         option.setName('all_warns')
           .setDescription('Type "all" to clear all warnings for the user.')
           .setRequired(false)),
-  execute: async (interaction, client, logModerationAction) => { // FIX: Added logModerationAction + Fixed Syntax
+          
+  execute: async (interaction, client, logModerationAction) => {
     const target = interaction.options.getUser('target');
     const index = interaction.options.getInteger('index');
     const allWarns = interaction.options.getString('all_warns')?.toLowerCase();
@@ -55,7 +56,7 @@ module.exports = {
       const settings = await Settings.findOne({ guildId: interaction.guild.id });
       await logModerationAction(interaction.guild, settings, 'Warnings Cleared', target, interaction.user, 'All warnings removed', `Count: ${removedCount}`);
 
-      // FIX: Public confirmation (visible to everyone)
+      // Public confirmation (visible to everyone)
       await interaction.editReply({ embeds: [embed], ephemeral: false });
 
     } else if (index !== null) {
@@ -82,7 +83,7 @@ module.exports = {
       const settings = await Settings.findOne({ guildId: interaction.guild.id });
       await logModerationAction(interaction.guild, settings, 'Warning Removed', target, interaction.user, removedWarn.reason, `Warning Index: #${index}`);
 
-      // FIX: Public confirmation (visible to everyone)
+      // Public confirmation (visible to everyone)
       await interaction.editReply({ embeds: [embed], ephemeral: false });
 
     } else {
