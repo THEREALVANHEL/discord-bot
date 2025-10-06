@@ -15,16 +15,21 @@ module.exports = {
         .setDescription('The amount of coins to remove')
         .setRequired(true)),
   async execute(interaction) {
+    // FIX: Defer reply immediately to prevent 'Unknown interaction' error due to DB lookup.
+    await interaction.deferReply(); 
+    
     const targetUser = interaction.options.getUser('target');
     const amount = interaction.options.getInteger('amount');
 
     if (amount <= 0) {
-      return interaction.reply({ content: '❌ **Error:** Amount must be a positive number.', ephemeral: true });
+      // FIX: Use editReply after deferring
+      return interaction.editReply({ content: '❌ **Error:** Amount must be a positive number.', ephemeral: true });
     }
 
     let user = await User.findOne({ userId: targetUser.id });
     if (!user) {
-      return interaction.reply({ content: `⚠️ **Warning:** ${targetUser} does not have any coins yet.`, ephemeral: true });
+      // FIX: Use editReply after deferring
+      return interaction.editReply({ content: `⚠️ **Warning:** ${targetUser} does not have any coins yet.`, ephemeral: true });
     }
 
     user.coins = Math.max(0, user.coins - amount);
@@ -41,6 +46,7 @@ module.exports = {
       .setColor(0xFF0000)
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    // FIX: Use editReply after deferring
+    await interaction.editReply({ embeds: [embed] });
   },
 };
