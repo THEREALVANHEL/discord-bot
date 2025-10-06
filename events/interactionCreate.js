@@ -89,8 +89,9 @@ module.exports = {
         return interaction.reply({ content: '🎮 Only Host roles can use this command.', ephemeral: true });
       }
 
-      // Moderation checks (warn, softban, etc.)
-      if (['warn', 'warnlist', 'removewarn', 'softban', 'timeout', 'giveaway', 'purge', 'purgeuser'].includes(cmdName) && !isMod && !isAdmin) {
+      // Moderation checks (warn, softban, reroll, etc.)
+      // FIX: Added 'reroll' to the moderation commands list
+      if (['warn', 'warnlist', 'removewarn', 'softban', 'timeout', 'giveaway', 'purge', 'purgeuser', 'reroll'].includes(cmdName) && !isMod && !isAdmin) {
         return interaction.reply({ content: '🛡️ You do not have permission to use this moderation command.', ephemeral: true });
       }
 
