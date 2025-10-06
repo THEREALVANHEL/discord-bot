@@ -1,4 +1,4 @@
-// events/interactionCreate.js (REPLACED - Fixed syntax and stabilized error handling)
+// events/interactionCreate.js (REPLACED - Added early Admin exit and simplified giveaway/moderation checks)
 const { EmbedBuilder } = require('discord.js');
 const Settings = require('../models/Settings');
 
@@ -30,8 +30,9 @@ module.exports = {
     const member = interaction.member;
     const config = client.config;
     const settings = await Settings.findOne({ guildId: interaction.guild.id });
+    const command = client.commands.get(interaction.commandName);
 
-    // FIX: Safely access roles object to prevent TypeError
+    // Safely access roles object
     const roles = config.roles || {};
     
     // Admin roles
@@ -42,69 +43,96 @@ module.exports = {
     // Gamelog roles
     const isHost = member.roles.cache.has(roles.gamelogUser) || member.roles.cache.has(roles.headHost);
 
-    // Cooldown system (existing)
-    const command = client.commands.get(interaction.commandName);
+    // --- EXECUTE COMMAND LOGIC ---
     if (interaction.isChatInputCommand() && command) {
-      const now = Date.now();
-      const cooldownAmount = (command.cooldown || 3) * 1000;
+        const cmdName = interaction.commandName;
 
-      if (!client.cooldowns.has(command.data.name)) {
-        client.cooldowns.set(command.data.name, new Map());
-      }
+        // NEW: 1. ADMIN BYPASS (forgottenOne & overseer have access to ALL commands)
+        if (isAdmin) {
+             // Skip all permission checks and go straight to cooldown and execution
+        } else {
+            // 2. PERMISSION CHECKS (for Non-Admins)
+            
+            // /poll result requires moderation permissions (Admin/LeadMod/Mod)
+            if (cmdName === 'poll') {
+                const subcommand = interaction.options.getSubcommand();
+                if (subcommand === 'result' && !isMod) {
+                  return interaction.reply({ content: '🗳️ Only moderators can manually end a poll and view results.', ephemeral: true });
+                }
+            }
 
-      const timestamps = client.cooldowns.get(command.data.name);
-      if (timestamps.has(interaction.user.id)) {
-        const expirationTime = timestamps.get(interaction.user.id) + cooldownAmount;
-        if (now < expirationTime) {
-          const timeLeft = (expirationTime - now) / 1000;
-          return interaction.reply({ content: `⏱️ Please wait ${timeLeft.toFixed(1)} more second(s) before reusing the \`${command.data.name}\` command.`, ephemeral: true });
+            // Lock/Unlock: Only lead mod
+            if (['lock', 'unlock'].includes(cmdName) && !isLeadMod) {
+              return interaction.reply({ content: '🔒 Only lead moderators can use this command.', ephemeral: true });
+            }
+
+            // Announce/Poll: Only mod (Applies to /poll create)
+            if (['announce', 'poll'].includes(cmdName) && !isMod) {
+              return interaction.reply({ content: '📢 Only moderators can use this command.', ephemeral: true });
+            }
+            
+            // MODERATION, GIVEAWAY, and CURRENCY MANAGEMENT (Mod or specific role required)
+            if (['warn', 'warnlist', 'removewarn', 'softban', 'timeout', 'giveaway', 'purge', 'purgeuser', 'reroll'].includes(cmdName)) {
+                // FIX: Give leadmod/mod permission to giveaway/moderation commands
+                if (!isMod) {
+                    return interaction.reply({ content: '🛡️ You do not have permission to use this moderation command.', ephemeral: true });
+                }
+            }
+
+            // Gamelog: Only host roles
+            if (cmdName === 'gamelog' && !isHost) {
+              return interaction.reply({ content: '🎮 Only Host roles can use this command.', ephemeral: true });
+            }
+
+            // Cookie/XP Manager checks
+            if (['addcookies', 'removecookies', 'addcookiesall', 'removecookiesall', 'addxp', 'removexp', 'addcoins', 'removecoins'].includes(cmdName) && !member.roles.cache.has(roles.cookiesManager)) {
+              return interaction.reply({ content: '🍪 You do not have permission to use this currency command.', ephemeral: true });
+            }
+
+            if (cmdName === 'quicksetup') {
+              return interaction.reply({ content: '👑 Only Administrators can use this command.', ephemeral: true });
+            }
         }
-      }
+        
+        // 3. COOLDOWN CHECK (applies to everyone unless cooldown is specifically ignored above)
+        const now = Date.now();
+        const cooldownAmount = (command.cooldown || 3) * 1000;
 
-      timestamps.set(interaction.user.id, now);
-      setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
-    }
-
-    // Permission checks
-    if (interaction.isChatInputCommand()) {
-      const cmdName = interaction.commandName;
-      
-      // /poll result requires moderation permissions (Admin/LeadMod/Mod)
-      if (cmdName === 'poll') {
-        const subcommand = interaction.options.getSubcommand();
-        if (subcommand === 'result' && !isMod && !isAdmin) {
-          return interaction.reply({ content: '🗳️ Only moderators can manually end a poll and view results.', ephemeral: true });
+        if (!client.cooldowns.has(command.data.name)) {
+            client.cooldowns.set(command.data.name, new Map());
         }
-      }
 
-      // Lock/Unlock: Only lead mod or admin
-      if (['lock', 'unlock'].includes(cmdName) && !isLeadMod && !isAdmin) {
-        return interaction.reply({ content: '🔒 Only lead moderators can use this command.', ephemeral: true });
-      }
+        const timestamps = client.cooldowns.get(command.data.name);
+        if (timestamps.has(interaction.user.id)) {
+            const expirationTime = timestamps.get(interaction.user.id) + cooldownAmount;
+            if (now < expirationTime) {
+                const timeLeft = (expirationTime - now) / 1000;
+                return interaction.reply({ content: `⏱️ Please wait ${timeLeft.toFixed(1)} more second(s) before reusing the \`${command.data.name}\` command.`, ephemeral: true });
+            }
+        }
 
-      // Announce/Poll: Only mod or admin (Applies to /poll create)
-      if (['announce', 'poll'].includes(cmdName) && !isMod && !isAdmin) {
-        return interaction.reply({ content: '📢 Only moderators can use this command.', ephemeral: true });
-      }
+        timestamps.set(interaction.user.id, now);
+        setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
 
-      // Gamelog: Only host roles or admin
-      if (cmdName === 'gamelog' && !isHost && !isAdmin) {
-        return interaction.reply({ content: '🎮 Only Host roles can use this command.', ephemeral: true });
-      }
 
-      // Moderation checks (warn, softban, reroll, etc.)
-      if (['warn', 'warnlist', 'removewarn', 'softban', 'timeout', 'giveaway', 'purge', 'purgeuser', 'reroll'].includes(cmdName) && !isMod && !isAdmin) {
-        return interaction.reply({ content: '🛡️ You do not have permission to use this moderation command.', ephemeral: true });
-      }
-
-      // Cookie/XP Manager checks
-      if (['addcookies', 'removecookies', 'addcookiesall', 'removecookiesall', 'addxp', 'removexp', 'addcoins', 'removecoins'].includes(cmdName) && !member.roles.cache.has(roles.cookiesManager) && !isAdmin) {
-        return interaction.reply({ content: '🍪 You do not have permission to use this currency command.', ephemeral: true });
-      }
-
-      if (cmdName === 'quicksetup' && !isAdmin) {
-        return interaction.reply({ content: '👑 Only Administrators can use this command.', ephemeral: true });
-      }
+        // 4. EXECUTE
+        try {
+            await command.execute(interaction, client, logModerationAction);
+        } catch (error) {
+            console.error(error);
+            
+            // Error Handling (already wrapped in a try-catch for robustness)
+            try { 
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.followUp({ content: '❌ **Command Error:** There was an error executing that command!', ephemeral: true });
+                } else {
+                    await interaction.reply({ content: '❌ **Command Error:** There was an error executing that command!', ephemeral: true });
+                }
+            } catch (replyError) {
+                console.error('Failed to send interaction error message, likely due to expired/acknowledged interaction:', replyError);
+            }
+        }
+        return; // End of ChatInputCommand logic
     }
 
     // Handle Button Interactions
@@ -249,27 +277,6 @@ module.exports = {
       return;
     }
 
-    // Execute command
-    if (interaction.isChatInputCommand() && command) {
-      try {
-        await command.execute(interaction, client, logModerationAction);
-      } catch (error) {
-        console.error(error);
-        
-        // FIX: Wrap the error reply logic in a try-catch to prevent secondary DiscordAPIError[40060] from crashing the bot
-        try { 
-          if (interaction.replied || interaction.deferred) {
-            // If already replied/deferred, use followUp
-            await interaction.followUp({ content: '❌ **Command Error:** There was an error executing that command!', ephemeral: true });
-          } else {
-            // Otherwise, reply 
-            await interaction.reply({ content: '❌ **Command Error:** There was an error executing that command!', ephemeral: true });
-          }
-        } catch (replyError) {
-             // Log the error that occurred while trying to send the error message, but do not crash the bot.
-             console.error('Failed to send interaction error message, likely due to expired/acknowledged interaction:', replyError);
-        }
-      }
-    }
+    // Since command execution logic was moved up, the fallback here is no longer necessary
   },
 };
