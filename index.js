@@ -1,4 +1,4 @@
-// index.js (REPLACE - Updated workProgression, added client.polls, cleaned config)
+// index.js (REPLACE - Updated workProgression, added client.polls, cleaned config, added PermissionsBitField)
 require('dotenv').config();
 // FIX: Added PermissionsBitField to the imports
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, PermissionsBitField } = require('discord.js'); 
