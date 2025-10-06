@@ -40,7 +40,7 @@ async function endGiveaway(client, giveaway) {
     const winnerMentions = winners.map(id => `<@${id}>`).join(', ');
 
     const endEmbed = new EmbedBuilder()
-        // FIX: Title now dynamically includes the prize name
+        // FIX: Use the prize from the stored giveaway object for the title and description
         .setTitle(`🎉 Giveaway: ${giveaway.prize}`)
         .setDescription(`**Prize:** ${giveaway.prize}\n\n**Winner(s):** ${winnerMentions}`)
         .addFields(
@@ -109,7 +109,7 @@ module.exports = {
     const giveawayData = {
         channelId: interaction.channel.id,
         messageId: giveawayMessage.id,
-        prize: prize, 
+        prize: prize, // Storing prize here
         winnersCount: winnersCount,
         endTime: Date.now() + durationMs,
     };
