@@ -34,14 +34,14 @@ module.exports = {
       return interaction.editReply({ content: '❌ **Error:** Number of winners must be between 1 and 10.' });
     }
     
-    // Initial Embed (will be updated after sending to include current entry count)
+    // Initial Embed: Set Total Entries to 0 to avoid unstable fetch/update logic
     const initialEmbed = new EmbedBuilder()
       .setTitle('🎁 Official Giveaway!')
       .setDescription(`**Prize:** ${prize}\n\n**To Enter:** React with 🎁\n**Ends:** <t:${Math.floor((Date.now() + durationMs) / 1000)}:R>`)
       .addFields(
         { name: 'Winners', value: `${winnersCount}`, inline: true },
-        // FIX 2: Added Total Entries field to show the reaction count excluding the bot
-        { name: 'Total Entries', value: 'Fetching...', inline: true } 
+        // FIX 2: Set initial Total Entries to '0' and rely on final announcement for accurate count
+        { name: 'Total Entries', value: '0 (Non-bot Participants)', inline: true } 
       )
       .setColor(0xFFD700)
       .setTimestamp()
@@ -51,16 +51,8 @@ module.exports = {
     const giveawayMessage = await interaction.channel.send({ embeds: [initialEmbed] });
     await giveawayMessage.react('🎁'); 
 
-    // Fetch reactions after bot has reacted and update the message with the correct count (1 less than total reaction count)
-    const reaction = giveawayMessage.reactions.cache.get('🎁');
-    const currentEntries = reaction ? reaction.count - 1 : 0;
+    // REMOVED: The unstable code block that tried to update the entries immediately.
     
-    // Update the embed with the correct starting entry count (0, or reaction.count -1 if people reacted before bot)
-    initialEmbed.data.fields = initialEmbed.data.fields.filter(f => f.name !== 'Total Entries');
-    initialEmbed.addFields({ name: 'Total Entries', value: `${currentEntries}`, inline: true });
-    await giveawayMessage.edit({ embeds: [initialEmbed] });
-
-
     // Store giveaway info in client.giveaways Map
     client.giveaways.set(giveawayMessage.id, {
       channelId: interaction.channel.id,
@@ -97,7 +89,7 @@ module.exports = {
           }
 
           const users = await reaction.users.fetch();
-          // FIX 3: Filter participants to ensure only unique non-bot IDs are counted
+          // The end logic correctly filters participants
           const participants = users.filter(user => !user.bot).map(user => user.id);
           const totalEntries = participants.length; 
 
