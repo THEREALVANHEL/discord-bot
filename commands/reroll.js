@@ -1,4 +1,4 @@
-// commands/reroll.js (REPLACE - Giveaway Reroll Command with exclusion and fixed title)
+// commands/reroll.js (REPLACE - Improved Prize Extraction)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 module.exports = {
@@ -41,12 +41,17 @@ module.exports = {
     
     if (message.embeds && message.embeds.length > 0) {
         const embed = message.embeds[0];
-        // Extract prize from description or title, matching giveaway.js structure
+        
+        // FIX: Improve prize extraction to reliably strip the leading emoji and spaces from the title.
         const prizeMatch = embed.description ? embed.description.match(/Prize:\s\*\*(.*?)\*\*/i) : null;
         if (prizeMatch && prizeMatch[1]) {
-            prize = prizeMatch[1];
+            prize = prizeMatch[1]; // Prefer prize from description field if available
         } else if (embed.title) {
-            prize = embed.title.replace('🎁 Official Giveaway!', 'Prize');
+            // Strip leading emoji (🎁) and any whitespace to get the prize string
+            const titleWithoutEmoji = embed.title.replace(/🎁\s*/, '').trim(); 
+            if (titleWithoutEmoji) {
+                prize = titleWithoutEmoji; // Use stripped title as fallback prize
+            }
         }
     }
     
@@ -57,7 +62,7 @@ module.exports = {
         .filter(user => !user.bot && user.id !== excludedUser.id)
         .map(user => user.id);
         
-    // const totalEntries = participants.length; // Not needed for final output string
+    const totalEntries = participants.length;
 
     if (participants.length === 0) {
       return interaction.editReply({ content: `⚠️ **Reroll Failed:** No valid participants to draw from, or all remaining participants were the excluded user(s).` });
@@ -70,10 +75,22 @@ module.exports = {
 
     const newWinnerMentions = newWinners.map(id => `<@${id}>`).join(', ');
 
+    const endEmbed = new EmbedBuilder()
+      // Use the now correctly extracted prize string
+      .setTitle(`✨ Giveaway Reroll: ${prize}`)
+      .setDescription(`**Prize:** ${prize}\n\n**Excluded Winner:** ${excludedUser}\n**New Winner:** ${newWinnerMentions}`)
+      .addFields(
+          { name: 'Original Winners Count', value: 'N/A (Reroll)', inline: true },
+          { name: 'Total Eligible Entries', value: `${totalEntries}`, inline: true },
+          { name: 'Rerolled By', value: `${interaction.user.tag}`, inline: true }
+      )
+      .setColor(0x00BFFF)
+      .setTimestamp();
+      
     // Send a simple, short ephemeral message
     await interaction.editReply({ content: `✅ **Reroll Complete!** Announcing new winner publicly.` });
     
-    // FIX: Announce ONLY the required string content.
-    channel.send(`🎉 **REROLL!** ${newWinnerMentions} has replaced ${excludedUser} as a winner for **${prize}**!`);
+    // Announce the full embed publicly
+    channel.send({ content: `🎉 **REROLL!** ${newWinnerMentions} has replaced ${excludedUser} as a winner for **${prize}**!`, embeds: [endEmbed] });
   },
 };
