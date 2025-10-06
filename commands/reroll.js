@@ -1,4 +1,4 @@
-// commands/reroll.js (REPLACE - Improved Prize Extraction)
+// commands/reroll.js (REPLACE - Removed the secondary embed/table display)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 module.exports = {
@@ -42,8 +42,7 @@ module.exports = {
     if (message.embeds && message.embeds.length > 0) {
         const embed = message.embeds[0];
         
-        // FIX: Re-simplify prize extraction. Prioritize the Prize field in the description, 
-        // then fall back to stripping emojis from the title.
+        // Prioritize the Prize field in the description, then fall back to stripping emojis from the title.
         const prizeMatch = embed.description ? embed.description.match(/Prize:\s\*\*(.*?)\*\*/i) : null;
         if (prizeMatch && prizeMatch[1]) {
             prize = prizeMatch[1]; 
@@ -61,8 +60,8 @@ module.exports = {
         .filter(user => !user.bot && user.id !== excludedUser.id)
         .map(user => user.id);
         
-    const totalEntries = participants.length;
-
+    // const totalEntries = participants.length; // No longer needed
+    
     if (participants.length === 0) {
       return interaction.editReply({ content: `⚠️ **Reroll Failed:** No valid participants to draw from, or all remaining participants were the excluded user(s).` });
     }
@@ -74,24 +73,10 @@ module.exports = {
 
     const newWinnerMentions = newWinners.map(id => `<@${id}>`).join(', ');
 
-    const endEmbed = new EmbedBuilder()
-      // FIX: Use the cleaner prize string only in the title
-      .setTitle(`✨ Reroll Winner: ${prize}`)
-      .setDescription(`**New Winner:** ${newWinnerMentions}\n**Excluded:** ${excludedUser}\n**Total Eligible Entries:** ${totalEntries}`)
-      .addFields(
-          // FIX: Removed unnecessary fields to make it simpler
-          { name: 'Rerolled By', value: `${interaction.user.tag}`, inline: true }
-      )
-      .setColor(0x00BFFF)
-      .setTimestamp();
-      
-    // FIX: Send a simple, short ephemeral message
+    // Send a simple, short ephemeral message
     await interaction.editReply({ content: `✅ **Reroll Complete!** New winner announced publicly.` });
     
-    // FIX: Announce the result publicly in a single, clean line of text
+    // Announce the result publicly in a single, clean line of text
     channel.send(`🎉 **REROLL!** ${newWinnerMentions} has replaced ${excludedUser} as the new winner for **${prize}**!`);
-    
-    // Send the full embed as a secondary message
-    channel.send({ embeds: [endEmbed] }).catch(console.error);
   },
 };
