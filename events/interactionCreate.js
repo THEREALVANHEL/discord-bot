@@ -32,7 +32,7 @@ module.exports = {
     const settings = await Settings.findOne({ guildId: interaction.guild.id });
     const command = client.commands.get(interaction.commandName);
 
-    // Safely access roles object
+    // FIX (CRASH FIX): Safely access roles object to prevent TypeError
     const roles = config.roles || {};
     
     // Admin roles
@@ -43,17 +43,15 @@ module.exports = {
     // Gamelog roles
     const isHost = member.roles.cache.has(roles.gamelogUser) || member.roles.cache.has(roles.headHost);
 
-    // --- EXECUTE COMMAND LOGIC ---
+    // --- COMMAND LOGIC ---
     if (interaction.isChatInputCommand() && command) {
         const cmdName = interaction.commandName;
 
-        // NEW: 1. ADMIN BYPASS (forgottenOne & overseer have access to ALL commands)
-        if (isAdmin) {
-             // Skip all permission checks and go straight to cooldown and execution
-        } else {
+        // 1. ADMIN BYPASS (Admins have permission to EVERY command)
+        if (!isAdmin) {
             // 2. PERMISSION CHECKS (for Non-Admins)
             
-            // /poll result requires moderation permissions (Admin/LeadMod/Mod)
+            // /poll result requires moderation permissions
             if (cmdName === 'poll') {
                 const subcommand = interaction.options.getSubcommand();
                 if (subcommand === 'result' && !isMod) {
@@ -71,9 +69,8 @@ module.exports = {
               return interaction.reply({ content: '📢 Only moderators can use this command.', ephemeral: true });
             }
             
-            // MODERATION, GIVEAWAY, and CURRENCY MANAGEMENT (Mod or specific role required)
+            // MODERATION, GIVEAWAY (leadmod/mod now explicitly have /giveaway perm)
             if (['warn', 'warnlist', 'removewarn', 'softban', 'timeout', 'giveaway', 'purge', 'purgeuser', 'reroll'].includes(cmdName)) {
-                // FIX: Give leadmod/mod permission to giveaway/moderation commands
                 if (!isMod) {
                     return interaction.reply({ content: '🛡️ You do not have permission to use this moderation command.', ephemeral: true });
                 }
@@ -94,7 +91,7 @@ module.exports = {
             }
         }
         
-        // 3. COOLDOWN CHECK (applies to everyone unless cooldown is specifically ignored above)
+        // 3. COOLDOWN CHECK (applies to everyone)
         const now = Date.now();
         const cooldownAmount = (command.cooldown || 3) * 1000;
 
@@ -121,7 +118,7 @@ module.exports = {
         } catch (error) {
             console.error(error);
             
-            // Error Handling (already wrapped in a try-catch for robustness)
+            // Error Handling 
             try { 
                 if (interaction.replied || interaction.deferred) {
                     await interaction.followUp({ content: '❌ **Command Error:** There was an error executing that command!', ephemeral: true });
@@ -276,7 +273,5 @@ module.exports = {
       }
       return;
     }
-
-    // Since command execution logic was moved up, the fallback here is no longer necessary
   },
 };
