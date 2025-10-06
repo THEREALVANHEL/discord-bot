@@ -1,4 +1,4 @@
-// commands/reroll.js (NEW - Giveaway Reroll Command with exclusion)
+// commands/reroll.js (REPLACE - Giveaway Reroll Command with exclusion and fixed title)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 module.exports = {
@@ -47,10 +47,12 @@ module.exports = {
             winnersCount = parseInt(winnersField.value); 
         }
         
+        // Extract prize from description or title, matching giveaway.js structure
         const prizeMatch = embed.description ? embed.description.match(/Prize:\s\*\*(.*?)\*\*/i) : null;
         if (prizeMatch && prizeMatch[1]) {
             prize = prizeMatch[1];
         } else if (embed.title) {
+            // Remove the starting emoji and text to get the prize description
             prize = embed.title.replace('🎁 Official Giveaway!', 'Prize');
         }
     }
@@ -76,7 +78,8 @@ module.exports = {
     const newWinnerMentions = newWinners.map(id => `<@${id}>`).join(', ');
 
     const endEmbed = new EmbedBuilder()
-      .setTitle('✨ Giveaway Reroll!')
+      // FIX: Use the prize for the title
+      .setTitle(`✨ Giveaway Reroll: ${prize}`)
       .setDescription(`**Prize:** ${prize}\n\n**Excluded Winner:** ${excludedUser}\n**New Winner:** ${newWinnerMentions}`)
       .addFields(
           { name: 'Original Winners Count', value: `${winnersCount}`, inline: true },
@@ -86,10 +89,10 @@ module.exports = {
       .setColor(0x00BFFF)
       .setTimestamp();
       
-    // FIX 1: Change to send a simple, short ephemeral message (as requested by user)
+    // Change to send a simple, short ephemeral message
     await interaction.editReply({ content: `✅ **Reroll Complete!** Announcing new winner publicly.` });
     
-    // FIX 2: Announce the full embed publicly
+    // Announce the full embed publicly
     channel.send({ content: `🎉 **REROLL!** ${newWinnerMentions} has replaced ${excludedUser} as a winner for **${prize}**!`, embeds: [endEmbed] });
   },
 };
