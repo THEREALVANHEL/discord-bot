@@ -1,4 +1,4 @@
-// deploy-commands.js
+// deploy-commands.js (FIXED)
 require('dotenv').config();
 const { REST, Routes } = require('discord.js');
 const fs = require('fs');
@@ -10,7 +10,16 @@ const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('
 
 for (const file of commandFiles) {
   const command = require(path.join(commandsPath, file));
-  if (command.data) commands.push(command.data.toJSON());
+  if (command.data) {
+    try {
+        // Add robust error handling to skip malformed commands
+        commands.push(command.data.toJSON());
+    } catch (error) {
+        // This log will help you find the broken file in future builds
+        console.error(`Skipping command file '${file}' due to serialization error:`, error.message);
+        continue;
+    }
+  }
 }
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
