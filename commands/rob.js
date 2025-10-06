@@ -1,4 +1,4 @@
-// commands/rob.js (REPLACE - Premium GUI, Cooldown 4min)
+// commands/rob.js (REPLACE - Fixing Syntax Error)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -9,8 +9,8 @@ module.exports = {
     .addUserOption(option =>
       option.setName('target')
         .setDescription('User to rob')
-        .setRequired(true))
-  // FIX: Increased cooldown from 240s (4min) to 600s (10min)
+        .setRequired(true)), // <-- COMMA IS CRITICAL HERE
+  // FIX: Cooldown property now correctly placed and delimited.
   cooldown: 600, // 10 minutes 
   async execute(interaction) {
     const targetUser = interaction.options.getUser('target');
@@ -23,7 +23,7 @@ module.exports = {
     let victim = await User.findOne({ userId: targetUser.id });
     if (!victim || victim.coins < 50) return interaction.reply({ content: `⚠️ **Safe Target:** ${targetUser} does not have enough coins (min 50) to make it worth the risk.`, ephemeral: true });
 
-    // FIX: Changed success rate from 50% to 30% (70% failure rate)
+    // 30% success rate (70% failure rate)
     if (Math.random() < 0.3) {
       // Success: rob 10% - 20% of victim's coins
       const percentage = Math.random() * (0.20 - 0.10) + 0.10;
