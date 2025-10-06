@@ -12,6 +12,9 @@ const getNextLevelXp = (level) => {
 
 // FIX: Helper function to manage a set of roles efficiently
 async function manageTieredRoles(member, userValue, roleConfigs, property) {
+    // FIX: Add check for null/undefined/empty array before attempting to call .filter
+    if (!roleConfigs || roleConfigs.length === 0) return; 
+    
     // 1. Determine the highest eligible role (the target role)
     const targetRoleConfig = roleConfigs
       .filter(r => r[property] <= userValue)
@@ -97,7 +100,7 @@ module.exports = {
 
     // Auto assign auto join role fallback
     const autoJoinRoleId = client.config.roles.autoJoin;
-    if (autoJoinRoleId && !member.roles.cache.has(autoJoinRoleId)) {
+    if (autoJoinRoleId && member && !member.roles.cache.has(autoJoinRoleId)) {
       await member.roles.add(autoJoinRoleId).catch(() => {});
     }
 
