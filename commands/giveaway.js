@@ -1,4 +1,4 @@
-// commands/giveaway.js (REPLACE - Fixed Timeout/Ending Logic and Added Total Entries)
+// commands/giveaway.js (REPLACE - Finalizing Title Strings)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const ms = require('ms');
 
@@ -40,8 +40,8 @@ async function endGiveaway(client, giveaway) {
     const winnerMentions = winners.map(id => `<@${id}>`).join(', ');
 
     const endEmbed = new EmbedBuilder()
-        // FIX: Use the prize from the stored giveaway object for the title and description
-        .setTitle(`🎉 Giveaway: ${giveaway.prize}`)
+        // FIX: Title is now descriptive for the end result
+        .setTitle(`🎉 Giveaway Ended: ${giveaway.prize}`) 
         .setDescription(`**Prize:** ${giveaway.prize}\n\n**Winner(s):** ${winnerMentions}`)
         .addFields(
             // The final embed shows the true, filtered count
@@ -90,8 +90,8 @@ module.exports = {
     
     // Initial Embed: Set Total Entries to 0 to avoid unstable fetch/update logic
     const initialEmbed = new EmbedBuilder()
-      // FIX: Use prize directly in the main title for clarity
-      .setTitle(`🎁 ${prize}`) 
+      // FIX: Use a descriptive title for the live giveaway
+      .setTitle(`🎁 Official Giveaway for: ${prize}`) 
       .setDescription(`**Prize:** ${prize}\n\n**To Enter:** React with 🎁\n**Ends:** <t:${Math.floor((Date.now() + durationMs) / 1000)}:R>`)
       .addFields(
         { name: 'Winners', value: `${winnersCount}`, inline: true },
