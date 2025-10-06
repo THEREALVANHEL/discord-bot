@@ -3,7 +3,23 @@ const { EmbedBuilder } = require('discord.js');
 const Settings = require('../models/Settings');
 
 async function logModerationAction(guild, settings, action, target, moderator, reason = 'No reason provided', extra = '') {
-// ... (logModerationAction logic remains the same)
+  if (!settings || !settings.modlogChannelId) return;
+
+  const modlogChannel = guild.channels.cache.get(settings.modlogChannelId);
+  if (!modlogChannel) return;
+
+  const embed = new EmbedBuilder()
+    .setTitle(`Moderation Action: ${action}`)
+    .setColor(0x7289DA) // Blurple
+    .addFields(
+      { name: 'Target', value: target ? `${target.tag || target} (${target.id || 'N/A'})` : 'N/A' },
+      { name: 'Moderator', value: `${moderator.tag} (${moderator.id})` },
+      { name: 'Reason', value: reason },
+      { name: 'Extra', value: extra || 'N/A' },
+    )
+    .setTimestamp();
+
+  modlogChannel.send({ embeds: [embed] });
 }
 
 module.exports = {
@@ -11,26 +27,35 @@ module.exports = {
   async execute(interaction, client) {
     if (!interaction.isChatInputCommand() && !interaction.isButton() && !interaction.isMessageComponent()) return;
 
-    const member = interaction.member;
+    let member = interaction.member; // Use let to allow fetching/reassignment
     const config = client.config;
     const settings = await Settings.findOne({ guildId: interaction.guild.id });
     const command = client.commands.get(interaction.commandName);
 
+    // FIX (Robustness): Attempt to fetch the member's current data if the roles cache is empty/stale.
+    if (member && !member.roles.cache.size) {
+        try {
+            member = await member.fetch();
+        } catch (e) {
+            console.error('Failed to fetch member data for permission check:', e);
+        }
+    }
+
     // Safely access roles object
     const roles = config.roles || {};
     
-    // Admin roles
-    const isAdmin = member.roles.cache.has(roles.forgottenOne) || member.roles.cache.has(roles.overseer);
+    // Admin roles (Using optional chaining for safety)
+    const isAdmin = member?.roles.cache.has(roles.forgottenOne) || member?.roles.cache.has(roles.overseer);
     // Mod roles
-    let isMod = member.roles.cache.has(roles.leadMod) || member.roles.cache.has(roles.mod);
+    let isMod = member?.roles.cache.has(roles.leadMod) || member?.roles.cache.has(roles.mod);
     // FIX: If the user is an Admin, they are also implicitly a Mod (for command permission purposes)
     if (isAdmin) {
         isMod = true;
     }
-    const isLeadMod = member.roles.cache.has(roles.leadMod); // Still needed for leadmod-only commands
+    const isLeadMod = member?.roles.cache.has(roles.leadMod); // Still needed for leadmod-only commands
     
     // Gamelog roles
-    const isHost = member.roles.cache.has(roles.gamelogUser) || member.roles.cache.has(roles.headHost);
+    const isHost = member?.roles.cache.has(roles.gamelogUser) || member?.roles.cache.has(roles.headHost);
 
     // --- COMMAND LOGIC ---
     if (interaction.isChatInputCommand() && command) {
@@ -61,7 +86,6 @@ module.exports = {
             }
             
             // MODERATION, GIVEAWAY (leadmod/mod)
-            // Note: isMod is already true if isAdmin is true, so this check only denies non-mods/non-admins.
             else if (['warn', 'warnlist', 'removewarn', 'softban', 'timeout', 'giveaway', 'purge', 'purgeuser', 'reroll'].includes(cmdName)) {
                 if (!isMod) {
                      permissionDenied = true;
@@ -74,7 +98,7 @@ module.exports = {
             }
 
             // Cookie/XP Manager checks
-            else if (['addcookies', 'removecookies', 'addcookiesall', 'removecookiesall', 'addxp', 'removexp', 'addcoins', 'removecoins'].includes(cmdName) && !member.roles.cache.has(roles.cookiesManager)) {
+            else if (['addcookies', 'removecookies', 'addcookiesall', 'removecookiesall', 'addxp', 'removexp', 'addcoins', 'removecoins'].includes(cmdName) && !member?.roles.cache.has(roles.cookiesManager)) {
                 permissionDenied = true;
             }
 
