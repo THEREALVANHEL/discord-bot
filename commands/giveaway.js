@@ -90,7 +90,8 @@ module.exports = {
     
     // Initial Embed: Set Total Entries to 0 to avoid unstable fetch/update logic
     const initialEmbed = new EmbedBuilder()
-      .setTitle('🎁 Official Giveaway!')
+      // FIX: Use prize directly in the main title for clarity
+      .setTitle(`🎁 ${prize}`) 
       .setDescription(`**Prize:** ${prize}\n\n**To Enter:** React with 🎁\n**Ends:** <t:${Math.floor((Date.now() + durationMs) / 1000)}:R>`)
       .addFields(
         { name: 'Winners', value: `${winnersCount}`, inline: true },
