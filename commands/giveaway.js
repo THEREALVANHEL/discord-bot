@@ -60,7 +60,7 @@ module.exports = {
     });
 
     // FIX: Use editReply to confirm the ephemeral deferral
-    interaction.editReply({ content: `✅ **Giveaway Started!** For **${prize}**!`, ephemeral: true });
+    await interaction.editReply({ content: `✅ **Giveaway Started!** For **${prize}**!`, ephemeral: true });
 
     // Set timeout to end giveaway
     setTimeout(() => { // FIX: Use standard function wrapper
@@ -112,7 +112,8 @@ module.exports = {
             .setTimestamp()
             .setFooter({ text: 'Congratulations!' });
 
-          await message.edit({ embeds: [endEmbed], components: [] }); // Remove components on end
+          // FIX: Ensure components are removed
+          await message.edit({ embeds: [endEmbed], components: [] });
           // Send winner pings in the content field to ensure they are properly notified
           channel.send(`**CONGRATULATIONS!** ${winnerMentions} won **${giveaway.prize}**! Please contact the host to claim your prize.`);
       })();
