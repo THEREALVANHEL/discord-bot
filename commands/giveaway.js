@@ -19,16 +19,21 @@ module.exports = {
         .setDescription('Number of winners')
         .setRequired(true)),
   async execute(interaction, client) {
+    // FIX: Defer reply immediately for stability against Discord timeouts
+    await interaction.deferReply({ ephemeral: true }); 
+
     const durationStr = interaction.options.getString('duration');
     const prize = interaction.options.getString('prize');
     const winnersCount = interaction.options.getInteger('winners');
 
     const durationMs = ms(durationStr);
     if (!durationMs || durationMs < 10000) {
-      return interaction.reply({ content: '❌ **Error:** Please provide a valid duration of at least 10 seconds.', ephemeral: true });
+      // Use editReply since we deferred
+      return interaction.editReply({ content: '❌ **Error:** Please provide a valid duration of at least 10 seconds.' });
     }
     if (winnersCount < 1 || winnersCount > 10) {
-      return interaction.reply({ content: '❌ **Error:** Number of winners must be between 1 and 10.', ephemeral: true });
+      // Use editReply since we deferred
+      return interaction.editReply({ content: '❌ **Error:** Number of winners must be between 1 and 10.' });
     }
 
     const embed = new EmbedBuilder()
@@ -41,8 +46,9 @@ module.exports = {
       .setTimestamp()
       .setFooter({ text: `Hosted by ${interaction.user.tag}` });
 
+    // Send the public message
     const giveawayMessage = await interaction.channel.send({ embeds: [embed] });
-    await giveawayMessage.react('🎁'); // Changed to 🎁 from 脂
+    await giveawayMessage.react('🎁'); 
 
     // Store giveaway info in client.giveaways Map
     client.giveaways.set(giveawayMessage.id, {
@@ -53,7 +59,8 @@ module.exports = {
       endTime: Date.now() + durationMs,
     });
 
-    interaction.reply({ content: `✅ **Giveaway Started!** For **${prize}**!`, ephemeral: true });
+    // FIX: Use editReply to confirm the ephemeral deferral
+    interaction.editReply({ content: `✅ **Giveaway Started!** For **${prize}**!`, ephemeral: true });
 
     // Set timeout to end giveaway
     setTimeout(() => { // FIX: Use standard function wrapper
@@ -105,7 +112,7 @@ module.exports = {
             .setTimestamp()
             .setFooter({ text: 'Congratulations!' });
 
-          await message.edit({ embeds: [endEmbed] });
+          await message.edit({ embeds: [endEmbed], components: [] }); // Remove components on end
           // Send winner pings in the content field to ensure they are properly notified
           channel.send(`**CONGRATULATIONS!** ${winnerMentions} won **${giveaway.prize}**! Please contact the host to claim your prize.`);
       })();
