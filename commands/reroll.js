@@ -42,16 +42,15 @@ module.exports = {
     if (message.embeds && message.embeds.length > 0) {
         const embed = message.embeds[0];
         
-        // FIX: Improve prize extraction to reliably strip the leading emoji and spaces from the title.
+        // FIX: Re-simplify prize extraction. Prioritize the Prize field in the description, 
+        // then fall back to stripping emojis from the title.
         const prizeMatch = embed.description ? embed.description.match(/Prize:\s\*\*(.*?)\*\*/i) : null;
         if (prizeMatch && prizeMatch[1]) {
-            prize = prizeMatch[1]; // Prefer prize from description field if available
+            prize = prizeMatch[1]; 
         } else if (embed.title) {
-            // Strip leading emoji (🎁) and any whitespace to get the prize string
-            const titleWithoutEmoji = embed.title.replace(/🎁\s*/, '').trim(); 
-            if (titleWithoutEmoji) {
-                prize = titleWithoutEmoji; // Use stripped title as fallback prize
-            }
+            // Strip leading emoji(s) and any "Giveaway Ended:" text to get a cleaner prize string
+            prize = embed.title.replace(/(\s*🎁\s*|\s*🎉\s*)?Giveaway Ended:\s*/i, '').trim();
+            prize = prize || 'Unknown Prize'; // Final fallback
         }
     }
     
@@ -76,21 +75,23 @@ module.exports = {
     const newWinnerMentions = newWinners.map(id => `<@${id}>`).join(', ');
 
     const endEmbed = new EmbedBuilder()
-      // Use the now correctly extracted prize string
-      .setTitle(`✨ Giveaway Reroll: ${prize}`)
-      .setDescription(`**Prize:** ${prize}\n\n**Excluded Winner:** ${excludedUser}\n**New Winner:** ${newWinnerMentions}`)
+      // FIX: Use the cleaner prize string only in the title
+      .setTitle(`✨ Reroll Winner: ${prize}`)
+      .setDescription(`**New Winner:** ${newWinnerMentions}\n**Excluded:** ${excludedUser}\n**Total Eligible Entries:** ${totalEntries}`)
       .addFields(
-          { name: 'Original Winners Count', value: 'N/A (Reroll)', inline: true },
-          { name: 'Total Eligible Entries', value: `${totalEntries}`, inline: true },
+          // FIX: Removed unnecessary fields to make it simpler
           { name: 'Rerolled By', value: `${interaction.user.tag}`, inline: true }
       )
       .setColor(0x00BFFF)
       .setTimestamp();
       
-    // Send a simple, short ephemeral message
-    await interaction.editReply({ content: `✅ **Reroll Complete!** Announcing new winner publicly.` });
+    // FIX: Send a simple, short ephemeral message
+    await interaction.editReply({ content: `✅ **Reroll Complete!** New winner announced publicly.` });
     
-    // Announce the full embed publicly
-    channel.send({ content: `🎉 **REROLL!** ${newWinnerMentions} has replaced ${excludedUser} as a winner for **${prize}**!`, embeds: [endEmbed] });
+    // FIX: Announce the result publicly in a single, clean line of text
+    channel.send(`🎉 **REROLL!** ${newWinnerMentions} has replaced ${excludedUser} as the new winner for **${prize}**!`);
+    
+    // Send the full embed as a secondary message
+    channel.send({ embeds: [endEmbed] }).catch(console.error);
   },
 };
