@@ -1,4 +1,4 @@
-// commands/daily.js (REPLACE - Fixed infinite role add/remove loop)
+// commands/daily.js (REPLACE - Fixed streak logic for missed day reset to 1/0)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -13,19 +13,18 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('daily')
     .setDescription('Claim your daily coins and XP!'),
-  execute: async (interaction) => { // FIX: Changed 'async execute(interaction)' to 'execute: async (interaction) =>' for deployment stability
+  execute: async (interaction) => {
     
     // FIX: Move deferral to the top to prevent 'Unknown interaction' due to latency.
     await interaction.deferReply(); 
 
-    // REMOVED: const cooldown = ms('24h');
     let user = await User.findOne({ userId: interaction.user.id });
 
     if (!user) {
       user = new User({ userId: interaction.user.id });
     }
 
-    // --- NEW: Midnight Reset Logic (UTC) ---
+    // --- Midnight Reset Logic (UTC) ---
     const now = new Date();
     // Get the start of today in UTC (00:00:00.000 UTC of the current date)
     const startOfTodayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -39,39 +38,42 @@ module.exports = {
 
       return interaction.editReply({ content: `⏱️ You can claim your daily reward again in **${timeLeft}** (resets at UTC midnight).`, ephemeral: true });
     }
-    // --- END NEW LOGIC ---
+    // --- END MIDNIGHT CHECK ---
 
     let coinsEarned = Math.floor(Math.random() * 50) + 50;
     let xpEarned = Math.floor(Math.random() * 20) + 10;
     let streakBonus = '';
     
-    // Streak logic
-    // const now = new Date(); // Moved to top for consistency
-    let currentStreak = 1;
-    if (user.lastDaily) {
-        const lastDailyTime = user.lastDaily.getTime();
-        if (now.getTime() - lastDailyTime < ms('48h')) {
-            // Continued streak
-            currentStreak = (user.dailyStreak || 0) + 1;
-        } else {
-            // Broken streak, reset to 1
-            currentStreak = 1;
-        }
-    } else {
+    // --- UPDATED STREAK LOGIC ---
+    let currentStreak = user.dailyStreak || 0;
+
+    if (!user.lastDaily) {
+        // First ever claim
         currentStreak = 1;
+    } else {
+        const timeSinceLastClaim = now.getTime() - user.lastDaily.getTime();
+
+        if (timeSinceLastClaim > ms('48h')) {
+            // Missed an entire day's window (missed yesterday), reset streak.
+            currentStreak = 1; // Start a new streak of 1 on successful claim
+        } else if (timeSinceLastClaim > ms('24h')) {
+            // Claimed in the previous UTC day (24-48h window), streak continues.
+            currentStreak++;
+        } else {
+            // Claimed today but the first check failed somehow (shouldn't happen here)
+            // Or a very fast second claim which is blocked by the first check.
+        }
     }
     
     // 7-Day Streak Bonus Logic
-    if (currentStreak % 7 === 0) {
+    if (currentStreak > 0 && currentStreak % 7 === 0) {
         coinsEarned *= 2; // Double the reward
         xpEarned *= 2;     // Double the reward
         streakBonus = `\n\n**✨ 7-Day Mega-Bonus!** You received **double** rewards!`;
     }
     
-    // Update the highest streak achieved for the leaderboard
+    // Update user data
     user.dailyStreak = currentStreak; 
-
-
     user.coins += coinsEarned;
     user.xp += xpEarned;
     user.lastDaily = now;
@@ -91,7 +93,7 @@ module.exports = {
       if (member) {
         const levelingRoles = interaction.client.config.levelingRoles;
         
-        // FIX: Find the single highest eligible role
+        // FIX: Find the single highest eligible role (logic copied from addxp/messagecreate)
         const targetLevelRole = levelingRoles
             .filter(r => r.level <= user.level)
             .sort((a, b) => b.level - a.level)[0];
