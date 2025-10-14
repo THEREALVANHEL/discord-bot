@@ -1,4 +1,4 @@
-// events/interactionCreate.js (REPLACED - Final fix for Admin roles in permission checks)
+// events/interactionCreate.js (REPLACED - Final fix for job application button logic)
 const { EmbedBuilder, PermissionsBitField } = require('discord.js'); // NOTE: PermissionsBitField is needed for the robust check
 const Settings = require('../models/Settings');
 
@@ -183,15 +183,17 @@ module.exports = {
           let user = await User.findOne({ userId: interaction.user.id });
           if (!user) user = new User({ userId: interaction.user.id });
 
-          if (!newJob || user.level < newJob.minLevel) {
-              return interaction.reply({ content: '❌ **Error:** You are not eligible for this job or the job is invalid.', ephemeral: true });
+          // CRITICAL FIX: Replaced the old incorrect 'user.level < newJob.minLevel' check 
+          // with the correct 'user.successfulWorks < newJob.minWorks' check.
+          if (!newJob || user.successfulWorks < newJob.minWorks) {
+              return interaction.reply({ content: '❌ **Error:** You are not eligible for this job (Insufficient Works) or the job is invalid.', ephemeral: true });
           }
 
           user.currentJob = newJob.id;
           await user.save();
 
           await interaction.update({ 
-              content: `🎉 **Application Successful!** You are now a **${newJob.title}**. Start working with \`/work work\`!`, 
+              content: `🎉 **Application Successful!** You are now a **${newJob.title}**. Start working with \`/work job\`!`, 
               components: [] 
           });
           return;
@@ -290,27 +292,4 @@ module.exports = {
 
         const ticketEmbed = new EmbedBuilder()
           .setTitle('🎫 New Support Ticket')
-          .setDescription(`Thank you for creating a ticket, ${interaction.user}! A staff member will be with you shortly. Please describe your issue clearly.`)
-          .addFields(
-            { name: 'User', value: `${interaction.user.tag} (${interaction.user.id})` },
-            { name: 'Status', value: 'Open' }
-          )
-          .setColor(0x0099FF)
-          .setTimestamp();
-          
-        const modPings = [roles.leadMod, roles.mod]
-                          .filter(id => id)
-                          .map(id => `<@&${id}>`).join(' ');
-
-        ticketChannel.send({
-          content: `${interaction.user} ${modPings}`,
-          embeds: [ticketEmbed],
-        });
-
-        // FIX: Use editReply after deferral
-        return interaction.editReply({ content: `Your ticket has been created: ${ticketChannel}` });
-      }
-      return;
-    }
-  },
-};
+          .setDescription(`Thank you for creating a ticket, ${interaction.user}! A staff member will be with
