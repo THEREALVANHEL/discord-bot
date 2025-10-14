@@ -1,4 +1,4 @@
-// commands/rob.js (REPLACE - Fixing Syntax Error)
+// commands/rob.js (UPDATED BALANCING)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -9,9 +9,9 @@ module.exports = {
     .addUserOption(option =>
       option.setName('target')
         .setDescription('User to rob')
-        .setRequired(true)), // <-- FIXED: Comma added after data property
-  // FIX: Cooldown property now correctly placed and delimited.
-  cooldown: 600, // 10 minutes 
+        .setRequired(true)), 
+  // FIX: Cooldown increased to 1 hour (3600 seconds)
+  cooldown: 3600, // 1 hour 
   async execute(interaction) {
     const targetUser = interaction.options.getUser('target');
     if (targetUser.bot) return interaction.reply({ content: '❌ **Error:** You cannot rob bots.', ephemeral: true });
@@ -23,10 +23,10 @@ module.exports = {
     let victim = await User.findOne({ userId: targetUser.id });
     if (!victim || victim.coins < 50) return interaction.reply({ content: `⚠️ **Safe Target:** ${targetUser} does not have enough coins (min 50) to make it worth the risk.`, ephemeral: true });
 
-    // 30% success rate (70% failure rate)
-    if (Math.random() < 0.3) {
-      // Success: rob 10% - 20% of victim's coins
-      const percentage = Math.random() * (0.20 - 0.10) + 0.10;
+    // Reworked: 20% success rate (down from 30%)
+    if (Math.random() < 0.2) {
+      // Success: rob 8% - 15% of victim's coins (down from 10%-20%)
+      const percentage = Math.random() * (0.15 - 0.08) + 0.08;
       const calculatedAmount = Math.floor(victim.coins * percentage);
       const amount = Math.min(victim.coins, Math.max(10, calculatedAmount)); // Min 10 coins
       
@@ -49,8 +49,8 @@ module.exports = {
 
       return interaction.reply({ embeds: [embed] });
     } else {
-      // Failure: lose 10% of robber's coins as penalty (max 100)
-      const penalty = Math.min(robber.coins, Math.floor(robber.coins * 0.10), 100);
+      // Failure: lose 15% of robber's coins as penalty (max 150) (up from 10% / max 100)
+      const penalty = Math.min(robber.coins, Math.floor(robber.coins * 0.15), 150);
       robber.coins -= penalty;
       await robber.save();
 
