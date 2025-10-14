@@ -1,11 +1,11 @@
-// commands/profile.js (REPLACE - Premium GUI, Progress Bar, Fixed timestamps)
+// commands/profile.js (REPLACE - Premium GUI, Progress Bar, Fixed timestamps + MODERATE XP Formula)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
-// Function to calculate XP needed for the next level (Harder formula)
+// Function to calculate XP needed for the next level (MODERATE formula)
 const getNextLevelXp = (level) => {
-    // New (Harder): 150 * Math.pow(level + 1, 1.8)
-    return Math.floor(150 * Math.pow(level + 1, 1.8));
+    // New Moderate: 100 * Math.pow(level + 1, 1.5)
+    return Math.floor(100 * Math.pow(level + 1, 1.5));
 };
 
 // Function to generate the visual progress bar
