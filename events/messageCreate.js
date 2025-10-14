@@ -1,13 +1,17 @@
-// events/messageCreate.js (REPLACE - Fixed infinite role add/remove loop in leveling and cookie role logic)
+// events/messageCreate.js (REPLACE - Fixed infinite role add/remove loop in leveling and cookie role logic + MODERATE XP GAIN + SPAM COOLDOWN)
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { EmbedBuilder } = require('discord.js');
 
-// Function to calculate XP needed for the next level (Made harder)
+// Cooldown Map: Stores last time a user gained XP in a channel { userId-channelId: timestamp }
+const xpCooldowns = new Map();
+const XP_COOLDOWN_MS = 30000; // 30 seconds
+
+// Function to calculate XP needed for the next level (Made MODERATE)
 const getNextLevelXp = (level) => {
-    // Original: 100 * Math.pow(level + 1, 1.5)
-    // New (Harder): 150 * Math.pow(level + 1, 1.8)
-    return Math.floor(150 * Math.pow(level + 1, 1.8));
+    // Original Hard: 150 * Math.pow(level + 1, 1.8)
+    // New Moderate: 100 * Math.pow(level + 1, 1.5)
+    return Math.floor(100 * Math.pow(level + 1, 1.5));
 };
 
 // FIX: Helper function to manage a set of roles efficiently
@@ -50,13 +54,26 @@ module.exports = {
     const settings = await Settings.findOne({ guildId: message.guild.id });
     if (settings && settings.noXpChannels.includes(message.channel.id)) return;
 
+    // --- XP COOLDOWN CHECK ---
+    const cooldownKey = `${message.author.id}-${message.channel.id}`;
+    const lastXpTime = xpCooldowns.get(cooldownKey);
+    
+    if (lastXpTime && (Date.now() - lastXpTime < XP_COOLDOWN_MS)) {
+        // User is still on cooldown for this channel
+        return;
+    }
+    
+    // Set cooldown timestamp
+    xpCooldowns.set(cooldownKey, Date.now());
+
+
     let user = await User.findOne({ userId: message.author.id });
     if (!user) {
       user = new User({ userId: message.author.id });
     }
 
-    // XP gain is now 1-3 per message (slower)
-    const xpGain = Math.floor(Math.random() * 3) + 1; // 1-3 XP
+    // XP gain is now 3-5 per message (More moderate)
+    const xpGain = Math.floor(Math.random() * 3) + 3; // 3-5 XP
     user.xp += xpGain;
 
     const nextLevelXp = getNextLevelXp(user.level);
