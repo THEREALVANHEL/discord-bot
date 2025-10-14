@@ -1,12 +1,13 @@
-// commands/daily.js (REPLACE - Fixed streak logic for missed day reset to 1/0)
+// commands/daily.js (REPLACE - Fixed streak logic for missed day reset to 1/0 + MODERATE XP Formula)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const ms = require('ms');
 
-// Function to calculate XP needed for the next level (Harder formula)
+// Function to calculate XP needed for the next level (MODERATE formula)
 const getNextLevelXp = (level) => {
-    return Math.floor(150 * Math.pow(level + 1, 1.8));
+    // New Moderate: 100 * Math.pow(level + 1, 1.5)
+    return Math.floor(100 * Math.pow(level + 1, 1.5));
 };
 
 module.exports = {
