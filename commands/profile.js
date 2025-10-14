@@ -8,14 +8,14 @@ const getNextLevelXp = (level) => {
     return Math.floor(100 * Math.pow(level + 1, 1.5));
 };
 
-// Function to generate the visual progress bar
+// Function to generate the visual progress bar (FIXED: Capped percent to prevent negative count error)
 const createProgressBar = (current, needed, length = 15) => {
-    const percent = current / needed;
-    const filledLength = Math.round(length * percent);
-    const emptyLength = length - filledLength;
+    const percent = Math.min(1, current / needed); // Cap percent at 1.0 (100%)
+    const filledLength = Math.round(length * percent); 
+    const emptyLength = length - filledLength; 
     const filled = '█'.repeat(filledLength); // Filled block
     const empty = '░'.repeat(emptyLength); // Empty block
-    const progress = (percent * 100).toFixed(1);
+    const progress = (current / needed * 100).toFixed(1); // Use original division for display
 
     return `\`[${filled}${empty}]\` **${progress}%**`;
 };
