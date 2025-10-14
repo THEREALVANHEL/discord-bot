@@ -1,4 +1,4 @@
-// commands/purge.js (NEW or REPLACE - Bulk delete messages in channel)
+// commands/purge.js (REPLACE - Bulk delete messages in channel, Fixed Acknowledgment)
 const { SlashCommandBuilder, PermissionsBitField } = require('discord.js'); // Added PermissionsBitField
 
 module.exports = {
@@ -13,12 +13,17 @@ module.exports = {
   async execute(interaction, client, logModerationAction) {
     const amount = interaction.options.getInteger('amount');
 
+    // FIX 1: Defer the reply immediately and ephemerally to acknowledge the interaction.
+    await interaction.deferReply({ ephemeral: true });
+
     if (amount < 1 || amount > 100) {
-      return interaction.reply({ content: 'Amount must be between 1 and 100.', ephemeral: true });
+      // Use editReply after deferral
+      return interaction.editReply({ content: 'Amount must be between 1 and 100.', ephemeral: true });
     }
 
     if (!interaction.channel.manageable) {
-      return interaction.reply({ content: 'I cannot manage messages in this channel.', ephemeral: true });
+      // Use editReply after deferral
+      return interaction.editReply({ content: 'I cannot manage messages in this channel.', ephemeral: true });
     }
 
     try {
@@ -27,13 +32,18 @@ module.exports = {
       await interaction.channel.bulkDelete(messages, true);
 
       // Public confirmation (visible to everyone)
-      await interaction.reply({ 
+      // FIX 2: Use followUp for the non-ephemeral public response.
+      const publicMessage = await interaction.followUp({ 
         content: `🧹 **Purge Executed:** ${amount} messages have been deleted from this channel by ${interaction.user.tag}.`, 
         ephemeral: false 
-      }).then(msg => {
-        // Auto-delete the reply after 5 seconds to clean up
-        setTimeout(() => msg.delete().catch(() => {}), 5000);
       });
+      
+      // Update deferred ephemeral reply for successful purge
+      await interaction.editReply({ content: `✅ Successfully deleted ${amount} messages. Public confirmation sent to channel.` });
+
+      // Auto-delete the public confirmation after 5 seconds to clean up
+      setTimeout(() => publicMessage.delete().catch(() => {}), 5000);
+      
 
       // Log
       const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
@@ -41,7 +51,8 @@ module.exports = {
 
     } catch (error) {
       console.error('Purge error:', error);
-      await interaction.reply({ content: 'Failed to purge messages. Ensure the bot has "Manage Messages" permission.', ephemeral: true });
+      // FIX 3: Use editReply to send the ephemeral error message back to the user.
+      await interaction.editReply({ content: '❌ **Error:** Failed to purge messages. Ensure the bot has "Manage Messages" permission.', ephemeral: true });
     }
   },
 };
