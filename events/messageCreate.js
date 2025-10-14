@@ -1,22 +1,21 @@
-// events/messageCreate.js (REPLACE - Fixed infinite role add/remove loop in leveling and cookie role logic + MODERATE XP GAIN + SPAM COOLDOWN)
+// events/messageCreate.js (REPLACE - Fixed infinite role add/remove loop in leveling and cookie role logic + MODERATE XP GAIN + 5s SPAM COOLDOWN)
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { EmbedBuilder } = require('discord.js');
 
 // Cooldown Map: Stores last time a user gained XP in a channel { userId-channelId: timestamp }
 const xpCooldowns = new Map();
-const XP_COOLDOWN_MS = 30000; // 30 seconds
+const XP_COOLDOWN_MS = 5000; // 5 seconds to prevent spamming XP gain (Changed from 30s)
 
-// Function to calculate XP needed for the next level (Made MODERATE)
+// Function to calculate XP needed for the next level (Made MODERATE HARD)
 const getNextLevelXp = (level) => {
     // Original Hard: 150 * Math.pow(level + 1, 1.8)
     // New Moderate: 100 * Math.pow(level + 1, 1.5)
     return Math.floor(100 * Math.pow(level + 1, 1.5));
 };
 
-// FIX: Helper function to manage a set of roles efficiently
+// Helper function to manage a set of roles efficiently
 async function manageTieredRoles(member, userValue, roleConfigs, property) {
-    // FIX: Add check for null/undefined/empty array before attempting to call .filter
     if (!roleConfigs || roleConfigs.length === 0) return; 
     
     // 1. Determine the highest eligible role (the target role)
@@ -63,7 +62,7 @@ module.exports = {
         return;
     }
     
-    // Set cooldown timestamp
+    // Set cooldown timestamp (must be done BEFORE DB/XP logic)
     xpCooldowns.set(cooldownKey, Date.now());
 
 
@@ -86,7 +85,7 @@ module.exports = {
 
       const member = message.member;
 
-      // FIX: Apply tiered role management on level up
+      // Apply tiered role management on level up
       if (member) {
           await manageTieredRoles(member, user.level, client.config.levelingRoles, 'level');
       }
@@ -108,7 +107,7 @@ module.exports = {
       }
     }
 
-    // FIX: Apply tiered role management for cookie roles on every message (unconditional block)
+    // Apply tiered role management for cookie roles on every message (unconditional block)
     const member = message.member;
     if (member) {
         await manageTieredRoles(member, user.cookies, client.config.cookieRoles, 'cookies');
