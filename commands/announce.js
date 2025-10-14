@@ -1,4 +1,4 @@
-// commands/announce.js (REPLACE - Premium GUI)
+// commands/announce.js (REPLACE - Fixed double reply issue)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 module.exports = {
@@ -22,6 +22,9 @@ module.exports = {
         .setDescription('The role to ping with the announcement')
         .setRequired(false)),
   async execute(interaction) {
+    // FIX: Defer reply first to acknowledge the interaction
+    await interaction.deferReply({ ephemeral: true });
+
     const title = interaction.options.getString('title');
     const pointsString = interaction.options.getString('points');
     const targetChannel = interaction.options.getChannel('channel') || interaction.channel;
@@ -43,11 +46,15 @@ module.exports = {
     }
 
     try {
+      // 1. Send the main message
       await targetChannel.send({ content: content, embeds: [embed] });
-      await interaction.reply({ content: '✅ **Announcement Sent!** The message has been broadcast.', ephemeral: true });
+
+      // 2. Edit the deferred reply to confirm success
+      await interaction.editReply({ content: `✅ **Announcement Sent!** The message has been broadcast to ${targetChannel}.` });
     } catch (error) {
       console.error('Error sending announcement:', error);
-      await interaction.reply({ content: '❌ **Error:** Failed to send announcement. Check bot permissions.', ephemeral: true });
+      // 3. Edit the deferred reply to send the error
+      await interaction.editReply({ content: '❌ **Error:** Failed to send announcement. Check bot permissions.', ephemeral: true });
     }
   },
 };
