@@ -103,6 +103,7 @@ module.exports = {
         user.successfulWorks++;
 
         // Calculate rewards from ranges
+        // NOTE: These values are read from the updated client.config.workProgression in index.js
         const coinsEarned = Math.floor(Math.random() * (currentJob.coinReward[1] - currentJob.coinReward[0] + 1)) + currentJob.coinReward[0];
         const xpEarned = Math.floor(Math.random() * (currentJob.xpReward[1] - currentJob.xpReward[0] + 1)) + currentJob.xpReward[0];
 
