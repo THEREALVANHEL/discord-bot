@@ -5,7 +5,7 @@ const { EmbedBuilder } = require('discord.js');
 
 // Cooldown Map: Stores last time a user gained XP in a channel { userId-channelId: timestamp }
 const xpCooldowns = new Map();
-const XP_COOLDOWN_MS = 5000; // 5 seconds to prevent spamming XP gain (Changed from 30s)
+const XP_COOLDOWN_MS = 5000; // 5 seconds to prevent spamming XP gain
 
 // Function to calculate XP needed for the next level (Made MODERATE HARD)
 const getNextLevelXp = (level) => {
