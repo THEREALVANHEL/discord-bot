@@ -1,4 +1,4 @@
-// commands/work.js (REPLACE - Job Progression: Job progression now 10 tiers based ONLY on successfulWorks + 10 internal sub-tiers)
+// commands/work.js (REPLACE - Final fix for Job Application display/logic)
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -219,12 +219,16 @@ module.exports = {
             const meetsWorks = user.successfulWorks >= job.minWorks;
             const isCurrent = currentJob && job.id === currentJob.id;
             
-            // Logic to determine if the job is available to apply for (higher tier or first job)
-            const isPromotion = currentJob && job.minWorks > currentJob.minWorks;
-            const isStartingJob = !currentJob && job.minWorks === workProgression[0].minWorks;
-            // CRITICAL FIX: Eligibility is solely based on having enough total works.
-            const isEligibleToApply = (isPromotion || isStartingJob) && meetsWorks; 
-            
+            // FIX/Refinement: The goal is only to show the immediate next job OR the starting job if unemployed.
+            const isNextJob = currentJob 
+                ? (index === workProgression.findIndex(j => j.id === currentJob.id) + 1) // Is the direct next job in the list
+                : index === 0; // Is the very first job (Intern/Level 0)
+                
+            // The job is eligible to apply for if:
+            // 1. It is the starting job (Index 0) AND the user is unemployed, OR
+            // 2. It is the next sequential job AND the user meets the work requirement.
+            const isEligibleToApply = (!currentJob && index === 0) || (currentJob && isNextJob && meetsWorks);
+
             let status = '';
             let emoji = '💼';
 
@@ -234,9 +238,18 @@ module.exports = {
             } else if (isEligibleToApply) {
                 status = `**[ELIGIBLE - APPLY NOW]**`;
                 emoji = '⬆️';
-            } else {
+            } else if (meetsWorks && currentJob && job.minWorks > currentJob.minWorks) {
+                // User is eligible for this job but it's NOT the next sequential one (e.g., they skipped one).
+                // Or user is eligible for the direct next one, but it's not the correct logic path above.
+                // Revert to [INELIGIBLE] for display purposes, they can only apply for the direct next job.
                 status = `[INELIGIBLE]`;
                 emoji = '❌';
+            } else if (job.minWorks > user.successfulWorks) {
+                 status = `[INELIGIBLE - Need ${job.minWorks} Works]`;
+                 emoji = '❌';
+            } else {
+                 status = `[INELIGIBLE]`;
+                 emoji = '❌';
             }
             
             // CRITICAL FIX: Removed minLevel display.
@@ -250,9 +263,7 @@ module.exports = {
                     .setEmoji(emoji);
                 
                 // Only add the button if the job is an *immediate* promotion or starting job
-                if (jobButtons.flatMap(r => r.components).length < 5) {
-                    row.addComponents(button);
-                } else if (row.components.length < 5) {
+                if (row.components.length < 5) {
                     row.addComponents(button);
                 }
             }
