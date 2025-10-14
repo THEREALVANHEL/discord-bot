@@ -1,11 +1,11 @@
-// commands/removexp.js (REPLACE - Fixed infinite role add/remove loop)
+// commands/removexp.js (REPLACE - Fixed infinite role add/remove loop + MODERATE XP Formula)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
-// Function to calculate XP needed for the next level (Harder formula)
+// Function to calculate XP needed for the next level (MODERATE formula)
 const getNextLevelXp = (level) => {
-    // New (Harder): 150 * Math.pow(level + 1, 1.8)
-    return Math.floor(150 * Math.pow(level + 1, 1.8));
+    // New Moderate: 100 * Math.pow(level + 1, 1.5)
+    return Math.floor(100 * Math.pow(level + 1, 1.5));
 };
 
 module.exports = {
@@ -44,6 +44,8 @@ module.exports = {
         // Drop level until XP is above the previous level's required total XP.
         let tempLevel = user.level;
         let leveledDown = false;
+        
+        // This is simplified but mostly effective for moderate curves.
         while (tempLevel > 0 && user.xp < getNextLevelXp(tempLevel - 1)) {
             tempLevel--;
             leveledDown = true;
