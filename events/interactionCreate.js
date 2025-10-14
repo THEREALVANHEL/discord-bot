@@ -292,4 +292,27 @@ module.exports = {
 
         const ticketEmbed = new EmbedBuilder()
           .setTitle('🎫 New Support Ticket')
-          .setDescription(`Thank you for creating a ticket, ${interaction.user}! A staff member will be with
+          .setDescription(`Thank thank you for creating a ticket, ${interaction.user}! A staff member will be with you shortly. Please describe your issue clearly.`)
+          .addFields(
+            { name: 'User', value: `${interaction.user.tag} (${interaction.user.id})` },
+            { name: 'Status', value: 'Open' }
+          )
+          .setColor(0x0099FF)
+          .setTimestamp();
+          
+        const modPings = [roles.leadMod, roles.mod]
+                          .filter(id => id)
+                          .map(id => `<@&${id}>`).join(' ');
+
+        ticketChannel.send({
+          content: `${interaction.user} ${modPings}`,
+          embeds: [ticketEmbed],
+        });
+
+        // FIX: Use editReply after deferral
+        return interaction.editReply({ content: `Your ticket has been created: ${ticketChannel}` });
+      }
+      return;
+    }
+  },
+};
