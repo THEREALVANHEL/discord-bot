@@ -1,11 +1,12 @@
-// commands/addxp.js (REPLACE - Fixed infinite role add/remove loop)
+// commands/addxp.js (REPLACE - Fixed infinite role add/remove loop + MODERATE XP Formula)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 
-// Function to calculate XP needed for the next level (Harder formula)
+// Function to calculate XP needed for the next level (MODERATE formula)
 const getNextLevelXp = (level) => {
-    return Math.floor(150 * Math.pow(level + 1, 1.8));
+    // New Moderate: 100 * Math.pow(level + 1, 1.5)
+    return Math.floor(100 * Math.pow(level + 1, 1.5));
 };
 
 module.exports = {
