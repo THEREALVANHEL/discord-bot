@@ -1,4 +1,4 @@
-// index.js (REPLACE - Updated workProgression, added client.polls, cleaned config, added PermissionsBitField)
+// index.js (REPLACE - Updated workProgression for 10 tiers based on works only)
 require('dotenv').config();
 // FIX: Added PermissionsBitField to the imports
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, PermissionsBitField } = require('discord.js'); 
@@ -55,17 +55,19 @@ client.config = {
     { cookies: 3000, roleId: '1371001806930579518' },
     { cookies: 5000, roleId: '1371004762761461770' },
   ],
-  // UPDATED: Coin rewards increased by roughly 50%
+  // NEW: 10 Job Tiers based ONLY on Successful Works, with worksToNextMajor for sub-tier calc.
   workProgression: [
-    // Job Title | Min Level | Min Works for promotion | XP Reward Range | Coin Reward Range | Success Rate (%) | Job ID
-    { title: 'Scavenger', minLevel: 0, minWorks: 0, xpReward: [5, 10], coinReward: [15, 30], successRate: 90, id: 'scavenger' },
-    { title: 'Miner', minLevel: 5, minWorks: 10, xpReward: [10, 15], coinReward: [40, 60], successRate: 85, id: 'miner' },
-    { title: 'Hunter', minLevel: 10, minWorks: 25, xpReward: [15, 25], coinReward: [60, 90], successRate: 80, id: 'hunter' },
-    { title: 'Courier', minLevel: 15, minWorks: 50, xpReward: [25, 40], coinReward: [90, 135], successRate: 75, id: 'courier' },
-    { title: 'Technician', minLevel: 25, minWorks: 100, xpReward: [40, 60], coinReward: [135, 195], successRate: 65, id: 'technician' },
-    { title: 'Engineer', minLevel: 40, minWorks: 200, xpReward: [60, 90], coinReward: [195, 270], successRate: 55, id: 'engineer' },
-    { title: 'Data Scientist', minLevel: 60, minWorks: 350, xpReward: [90, 130], coinReward: [270, 375], successRate: 45, id: 'data_scientist' },
-    { title: 'Tech Legend', minLevel: 100, minWorks: 550, xpReward: [130, 200], coinReward: [375, 600], successRate: 35, id: 'tech_legend' },
+    // Job Title | Base Works (minWorks) | Works to Next Major Tier | XP Reward Range | Coin Reward Range | Success Rate (%) | Job ID
+    { title: 'Intern', minWorks: 0, worksToNextMajor: 50, xpReward: [10, 20], coinReward: [20, 40], successRate: 95, id: 'intern' },
+    { title: 'Junior Developer', minWorks: 50, worksToNextMajor: 100, xpReward: [20, 40], coinReward: [50, 90], successRate: 90, id: 'junior_dev' },
+    { title: 'Software Developer', minWorks: 150, worksToNextMajor: 150, xpReward: [40, 70], coinReward: [100, 160], successRate: 85, id: 'software_dev' },
+    { title: 'Senior Developer', minWorks: 300, worksToNextMajor: 200, xpReward: [70, 110], coinReward: [180, 250], successRate: 80, id: 'senior_dev' },
+    { title: 'Team Lead', minWorks: 500, worksToNextMajor: 300, xpReward: [110, 160], coinReward: [280, 400], successRate: 75, id: 'team_lead' },
+    { title: 'Engineering Manager', minWorks: 800, worksToNextMajor: 500, xpReward: [160, 230], coinReward: [450, 650], successRate: 70, id: 'eng_manager' },
+    { title: 'Director', minWorks: 1300, worksToNextMajor: 700, xpReward: [230, 320], coinReward: [700, 1000], successRate: 65, id: 'director' },
+    { title: 'VP of Engineering', minWorks: 2000, worksToNextMajor: 1000, xpReward: [320, 450], coinReward: [1200, 1800], successRate: 60, id: 'vp_eng' },
+    { title: 'CTO', minWorks: 3000, worksToNextMajor: 2000, xpReward: [450, 650], coinReward: [2000, 3000], successRate: 55, id: 'cto' },
+    { title: 'Tech Legend', minWorks: 5000, worksToNextMajor: Infinity, xpReward: [700, 1200], coinReward: [3500, 6000], successRate: 50, id: 'tech_legend' },
   ],
   shopItems: [
     { id: 'xp_boost_1h', name: '1 Hour XP Boost', description: 'Gain 2x XP for 1 hour.', price: 500, type: 'boost' },
