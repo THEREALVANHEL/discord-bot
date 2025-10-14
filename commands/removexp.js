@@ -1,4 +1,4 @@
-// commands/removexp.js (REPLACE - Fixed infinite role add/remove loop + MODERATE XP Formula)
+// commands/removexp.js (REPLACE - Fixed infinite role add/remove loop + MODERATE XP Formula + ROBUST LEVEL DOWN LOGIC)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -34,57 +34,76 @@ module.exports = {
       return interaction.editReply({ content: `⚠️ **Warning:** ${targetUser} does not have any XP yet.`, ephemeral: true });
     }
 
-    user.xp = Math.max(0, user.xp - amount);
+    // --- ROBUST LEVEL DOWN LOGIC START (Fixes Cascading Demotion Bug) ---
 
-    let oldLevel = user.level;
+    // 1. Calculate Total XP Accumulated by the user before removal.
+    let totalXP = user.xp;
+    for (let i = 0; i < user.level; i++) {
+        // Add the XP needed to complete each previous level (i.e., go from i to i+1)
+        totalXP += getNextLevelXp(i);
+    }
+    
+    const newTotalXP = Math.max(0, totalXP - amount);
+
+    let newLevel = 0;
+    let xpInNewLevel = newTotalXP;
     let levelDownMsg = '';
 
-    // Recalculate level
-    if (user.level > 0) {
-        // Drop level until XP is above the previous level's required total XP.
-        let tempLevel = user.level;
-        let leveledDown = false;
+    // 2. Determine the new level by reversing the accumulation.
+    for (let levelCheck = 0; levelCheck < 1000; levelCheck++) { // Iterate through possible levels
+        const xpNeededToCompleteLevel = getNextLevelXp(levelCheck);
         
-        // This is simplified but mostly effective for moderate curves.
-        while (tempLevel > 0 && user.xp < getNextLevelXp(tempLevel - 1)) {
-            tempLevel--;
-            leveledDown = true;
+        if (xpInNewLevel < xpNeededToCompleteLevel) {
+            newLevel = levelCheck;
+            break; // Found the correct level
         }
-        user.level = tempLevel;
+        
+        // This is not the correct level, so subtract the XP needed for this level and continue up.
+        xpInNewLevel -= xpNeededToCompleteLevel;
+    }
+    
+    const oldLevel = user.level;
+    const leveledDown = newLevel < oldLevel;
 
-        // Assign leveling roles if level changed (FIXED logic)
-        if (leveledDown) {
-            const member = interaction.guild.members.cache.get(targetUser.id);
-            if (member) {
-              const levelingRoles = interaction.client.config.levelingRoles;
-              
-              // FIX: Find the single highest eligible role
-              const targetLevelRole = levelingRoles
-                  .filter(r => r.level <= user.level)
-                  .sort((a, b) => b.level - a.level)[0];
-              
-              const targetLevelRoleId = targetLevelRole ? targetLevelRole.roleId : null;
+    user.level = newLevel;
+    user.xp = xpInNewLevel; // This is the remaining XP within the new level tier
 
-              for (const roleConfig of levelingRoles) {
-                  const roleId = roleConfig.roleId;
-                  const hasRole = member.roles.cache.has(roleId);
-                  
-                  if (roleId === targetLevelRoleId) {
-                      // If this is the correct role but the user doesn't have it, add it.
-                      if (!hasRole) {
-                          await member.roles.add(roleId).catch(() => {});
-                      }
-                  } else {
-                      // If the user has a different leveling role, remove it.
-                      if (hasRole) {
-                          await member.roles.remove(roleId).catch(() => {});
-                      }
+    // --- ROBUST LEVEL DOWN LOGIC END ---
+
+
+    // Assign leveling roles if level changed (FIXED logic)
+    if (leveledDown) {
+        const member = interaction.guild.members.cache.get(targetUser.id);
+        if (member) {
+          const levelingRoles = interaction.client.config.levelingRoles;
+          
+          // FIX: Find the single highest eligible role
+          const targetLevelRole = levelingRoles
+              .filter(r => r.level <= user.level)
+              .sort((a, b) => b.level - a.level)[0];
+          
+          const targetLevelRoleId = targetLevelRole ? targetLevelRole.roleId : null;
+
+          for (const roleConfig of levelingRoles) {
+              const roleId = roleConfig.roleId;
+              const hasRole = member.roles.cache.has(roleId);
+              
+              if (roleId === targetLevelRoleId) {
+                  // If this is the correct role but the user doesn't have it, add it.
+                  if (!hasRole) {
+                      await member.roles.add(roleId).catch(() => {});
+                  }
+              } else {
+                  // If the user has a different leveling role, remove it.
+                  if (hasRole) {
+                      await member.roles.remove(roleId).catch(() => {});
                   }
               }
-            }
-            levelDownMsg = `\n\n**📉 Level DOWN!** ${targetUser} has dropped to **Level ${user.level}**!`;
+          }
         }
+        levelDownMsg = `\n\n**📉 Level DOWN!** ${targetUser} has dropped to **Level ${user.level}**! (Was Level ${oldLevel})`;
     }
+
 
     await user.save();
     const nextLevelXp = getNextLevelXp(user.level);
