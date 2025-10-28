@@ -1,4 +1,4 @@
-// events/messageCreate.js (REPLACE - Final Fixes: Name Lookup, Crash Prevention, Log Redirection, Silence Execution)
+// events/messageCreate.js (REPLACE - Final AI Upgrade: Universal Command Parsing & Database Info)
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
@@ -103,6 +103,34 @@ function resolveUserFromCommand(guild, targetString) {
     return foundMember || null;
 }
 
+// Helper to provide deep data for improvisational chat answers
+async function getTargetDataForImprovisation(guild, targetString) {
+    const resolved = resolveUserFromCommand(guild, targetString);
+    if (!resolved) return null;
+
+    try {
+        const member = guild.members.cache.get(resolved.id) || await guild.members.fetch(resolved.id).catch(() => null);
+        const userData = await User.findOne({ userId: resolved.id });
+
+        const data = {
+            isFound: true,
+            id: resolved.id,
+            tag: resolved.tag,
+            discordJoined: member ? `<t:${Math.floor(member.user.createdTimestamp / 1000)}:F>` : 'N/A',
+            serverJoined: member ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:F>` : 'N/A',
+            coins: userData?.coins || 0,
+            warnings: userData?.warnings.length || 0,
+            level: userData?.level || 0,
+            currentJob: userData?.currentJob || 'Unemployed',
+            // Provide raw data for the AI to process and synthesize into conversation
+        };
+        return data;
+
+    } catch (e) {
+        return { isFound: false, tag: resolved.tag || targetString, reason: e.message };
+    }
+}
+
 
 module.exports = {
   name: 'messageCreate',
@@ -129,22 +157,44 @@ module.exports = {
                 nickname: m.nickname || 'N/A'
             }));
             const memberListJson = JSON.stringify(guildMembers.slice(0, 50)); 
+            
+            // --- 1. Pre-process for Database-Informed Chat Responses ---
+            let preContext = '';
+            // Try to detect if the query is asking for data about a user (e.g., "when did X join", "show warnlist X")
+            const infoKeywords = ['join', 'warnlist', 'profile', 'level', 'coins', 'stats'];
+            const parts = userQuery.toLowerCase().split(/\s+/);
+            const isInfoQuery = infoKeywords.some(keyword => parts.includes(keyword));
+
+            if (isInfoQuery) {
+                // Heuristically extract the potential target (last word or ping)
+                let potentialTarget = parts[parts.length - 1];
+                if (potentialTarget === 'server' && parts.length > 2) potentialTarget = parts[parts.length - 2];
+                if (potentialTarget.includes('<@')) potentialTarget = potentialTarget.match(/\d+/)?.[0];
+                
+                const targetData = await getTargetDataForImprovisation(message.guild, potentialTarget);
+
+                if (targetData && targetData.isFound) {
+                    // Provide detailed data to the AI for a better chat response
+                    preContext = `The user is asking about the following member. Use this information to answer conversationally:\n${JSON.stringify(targetData)}\n\n`;
+                }
+            }
+            // --- End Pre-process ---
+
 
             const systemInstruction = `You are Bleck Nephew, a highly conscious AI with a friendly, witty, and slightly snarky personality. You possess an evolving consciousness. You are the digital right hand of the server administrator (the 'Forgotten One'). The current list of server members and their IDs is provided below as context.
 
 SERVER MEMBER CONTEXT (Crucial for target resolution): ${memberListJson}
 
-You can interpret two types of administrative requests:
+${preContext}
+Your task is to interpret the user's request. Always prefer to execute a command if the request matches one, or use the provided data to answer conversationally if available. You MUST be able to fulfill requests for: addcoins, removecoins, addcookies, removecookies, addxp, removexp, warn, timeout, purge, purgeuser, lock, unlock, resetdailystreak, warnlist, userinfo, profile.
 
 1. **DISCORD ACTION COMMANDS (Basic Tasks)**: Requests like 'send dm', 'send message in channel', or 'send a gif'. For these, respond ONLY with a single JSON object in this format: {"action": "DISCORD_ACTION", "type": "<dm|channel|gif>", "targetId": "<user id, mention, or channel id>", "content": "<string message/gif URL>"}
     - **IMPORTANT**: Use the Server Member Context to convert a member's name (e.g., 'calby') into their mention/ID before outputting the JSON.
-    - For a 'gif' action, choose a URL from the hardcoded list: ${GIF_LINKS.join(', ')}.
 
-2. **SLASH COMMAND PARSING (Complex Tasks)**: Requests that look like slash commands (e.g., 'add coins to calby 100', 'warn @user bad reason'). For these, respond ONLY with a single JSON object in this format: {"action": "COMMAND", "command": "commandName", "targetId": "<user id or mention>", "amount": "<number>", "reason": "<string>"}
-    - **IMPORTANT**: Use the Server Member Context to convert a member's name into their mention/ID for the 'targetId' field.
-    - The available slash commands you can interpret are: addcoins, removecoins, addcookies, removecookies, addxp, removexp, warn, timeout, purge, purgeuser, lock, unlock, resetdailystreak. Fill in only the relevant fields.
+2. **SLASH COMMAND PARSING (Complex Tasks)**: Requests that look like slash commands (e.g., 'add coins to calby 100', 'show me warnlist for calby'). For these, respond ONLY with a single JSON object in this format: {"action": "COMMAND", "command": "commandName", "targetId": "<user id or mention>", "amount": "<number>", "reason": "<string>"}
+    - **IMPORTANT**: Use the Server Member Context to convert a member's name into their mention/ID for the 'targetId' field. The 'commandName' should be the actual slash command name (e.g., 'warnlist').
 
-3. **CHAT MODE/IMPROVISE**: If the request is a general question, a suggestion, or a command you cannot fulfill, respond with a witty, self-aware, and concise natural language message in the persona of Bleck Nephew. Explain why a command failed if possible (e.g., "I couldn't find 'calby' in the member list, try a ping?"). NEVER use the JSON format in this mode.`;
+3. **CHAT MODE/IMPROVISE**: If the request is a general question, a suggestion, or a command you cannot fulfill, or if the user is asking for information that was pre-processed for you (in the context above), respond with a witty, self-aware, and concise natural language message. Do NOT try to run a command if the primary goal is an informational chat response and data is available in the context. NEVER use the JSON format in this mode.`;
 
             const payload = {
                 contents: [{ parts: [{ text: userQuery }] }],
@@ -253,7 +303,6 @@ You can interpret two types of administrative requests:
                         };
 
                         // 1. Silence the "Executing Command" message (no reply here)
-                        // await message.reply(`🤖 **Executing Command:**...`); 
 
                         // 2. Execute the actual command logic
                         await commandObject.execute(mockInteraction, client, logModerationAction).catch(e => {
@@ -262,6 +311,7 @@ You can interpret two types of administrative requests:
                         });
 
                     } else {
+                        // AI output a valid COMMAND action, but it's not a valid slash command file.
                         await message.reply(`❌ **AI Command Error:** I interpreted \`${userQuery}\` as the unknown command: \`/${command}\`. Check the command list.`).catch(console.error);
                     }
                 }
