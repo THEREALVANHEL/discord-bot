@@ -1,4 +1,4 @@
-// commands/leaderboard.js (REPLACE - Added Pagination and Filtering of Non-Members)
+// commands/leaderboard.js (REPLACE - Added Pagination and Filtering of Non-Members + FIX: Deferred Reply moved to top)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 
@@ -22,10 +22,12 @@ module.exports = {
       option.setName('page')
         .setDescription('The page number to view (Default: 1)')
         .setRequired(false)),
-  execute: async (interaction) => { // Fixed syntax
+  execute: async (interaction) => {
+    // FIX: Move deferReply to the absolute beginning to prevent "Unknown Interaction"
+    await interaction.deferReply();
+
     const type = interaction.options.getString('type');
     const page = interaction.options.getInteger('page') || 1;
-    await interaction.deferReply();
 
     if (page < 1) return interaction.editReply({ content: '❌ Page number must be 1 or higher.' });
 
