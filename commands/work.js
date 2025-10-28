@@ -1,4 +1,4 @@
-// commands/work.js (REPLACE - Final fix for Job Application display/logic)
+// commands/work.js (REPLACE - Final fix for Job Application display/logic + FIX: Moved defer to top)
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -23,7 +23,7 @@ module.exports = {
     .addSubcommand(subcommand =>
         subcommand.setName('apply')
             .setDescription('Apply for a new job based on your progress.')
-    )
+        )
     .addSubcommand(subcommand =>
         subcommand.setName('resign')
             .setDescription('Resign from your current job.')
@@ -31,8 +31,10 @@ module.exports = {
   // Removed global cooldown: 3600, 
   execute: async (interaction, client) => { // Fixed syntax
     const subcommand = interaction.options.getSubcommand();
-    let user = await User.findOne({ userId: interaction.user.id });
+    // FIX: Move defer reply to the very top!
     await interaction.deferReply();
+    
+    let user = await User.findOne({ userId: interaction.user.id });
 
     if (!user) {
       user = new User({ userId: interaction.user.id });
@@ -130,7 +132,7 @@ module.exports = {
         user.xp += xpEarned;
         
         // Level up check (existing chat leveling logic, preserved)
-        const settings = await Settings.findOne({ guildId: interaction.guild.id });
+        const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
         const levelUpChannel = settings?.levelUpChannelId ? 
             interaction.guild.channels.cache.get(settings.levelUpChannelId) : 
             interaction.channel;
