@@ -1,4 +1,4 @@
-// events/messageCreate.js (REPLACE - Final Execution Flow Correction)
+// events/messageCreate.js (REPLACE - Final Execution Flow Correction and Stealth Stabilization)
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
@@ -273,7 +273,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
                 commandExecutionData = JSON.parse(aiResponseText);
             } catch {}
 
-            // HIDE JSON OUTPUT: We capture the raw output and delete the reply containing the raw JSON.
+            // HIDE JSON OUTPUT: We capture the raw output and run the command.
             let jsonReplyMessage = null;
             if (aiResponseText.startsWith('{') && aiResponseText.endsWith('}')) {
                 // Send the raw JSON first, but capture the message object
@@ -285,7 +285,6 @@ Your task is to interpret the user's request. **If the request sounds like a com
                 let { action, command, type, targetId, amount, reason, content } = commandExecutionData;
                 
                 // --- EXECUTION HARDENING: ENSURE REASON IS PRESENT FOR MOD COMMANDS ---
-                // This is the core fix to prevent silent failures due to missing required arguments.
                 if (['warn', 'timeout', 'softban'].includes(command) && !reason) {
                     reason = "AI-inferred action: Reason was missing or unclear.";
                     commandExecutionData.reason = reason;
