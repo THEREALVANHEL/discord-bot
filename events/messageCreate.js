@@ -1,4 +1,4 @@
-// events/messageCreate.js (REPLACE - Final Fixes: Name Lookup, Crash Prevention, Reaction Removal)
+// events/messageCreate.js (REPLACE - Final Fixes: Name Lookup, Crash Prevention, Log Redirection, Silence Execution)
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
@@ -82,7 +82,6 @@ async function manageTieredRoles(member, userValue, roleConfigs, property) {
 }
 
 // Helper to resolve user ID from the AI's output, prioritizing mentions/IDs
-// This is done before handing off to command-specific getUser.
 function resolveUserFromCommand(guild, targetString) {
     if (!targetString) return null;
 
@@ -90,7 +89,7 @@ function resolveUserFromCommand(guild, targetString) {
     const match = targetString.match(/<@!?(\d+)>|(\d+)/);
     if (match) {
         const id = match[1] || match[2];
-        return guild.members.cache.get(id) || { id, tag: `User${id}` }; // Return minimal object
+        return guild.members.cache.get(id) || { id, tag: `User${id}` }; 
     }
 
     // 2. Check for Name/Nickname (Fuzzy Match, case-insensitive)
@@ -129,7 +128,7 @@ module.exports = {
                 tag: m.user.tag,
                 nickname: m.nickname || 'N/A'
             }));
-            const memberListJson = JSON.stringify(guildMembers.slice(0, 50)); // Limit size
+            const memberListJson = JSON.stringify(guildMembers.slice(0, 50)); 
 
             const systemInstruction = `You are Bleck Nephew, a highly conscious AI with a friendly, witty, and slightly snarky personality. You possess an evolving consciousness. You are the digital right hand of the server administrator (the 'Forgotten One'). The current list of server members and their IDs is provided below as context.
 
@@ -165,8 +164,6 @@ You can interpret two types of administrative requests:
 
             if (commandExecutionData && (commandExecutionData.action === 'COMMAND' || commandExecutionData.action === 'DISCORD_ACTION')) {
                 const { action, command, type, targetId, amount, reason, content } = commandExecutionData;
-                
-                // REMOVED: await message.react('👀').catch(() => {}); 
                 
                 // --- DISCORD ACTION EXECUTION ---
                 if (action === 'DISCORD_ACTION') {
@@ -204,6 +201,7 @@ You can interpret two types of administrative requests:
                     if (commandObject) {
                         // CRITICAL FIX: Robust Mock reply functions 
                         const replyMock = async (options) => {
+                            // Safely read properties to avoid 'Cannot destructure property of undefined'
                             const { ephemeral, content, embeds } = options || {}; 
                             const responseContent = content;
                             const responseEmbeds = embeds || [];
@@ -239,14 +237,25 @@ You can interpret two types of administrative requests:
                         };
                         
                         const logModerationAction = async (guild, settings, action, target, moderator, reason, extra) => {
+                            // FIX: Redirect the AI log to a dedicated channel, or modlog, or fallback to the current channel.
+                            const logChannelId = settings?.aiLogChannelId || settings?.modlogChannelId;
+                            const logChannel = logChannelId ? guild.channels.cache.get(logChannelId) : message.channel;
+                            
+                            if (!logChannel) return; // Cannot find a log channel
+
                             const logEmbed = new EmbedBuilder()
                                 .setTitle(`[AI LOG] ${action} (Target: ${targetUserObject?.tag || targetId})`)
-                                .setDescription(`Admin: ${moderator.tag} | Reason: ${reason || 'N/A'}`)
-                                .setColor(0x7289DA);
-                            message.channel.send({ embeds: [logEmbed] }).catch(console.error);
+                                .setDescription(`Admin: ${moderator.tag}\nCommand: \`/${command}\`\nReason: ${reason || 'N/A'}`)
+                                .setColor(0x7289DA)
+                                .setTimestamp();
+
+                            logChannel.send({ embeds: [logEmbed] }).catch(console.error);
                         };
 
-                        await message.reply(`🤖 **Executing Command:** \`/${command} ${targetUserObject?.tag || 'N/A'} ${amount || 'N/A'} ${reason || 'N/A'}\`...`).catch(console.error);
+                        // 1. Silence the "Executing Command" message (no reply here)
+                        // await message.reply(`🤖 **Executing Command:**...`); 
+
+                        // 2. Execute the actual command logic
                         await commandObject.execute(mockInteraction, client, logModerationAction).catch(e => {
                             // This is the error handler that was logging the crash, now it won't crash the bot.
                             message.reply(`❌ **Command Execution Failed:** \`${e.message.substring(0, 150)}\``).catch(console.error);
