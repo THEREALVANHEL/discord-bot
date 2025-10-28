@@ -1,4 +1,4 @@
-// events/messageCreate.js (REPLACE - Final Fix: Injected Default Reason for Moderation and Stealth Execution)
+// events/messageCreate.js (REPLACE - Final Execution Flow Correction)
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
@@ -123,10 +123,12 @@ function resolveUserFromCommand(guild, targetString) {
     let minDistance = 5; 
 
     guild.members.cache.forEach(member => {
+        // FIX: Prioritize Display Name (which is nickname or username)
         const displayName = member.displayName?.toLowerCase(); 
         const username = member.user.username.toLowerCase();
         const tag = member.user.tag.toLowerCase();
 
+        // Check distance for DisplayName, Username, and Tag
         const checkFields = [displayName, username, tag].filter(Boolean); 
         
         for (const field of checkFields) {
@@ -283,6 +285,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
                 let { action, command, type, targetId, amount, reason, content } = commandExecutionData;
                 
                 // --- EXECUTION HARDENING: ENSURE REASON IS PRESENT FOR MOD COMMANDS ---
+                // This will be executed on the AI's output *after* it has made its best guess at the reason.
                 if (['warn', 'timeout', 'softban'].includes(command) && !reason) {
                     reason = "AI-inferred action: Reason was missing or unclear.";
                     commandExecutionData.reason = reason;
@@ -291,7 +294,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
                 
                 // Attempt to delete the raw JSON reply if it exists
                 if (jsonReplyMessage) {
-                    await delay(500); // Wait briefly so the user might see the output attempt, then delete.
+                    await delay(100); // Reduce delay for faster stealth
                     await jsonReplyMessage.delete().catch(console.error);
                 }
                 
@@ -384,7 +387,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
             } else {
                 // 3. Respond with AI chat (Chat Mode)
                 if (jsonReplyMessage) {
-                    await delay(500); // Wait briefly
+                    await delay(100); // Wait briefly
                     await jsonReplyMessage.delete().catch(console.error);
                 }
                 await message.reply(aiResponseText).catch(console.error);
