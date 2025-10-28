@@ -285,7 +285,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
                 let { action, command, type, targetId, amount, reason, content } = commandExecutionData;
                 
                 // --- EXECUTION HARDENING: ENSURE REASON IS PRESENT FOR MOD COMMANDS ---
-                // This will be executed on the AI's output *after* it has made its best guess at the reason.
+                // This is the core fix to prevent silent failures due to missing required arguments.
                 if (['warn', 'timeout', 'softban'].includes(command) && !reason) {
                     reason = "AI-inferred action: Reason was missing or unclear.";
                     commandExecutionData.reason = reason;
@@ -296,9 +296,9 @@ Your task is to interpret the user's request. **If the request sounds like a com
                 // Ensure amount is safe
                 if (!amount) amount = null;
 
-                // Attempt to delete the raw JSON reply if it exists
+                // --- DELETE JSON REPLY (Critical Step for Stealth) ---
                 if (jsonReplyMessage) {
-                    await delay(100); // Reduce delay for faster stealth
+                    await delay(100); 
                     await jsonReplyMessage.delete().catch(console.error);
                 }
                 
@@ -347,7 +347,6 @@ Your task is to interpret the user's request. **If the request sounds like a com
 
                         const mockInteraction = {
                             options: {
-                                // Use the hardened string/null variables
                                 getUser: (name) => targetUserObject,
                                 getInteger: (name) => (name === 'amount' && amount) ? parseInt(amount) : null,
                                 getString: (name) => {
