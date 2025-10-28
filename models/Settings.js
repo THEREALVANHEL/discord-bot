@@ -1,4 +1,4 @@
-// models/Settings.js (REPLACE - Added levelUpChannelId)
+// models/Settings.js (REPLACE - Added aiLogChannelId)
 const mongoose = require('mongoose');
 
 const settingsSchema = new mongoose.Schema({
@@ -8,6 +8,7 @@ const settingsSchema = new mongoose.Schema({
   suggestionChannelId: { type: String, default: null },
   autologChannelId: { type: String, default: null },
   modlogChannelId: { type: String, default: null },
+  aiLogChannelId: { type: String, default: null }, // NEW: AI Log Channel
   noXpChannels: { type: [String], default: [] },
   reactionRoles: [{
     messageId: String,
