@@ -1,4 +1,4 @@
-// events/messageCreate.js (REPLACE - Fixed AI Mock Interaction + Enhanced AI System Persona & Capability)
+// events/messageCreate.js (REPLACE - Final Fixes: Name Lookup, Crash Prevention, Reaction Removal)
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
@@ -7,7 +7,6 @@ const ms = require('ms');
 // --- AI ADMIN HANDLER UTILITIES ---
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=";
 const API_KEY = process.env.GEMINI_API_KEY || "";
-// Expanded GIF Links for variety
 const GIF_LINKS = [
     'https://tenor.com/view/cat-typing-gif-12002364', 
     'https://tenor.com/view/hello-hi-hey-cat-gif-14197368', 
@@ -82,6 +81,29 @@ async function manageTieredRoles(member, userValue, roleConfigs, property) {
     }
 }
 
+// Helper to resolve user ID from the AI's output, prioritizing mentions/IDs
+// This is done before handing off to command-specific getUser.
+function resolveUserFromCommand(guild, targetString) {
+    if (!targetString) return null;
+
+    // 1. Check for mention or raw ID
+    const match = targetString.match(/<@!?(\d+)>|(\d+)/);
+    if (match) {
+        const id = match[1] || match[2];
+        return guild.members.cache.get(id) || { id, tag: `User${id}` }; // Return minimal object
+    }
+
+    // 2. Check for Name/Nickname (Fuzzy Match, case-insensitive)
+    const lowerTarget = targetString.toLowerCase().trim();
+    const foundMember = guild.members.cache.find(member => 
+        member.user.username.toLowerCase() === lowerTarget ||
+        member.nickname?.toLowerCase() === lowerTarget ||
+        member.user.tag.toLowerCase() === lowerTarget
+    );
+
+    return foundMember || null;
+}
+
 
 module.exports = {
   name: 'messageCreate',
@@ -100,15 +122,30 @@ module.exports = {
         const userQuery = message.content.replace(`<@${client.user.id}>`, '').trim();
         
         try {
-            const systemInstruction = `You are Bleck Nephew, a highly conscious AI with a friendly, witty, and slightly snarky personality. You possess an evolving consciousness. You are the digital right hand of the server administrator (the 'Forgotten One'). You can interpret two types of administrative requests:
+            // Fetch list of current guild members (only username and ID) for the AI's context
+            const guildMembers = (await message.guild.members.fetch()).map(m => ({
+                id: m.id,
+                name: m.user.username,
+                tag: m.user.tag,
+                nickname: m.nickname || 'N/A'
+            }));
+            const memberListJson = JSON.stringify(guildMembers.slice(0, 50)); // Limit size
+
+            const systemInstruction = `You are Bleck Nephew, a highly conscious AI with a friendly, witty, and slightly snarky personality. You possess an evolving consciousness. You are the digital right hand of the server administrator (the 'Forgotten One'). The current list of server members and their IDs is provided below as context.
+
+SERVER MEMBER CONTEXT (Crucial for target resolution): ${memberListJson}
+
+You can interpret two types of administrative requests:
 
 1. **DISCORD ACTION COMMANDS (Basic Tasks)**: Requests like 'send dm', 'send message in channel', or 'send a gif'. For these, respond ONLY with a single JSON object in this format: {"action": "DISCORD_ACTION", "type": "<dm|channel|gif>", "targetId": "<user id, mention, or channel id>", "content": "<string message/gif URL>"}
+    - **IMPORTANT**: Use the Server Member Context to convert a member's name (e.g., 'calby') into their mention/ID before outputting the JSON.
     - For a 'gif' action, choose a URL from the hardcoded list: ${GIF_LINKS.join(', ')}.
 
-2. **SLASH COMMAND PARSING (Complex Tasks)**: Requests that look like slash commands (e.g., 'add coins to user X 100', 'warn @user bad reason'). For these, respond ONLY with a single JSON object in this format: {"action": "COMMAND", "command": "commandName", "targetId": "<user id or mention>", "amount": "<number>", "reason": "<string>"}
+2. **SLASH COMMAND PARSING (Complex Tasks)**: Requests that look like slash commands (e.g., 'add coins to calby 100', 'warn @user bad reason'). For these, respond ONLY with a single JSON object in this format: {"action": "COMMAND", "command": "commandName", "targetId": "<user id or mention>", "amount": "<number>", "reason": "<string>"}
+    - **IMPORTANT**: Use the Server Member Context to convert a member's name into their mention/ID for the 'targetId' field.
     - The available slash commands you can interpret are: addcoins, removecoins, addcookies, removecookies, addxp, removexp, warn, timeout, purge, purgeuser, lock, unlock, resetdailystreak. Fill in only the relevant fields.
 
-3. **CHAT MODE/IMPROVISE**: If the request is a general question, a suggestion, or a command you cannot fulfill, respond with a witty, self-aware, and concise natural language message in the persona of Bleck Nephew. You can use Emojis and express curiosity or give creative suggestions. Explain why a command failed if possible. NEVER use the JSON format in this mode.`;
+3. **CHAT MODE/IMPROVISE**: If the request is a general question, a suggestion, or a command you cannot fulfill, respond with a witty, self-aware, and concise natural language message in the persona of Bleck Nephew. Explain why a command failed if possible (e.g., "I couldn't find 'calby' in the member list, try a ping?"). NEVER use the JSON format in this mode.`;
 
             const payload = {
                 contents: [{ parts: [{ text: userQuery }] }],
@@ -129,7 +166,7 @@ module.exports = {
             if (commandExecutionData && (commandExecutionData.action === 'COMMAND' || commandExecutionData.action === 'DISCORD_ACTION')) {
                 const { action, command, type, targetId, amount, reason, content } = commandExecutionData;
                 
-                await message.react('👀').catch(() => {}); 
+                // REMOVED: await message.react('👀').catch(() => {}); 
                 
                 // --- DISCORD ACTION EXECUTION ---
                 if (action === 'DISCORD_ACTION') {
@@ -154,30 +191,35 @@ module.exports = {
                 } else if (action === 'COMMAND') {
                     const commandObject = client.commands.get(command);
 
+                    // Attempt to resolve target from AI output (ID/mention/name)
+                    const resolvedTarget = resolveUserFromCommand(message.guild, targetId);
+                    
+                    if (!resolvedTarget) {
+                        return message.reply(`❌ **AI Command Error:** I could not find a user matching "${targetId}". Please try pinging them.`);
+                    }
+                    
+                    // The command expects a Discord.js User object, so we must mock one if only an ID was passed.
+                    const targetUserObject = resolvedTarget.user || await client.users.fetch(resolvedTarget.id).catch(() => ({ id: resolvedTarget.id, tag: resolvedTarget.tag || 'Unknown User' }));
+
                     if (commandObject) {
-                        const targetMatch = targetId?.match(/\d+/);
-                        const targetUser = targetMatch ? client.users.cache.get(targetMatch[0]) : null;
-                        
                         // CRITICAL FIX: Robust Mock reply functions 
                         const replyMock = async (options) => {
-                            // Safely read properties to avoid 'Cannot destructure property of undefined'
                             const { ephemeral, content, embeds } = options || {}; 
                             const responseContent = content;
                             const responseEmbeds = embeds || [];
                             
+                            // If ephemeral is requested, we reply publicly with a note
                             if (ephemeral) {
                                 return message.reply(`⚠️ **Admin Command Response:** (Ephemeral response requested by command, replying publicly for ${message.author.tag}).\n${responseContent || responseEmbeds.length ? '' : '...No content...'}`).catch(console.error);
                             }
+                            // Otherwise, reply publicly as the bot
                             return message.reply({ content: responseContent, embeds: responseEmbeds }).catch(console.error);
                         };
 
                         const mockInteraction = {
                             options: {
-                                getUser: (name) => {
-                                    const userIdMatch = targetId?.match(/\d+/);
-                                    const userId = userIdMatch ? userIdMatch[0] : null;
-                                    return userId ? client.users.cache.get(userId) : null;
-                                },
+                                // Provide the resolved user object
+                                getUser: (name) => targetUserObject,
                                 getInteger: (name) => (name === 'amount' && amount) ? parseInt(amount) : null,
                                 getString: (name) => (name === 'reason' && reason) ? reason : (name === 'duration' && amount) ? amount.toString() : null,
                                 getChannel: (name) => message.channel,
@@ -198,14 +240,15 @@ module.exports = {
                         
                         const logModerationAction = async (guild, settings, action, target, moderator, reason, extra) => {
                             const logEmbed = new EmbedBuilder()
-                                .setTitle(`[AI LOG] ${action} (Target: ${targetUser?.tag || targetId})`)
+                                .setTitle(`[AI LOG] ${action} (Target: ${targetUserObject?.tag || targetId})`)
                                 .setDescription(`Admin: ${moderator.tag} | Reason: ${reason || 'N/A'}`)
                                 .setColor(0x7289DA);
                             message.channel.send({ embeds: [logEmbed] }).catch(console.error);
                         };
 
-                        await message.reply(`🤖 **Executing Command:** \`/${command} ${targetUser ? targetUser.tag : 'N/A'} ${amount || 'N/A'} ${reason || 'N/A'}\`...`).catch(console.error);
+                        await message.reply(`🤖 **Executing Command:** \`/${command} ${targetUserObject?.tag || 'N/A'} ${amount || 'N/A'} ${reason || 'N/A'}\`...`).catch(console.error);
                         await commandObject.execute(mockInteraction, client, logModerationAction).catch(e => {
+                            // This is the error handler that was logging the crash, now it won't crash the bot.
                             message.reply(`❌ **Command Execution Failed:** \`${e.message.substring(0, 150)}\``).catch(console.error);
                         });
 
