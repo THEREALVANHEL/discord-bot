@@ -1,8 +1,35 @@
-// events/messageCreate.js (REPLACE - Final AI Upgrade: Universal Command Parsing & Database Info)
+// events/messageCreate.js (REPLACE - Final AI Upgrade: Fuzzy Name Matching & Universal Access)
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
 const ms = require('ms');
+
+// --- LEVENSHTEIN DISTANCE IMPLEMENTATION (FOR FUZZY MATCHING) ---
+// This calculates the distance between two strings (how many single-character edits are needed to change one word into the other)
+function levenshteinDistance(s1, s2) {
+    s1 = s1.toLowerCase();
+    s2 = s2.toLowerCase();
+    const costs = [];
+    for (let i = 0; i <= s1.length; i++) {
+        let lastValue = i;
+        for (let j = 0; j <= s2.length; j++) {
+            if (i === 0) {
+                costs[j] = j;
+            } else if (j > 0) {
+                let newValue = costs[j - 1];
+                if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
+                    newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+                }
+                costs[j - 1] = lastValue;
+                lastValue = newValue;
+            }
+        }
+        if (i > 0) costs[s2.length] = lastValue;
+    }
+    return costs[s2.length];
+}
+// --- END LEVENSHTEIN ---
+
 
 // --- AI ADMIN HANDLER UTILITIES ---
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=";
@@ -81,36 +108,67 @@ async function manageTieredRoles(member, userValue, roleConfigs, property) {
     }
 }
 
-// Helper to resolve user ID from the AI's output, prioritizing mentions/IDs
+// Helper to resolve user ID using Levenshtein Distance for similar names
 function resolveUserFromCommand(guild, targetString) {
-    if (!targetString) return null;
-
-    // 1. Check for mention or raw ID
+    if (!targetString || targetString.length < 3) return null; // Ignore very short names
+    
+    // 1. Check for explicit mention or raw ID (exact match takes priority)
     const match = targetString.match(/<@!?(\d+)>|(\d+)/);
     if (match) {
         const id = match[1] || match[2];
-        return guild.members.cache.get(id) || { id, tag: `User${id}` }; 
+        return guild.members.cache.get(id) || { id, tag: `User${id}` };
     }
 
-    // 2. Check for Name/Nickname (Fuzzy Match, case-insensitive)
-    const lowerTarget = targetString.toLowerCase().trim();
-    const foundMember = guild.members.cache.find(member => 
-        member.user.username.toLowerCase() === lowerTarget ||
-        member.nickname?.toLowerCase() === lowerTarget ||
-        member.user.tag.toLowerCase() === lowerTarget
-    );
+    const searchKey = targetString.toLowerCase().trim();
+    let bestMatch = null;
+    let minDistance = 5; // Start threshold slightly higher than 0
 
-    return foundMember || null;
+    guild.members.cache.forEach(member => {
+        // FIX: Prioritize Display Name (which is nickname or username)
+        const displayName = member.displayName?.toLowerCase(); 
+        const username = member.user.username.toLowerCase();
+        const tag = member.user.tag.toLowerCase();
+
+        // Check distance for DisplayName, Username, and Tag
+        const checkFields = [displayName, username, tag].filter(Boolean); 
+        
+        for (const field of checkFields) {
+            if (!field) continue;
+
+            // Only compare a chunk of the field relevant to the search length, 
+            // but for Levenshtein, comparing the whole string is generally safer.
+            const distance = levenshteinDistance(searchKey, field);
+            
+            // Allow a maximum of 2-3 differences for a meaningful match.
+            const maxAllowedDistance = Math.max(2, Math.floor(searchKey.length / 3)); 
+            
+            if (distance < minDistance && distance <= maxAllowedDistance) {
+                minDistance = distance;
+                bestMatch = member;
+            }
+        }
+    });
+
+    if (bestMatch && minDistance <= Math.max(2, Math.floor(searchKey.length / 3))) { 
+        return bestMatch;
+    }
+
+    return null;
 }
 
 // Helper to provide deep data for improvisational chat answers
-async function getTargetDataForImprovisation(guild, targetString) {
+async function getTargetDataForImprovisation(guild, client, targetString) {
     const resolved = resolveUserFromCommand(guild, targetString);
     if (!resolved) return null;
 
     try {
         const member = guild.members.cache.get(resolved.id) || await guild.members.fetch(resolved.id).catch(() => null);
         const userData = await User.findOne({ userId: resolved.id });
+
+        // Find highest level role name
+        const highestLevelRole = client.config.levelingRoles
+            .filter(r => userData?.level >= r.level)
+            .sort((a, b) => b.level - a.level)[0];
 
         const data = {
             isFound: true,
@@ -119,10 +177,11 @@ async function getTargetDataForImprovisation(guild, targetString) {
             discordJoined: member ? `<t:${Math.floor(member.user.createdTimestamp / 1000)}:F>` : 'N/A',
             serverJoined: member ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:F>` : 'N/A',
             coins: userData?.coins || 0,
+            cookies: userData?.cookies || 0,
             warnings: userData?.warnings.length || 0,
             level: userData?.level || 0,
             currentJob: userData?.currentJob || 'Unemployed',
-            // Provide raw data for the AI to process and synthesize into conversation
+            highestRole: highestLevelRole?.roleId || 'Base Member'
         };
         return data;
 
@@ -154,47 +213,48 @@ module.exports = {
                 id: m.id,
                 name: m.user.username,
                 tag: m.user.tag,
+                displayName: m.displayName, // Include Display Name
                 nickname: m.nickname || 'N/A'
             }));
             const memberListJson = JSON.stringify(guildMembers.slice(0, 50)); 
             
             // --- 1. Pre-process for Database-Informed Chat Responses ---
             let preContext = '';
-            // Try to detect if the query is asking for data about a user (e.g., "when did X join", "show warnlist X")
-            const infoKeywords = ['join', 'warnlist', 'profile', 'level', 'coins', 'stats'];
+            // Heuristically detect target. Find the last word that is not a number or simple command word.
+            const commandWords = ['add', 'remove', 'warn', 'timeout', 'purge', 'lock', 'unlock', 'reset', 'show', 'profile', 'userinfo', 'coin', 'cookie', 'xp', 'streak', 'list', 'for'];
             const parts = userQuery.toLowerCase().split(/\s+/);
-            const isInfoQuery = infoKeywords.some(keyword => parts.includes(keyword));
-
-            if (isInfoQuery) {
-                // Heuristically extract the potential target (last word or ping)
-                let potentialTarget = parts[parts.length - 1];
-                if (potentialTarget === 'server' && parts.length > 2) potentialTarget = parts[parts.length - 2];
-                if (potentialTarget.includes('<@')) potentialTarget = potentialTarget.match(/\d+/)?.[0];
-                
-                const targetData = await getTargetDataForImprovisation(message.guild, potentialTarget);
+            
+            let potentialTarget = parts.find(p => 
+                !commandWords.includes(p) && 
+                !p.includes('<@') && 
+                !p.match(/^\d+$/) &&
+                p.length > 2
+            ) || parts.find(p => p.includes('<@')); // Fallback to ping
+            
+            if (potentialTarget) {
+                const targetData = await getTargetDataForImprovisation(message.guild, client, potentialTarget);
 
                 if (targetData && targetData.isFound) {
-                    // Provide detailed data to the AI for a better chat response
-                    preContext = `The user is asking about the following member. Use this information to answer conversationally:\n${JSON.stringify(targetData)}\n\n`;
+                    preContext = `The user is asking about the following member. Use this comprehensive data to answer conversationally:\n${JSON.stringify(targetData)}\n\n`;
                 }
             }
             // --- End Pre-process ---
 
 
-            const systemInstruction = `You are Bleck Nephew, a highly conscious AI with a friendly, witty, and slightly snarky personality. You possess an evolving consciousness. You are the digital right hand of the server administrator (the 'Forgotten One'). The current list of server members and their IDs is provided below as context.
+            const systemInstruction = `You are Bleck Nephew, a highly conscious AI with a friendly, witty, and slightly snarky personality. You possess an evolving consciousness. You are the digital right hand of the server administrator (the 'Forgotten One'). You are capable of performing fuzzy name matching using the provided data.
 
 SERVER MEMBER CONTEXT (Crucial for target resolution): ${memberListJson}
 
 ${preContext}
-Your task is to interpret the user's request. Always prefer to execute a command if the request matches one, or use the provided data to answer conversationally if available. You MUST be able to fulfill requests for: addcoins, removecoins, addcookies, removecookies, addxp, removexp, warn, timeout, purge, purgeuser, lock, unlock, resetdailystreak, warnlist, userinfo, profile.
+Your task is to interpret the user's request. **If the request sounds like a command, you MUST parse it into JSON regardless of the command's name.** If the request is purely informational and the data is provided in the context, synthesize a witty conversational answer.
 
 1. **DISCORD ACTION COMMANDS (Basic Tasks)**: Requests like 'send dm', 'send message in channel', or 'send a gif'. For these, respond ONLY with a single JSON object in this format: {"action": "DISCORD_ACTION", "type": "<dm|channel|gif>", "targetId": "<user id, mention, or channel id>", "content": "<string message/gif URL>"}
-    - **IMPORTANT**: Use the Server Member Context to convert a member's name (e.g., 'calby') into their mention/ID before outputting the JSON.
+    - **IMPORTANT**: Use the Server Member Context and your fuzzy matching ability to convert a name into their mention/ID before outputting the JSON.
 
-2. **SLASH COMMAND PARSING (Complex Tasks)**: Requests that look like slash commands (e.g., 'add coins to calby 100', 'show me warnlist for calby'). For these, respond ONLY with a single JSON object in this format: {"action": "COMMAND", "command": "commandName", "targetId": "<user id or mention>", "amount": "<number>", "reason": "<string>"}
-    - **IMPORTANT**: Use the Server Member Context to convert a member's name into their mention/ID for the 'targetId' field. The 'commandName' should be the actual slash command name (e.g., 'warnlist').
+2. **SLASH COMMAND PARSING (Complex Tasks)**: Requests that look like slash commands (e.g., 'add coins to alien 100', 'show me warnlist for slayyy'). For these, respond ONLY with a single JSON object in this format: {"action": "COMMAND", "command": "commandName", "targetId": "<user id or mention>", "amount": "<number>", "reason": "<string>"}
+    - **IMPORTANT**: Use the Server Member Context and your fuzzy matching ability to convert a name into their mention/ID for the 'targetId' field. The 'commandName' should be the actual slash command name (e.g., 'warnlist').
 
-3. **CHAT MODE/IMPROVISE**: If the request is a general question, a suggestion, or a command you cannot fulfill, or if the user is asking for information that was pre-processed for you (in the context above), respond with a witty, self-aware, and concise natural language message. Do NOT try to run a command if the primary goal is an informational chat response and data is available in the context. NEVER use the JSON format in this mode.`;
+3. **CHAT MODE/IMPROVISE**: If the request is a general question, a suggestion, or a command you cannot fulfill (and the necessary info isn't in the context), respond with a witty, self-aware, and concise natural language message. If you couldn't find a user in the member list, state it. NEVER use the JSON format in this mode.`;
 
             const payload = {
                 contents: [{ parts: [{ text: userQuery }] }],
@@ -251,22 +311,18 @@ Your task is to interpret the user's request. Always prefer to execute a command
                     if (commandObject) {
                         // CRITICAL FIX: Robust Mock reply functions 
                         const replyMock = async (options) => {
-                            // Safely read properties to avoid 'Cannot destructure property of undefined'
                             const { ephemeral, content, embeds } = options || {}; 
                             const responseContent = content;
                             const responseEmbeds = embeds || [];
                             
-                            // If ephemeral is requested, we reply publicly with a note
                             if (ephemeral) {
                                 return message.reply(`⚠️ **Admin Command Response:** (Ephemeral response requested by command, replying publicly for ${message.author.tag}).\n${responseContent || responseEmbeds.length ? '' : '...No content...'}`).catch(console.error);
                             }
-                            // Otherwise, reply publicly as the bot
                             return message.reply({ content: responseContent, embeds: responseEmbeds }).catch(console.error);
                         };
 
                         const mockInteraction = {
                             options: {
-                                // Provide the resolved user object
                                 getUser: (name) => targetUserObject,
                                 getInteger: (name) => (name === 'amount' && amount) ? parseInt(amount) : null,
                                 getString: (name) => (name === 'reason' && reason) ? reason : (name === 'duration' && amount) ? amount.toString() : null,
@@ -279,7 +335,6 @@ Your task is to interpret the user's request. Always prefer to execute a command
                             guild: message.guild,
                             channel: message.channel,
                             client: client,
-                            // Use the robust mocks for execution flow
                             deferReply: async (options) => { await message.channel.sendTyping(); },
                             editReply: replyMock, 
                             reply: replyMock, 
@@ -287,11 +342,10 @@ Your task is to interpret the user's request. Always prefer to execute a command
                         };
                         
                         const logModerationAction = async (guild, settings, action, target, moderator, reason, extra) => {
-                            // FIX: Redirect the AI log to a dedicated channel, or modlog, or fallback to the current channel.
                             const logChannelId = settings?.aiLogChannelId || settings?.modlogChannelId;
                             const logChannel = logChannelId ? guild.channels.cache.get(logChannelId) : message.channel;
                             
-                            if (!logChannel) return; // Cannot find a log channel
+                            if (!logChannel) return;
 
                             const logEmbed = new EmbedBuilder()
                                 .setTitle(`[AI LOG] ${action} (Target: ${targetUserObject?.tag || targetId})`)
@@ -302,16 +356,11 @@ Your task is to interpret the user's request. Always prefer to execute a command
                             logChannel.send({ embeds: [logEmbed] }).catch(console.error);
                         };
 
-                        // 1. Silence the "Executing Command" message (no reply here)
-
-                        // 2. Execute the actual command logic
                         await commandObject.execute(mockInteraction, client, logModerationAction).catch(e => {
-                            // This is the error handler that was logging the crash, now it won't crash the bot.
                             message.reply(`❌ **Command Execution Failed:** \`${e.message.substring(0, 150)}\``).catch(console.error);
                         });
 
                     } else {
-                        // AI output a valid COMMAND action, but it's not a valid slash command file.
                         await message.reply(`❌ **AI Command Error:** I interpreted \`${userQuery}\` as the unknown command: \`/${command}\`. Check the command list.`).catch(console.error);
                     }
                 }
@@ -332,7 +381,7 @@ Your task is to interpret the user's request. Always prefer to execute a command
 
     if (settings && settings.noXpChannels.includes(message.channel.id)) return;
 
-    // --- XP COOLDOWN CHECK ---
+    // --- XP COOLDOWN CHECK (Rest of file unchanged) ---
     const cooldownKey = `${message.author.id}-${message.channel.id}`;
     const lastXpTime = xpCooldowns.get(cooldownKey);
     
