@@ -1,4 +1,4 @@
-// commands/quicksetup.js (REPLACE - Added levelUpChannel option)
+// commands/quicksetup.js (REPLACE - Added aiLogChannel option)
 const { SlashCommandBuilder, ChannelType, EmbedBuilder } = require('discord.js');
 const Settings = require('../models/Settings');
 
@@ -26,6 +26,11 @@ module.exports = {
         .setDescription('Channel for moderation actions logging')
         .addChannelTypes(ChannelType.GuildText)
         .setRequired(false))
+    .addChannelOption(option => // NEW
+        option.setName('ai_log_channel')
+          .setDescription('Channel for AI command execution logs')
+          .addChannelTypes(ChannelType.GuildText)
+          .setRequired(false))
     .addChannelOption(option =>
       option.setName('suggestion_channel')
         .setDescription('Channel for suggestions')
@@ -89,6 +94,14 @@ module.exports = {
       settings.modlogChannelId = modlogChannel.id;
       updatedFields.push(`Mod-Log Channel: ${modlogChannel}`);
     }
+    
+    // NEW: AI Log Channel
+    const aiLogChannel = interaction.options.getChannel('ai_log_channel');
+    if (aiLogChannel) {
+      settings.aiLogChannelId = aiLogChannel.id;
+      updatedFields.push(`AI-Log Channel: ${aiLogChannel}`);
+    }
+
 
     const suggestionChannel = interaction.options.getChannel('suggestion_channel');
     if (suggestionChannel) {
