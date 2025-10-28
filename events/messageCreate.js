@@ -87,7 +87,7 @@ async function manageTieredRoles(member, userValue, roleConfigs, property) {
     
     const targetRoleConfig = roleConfigs
       .filter(r => r[property] <= userValue)
-      .sort((a, b) => b[property] - a[property])[0];
+      .sort((a, b) => b.level - a.level)[0];
       
     const targetRoleId = targetRoleConfig ? targetRoleConfig.roleId : null;
 
@@ -289,9 +289,13 @@ Your task is to interpret the user's request. **If the request sounds like a com
                 if (['warn', 'timeout', 'softban'].includes(command) && !reason) {
                     reason = "AI-inferred action: Reason was missing or unclear.";
                     commandExecutionData.reason = reason;
+                } else if (!reason) {
+                    reason = null;
                 }
-                // --- END HARDENING ---
                 
+                // Ensure amount is safe
+                if (!amount) amount = null;
+
                 // Attempt to delete the raw JSON reply if it exists
                 if (jsonReplyMessage) {
                     await delay(100); // Reduce delay for faster stealth
@@ -343,12 +347,17 @@ Your task is to interpret the user's request. **If the request sounds like a com
 
                         const mockInteraction = {
                             options: {
+                                // Use the hardened string/null variables
                                 getUser: (name) => targetUserObject,
                                 getInteger: (name) => (name === 'amount' && amount) ? parseInt(amount) : null,
-                                getString: (name) => (name === 'reason' && reason) ? reason : (name === 'duration' && amount) ? amount.toString() : null,
+                                getString: (name) => {
+                                    if (name === 'reason') return reason; // Now guaranteed to be string or null
+                                    if (name === 'duration') return amount ? amount.toString() : null; // Now guaranteed to be string or null
+                                    return null;
+                                },
                                 getChannel: (name) => message.channel,
-                                getRole: () => null,
-                                getAttachment: () => null,
+                                getRole: (name) => null,
+                                getAttachment: (name) => null,
                             },
                             user: message.author,
                             member: message.member,
