@@ -1,4 +1,4 @@
-// events/messageCreate.js (REPLACE - Final Fix: Hiding JSON & Hardened Command Execution)
+// events/messageCreate.js (REPLACE - Final Fix: Injected Default Reason for Moderation and Stealth Execution)
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
@@ -123,12 +123,10 @@ function resolveUserFromCommand(guild, targetString) {
     let minDistance = 5; 
 
     guild.members.cache.forEach(member => {
-        // FIX: Prioritize Display Name (which is nickname or username)
         const displayName = member.displayName?.toLowerCase(); 
         const username = member.user.username.toLowerCase();
         const tag = member.user.tag.toLowerCase();
 
-        // Check distance for DisplayName, Username, and Tag
         const checkFields = [displayName, username, tag].filter(Boolean); 
         
         for (const field of checkFields) {
@@ -160,7 +158,7 @@ async function getTargetDataForImprovisation(guild, client, targetString) {
     try {
         const member = guild.members.cache.get(resolved.id) || await guild.members.fetch(resolved.id).catch(() => null);
         const userData = await User.findOne({ userId: resolved.id });
-        
+
         // Find highest level role name
         const highestLevelRole = client.config.levelingRoles
             .filter(r => userData?.level >= r.level)
@@ -243,9 +241,9 @@ SERVER MEMBER CONTEXT (Crucial for target resolution): ${memberListJson}
 ${preContext}
 Your task is to interpret the user's request. **If the request sounds like a command, you MUST parse it into JSON regardless of the command's name. You MUST ensure the JSON only contains necessary and valid fields for the command.** If the request is purely informational and the data is provided in the context, synthesize a witty conversational answer.
 
-**COMMAND FIELD GUIDE (Only include fields if necessary):**
+**COMMAND FIELD GUIDE (Only include fields if necessary, reason is REQUIRED for moderation actions):**
 - **addcoins/removecoins/addcookies/removecookies/addxp/removexp/beg/gamble**: {"command": "...", "targetId": "...", "amount": "..."}
-- **warn/timeout/softban**: {"command": "...", "targetId": "...", "reason": "...", "amount": "..."} (Use 'amount' for duration in timeout)
+- **warn/timeout/softban**: {"command": "...", "targetId": "...", "reason": "..."} (Always provide a reason string, even a default one if the user is lazy, or explicitly state the reason)
 - **purge/purgeuser**: {"command": "...", "targetId": "...", "amount": "..."}
 - **warnlist/profile/userinfo**: {"command": "...", "targetId": "..."}
 
@@ -273,7 +271,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
                 commandExecutionData = JSON.parse(aiResponseText);
             } catch {}
 
-            // HIDE JSON OUTPUT: We check if the AI outputted JSON and delete the reply containing the raw JSON.
+            // HIDE JSON OUTPUT: We capture the raw output and delete the reply containing the raw JSON.
             let jsonReplyMessage = null;
             if (aiResponseText.startsWith('{') && aiResponseText.endsWith('}')) {
                 // Send the raw JSON first, but capture the message object
@@ -282,11 +280,18 @@ Your task is to interpret the user's request. **If the request sounds like a com
             }
 
             if (commandExecutionData && (commandExecutionData.action === 'COMMAND' || commandExecutionData.action === 'DISCORD_ACTION')) {
-                const { action, command, type, targetId, amount, reason, content } = commandExecutionData;
-
+                let { action, command, type, targetId, amount, reason, content } = commandExecutionData;
+                
+                // --- EXECUTION HARDENING: ENSURE REASON IS PRESENT FOR MOD COMMANDS ---
+                if (['warn', 'timeout', 'softban'].includes(command) && !reason) {
+                    reason = "AI-inferred action: Reason was missing or unclear.";
+                    commandExecutionData.reason = reason;
+                }
+                // --- END HARDENING ---
+                
                 // Attempt to delete the raw JSON reply if it exists
                 if (jsonReplyMessage) {
-                    await delay(1500); // Wait briefly so the user sees the output attempt
+                    await delay(500); // Wait briefly so the user might see the output attempt, then delete.
                     await jsonReplyMessage.delete().catch(console.error);
                 }
                 
@@ -322,7 +327,6 @@ Your task is to interpret the user's request. **If the request sounds like a com
                     const targetUserObject = resolvedTarget.user || await client.users.fetch(resolvedTarget.id).catch(() => ({ id: resolvedTarget.id, tag: resolvedTarget.tag || 'Unknown User' }));
 
                     if (commandObject) {
-                        // CRITICAL FIX: Robust Mock reply functions 
                         const replyMock = async (options) => {
                             const { ephemeral, content, embeds } = options || {}; 
                             const responseContent = content;
@@ -380,7 +384,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
             } else {
                 // 3. Respond with AI chat (Chat Mode)
                 if (jsonReplyMessage) {
-                    await delay(1500); // Wait briefly
+                    await delay(500); // Wait briefly
                     await jsonReplyMessage.delete().catch(console.error);
                 }
                 await message.reply(aiResponseText).catch(console.error);
