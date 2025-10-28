@@ -1,4 +1,4 @@
-// commands/daily.js (REPLACE - Fixed streak logic for missed day reset to 1/0 + MODERATE XP Formula)
+// commands/daily.js (REPLACE - Fixed streak logic for missed day reset to 1/0 + MODERATE XP Formula + REVISED STREAK LOGIC)
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -8,6 +8,11 @@ const ms = require('ms');
 const getNextLevelXp = (level) => {
     // New Moderate: 100 * Math.pow(level + 1, 1.5)
     return Math.floor(100 * Math.pow(level + 1, 1.5));
+};
+
+// Helper function to get the UTC start of a day
+const getUtcStart = (date) => {
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())).getTime();
 };
 
 module.exports = {
@@ -27,14 +32,13 @@ module.exports = {
 
     // --- Midnight Reset Logic (UTC) ---
     const now = new Date();
-    // Get the start of today in UTC (00:00:00.000 UTC of the current date)
-    const startOfTodayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const startOfTodayUTC = getUtcStart(now);
 
-    if (user.lastDaily && user.lastDaily.getTime() >= startOfTodayUTC.getTime()) {
+    if (user.lastDaily && getUtcStart(user.lastDaily) === startOfTodayUTC) {
       // Already claimed today (UTC date check)
       
       // Calculate time left until next UTC midnight (start of tomorrow UTC)
-      const startOfTomorrowUTC = new Date(startOfTodayUTC.getTime() + ms('24h'));
+      const startOfTomorrowUTC = new Date(startOfTodayUTC + ms('24h'));
       const timeLeft = ms(startOfTomorrowUTC.getTime() - now.getTime(), { long: true });
 
       return interaction.editReply({ content: `⏱️ You can claim your daily reward again in **${timeLeft}** (resets at UTC midnight).`, ephemeral: true });
@@ -45,25 +49,24 @@ module.exports = {
     let xpEarned = Math.floor(Math.random() * 20) + 10;
     let streakBonus = '';
     
-    // --- UPDATED STREAK LOGIC ---
+    // --- UPDATED STREAK LOGIC (REVISED FOR UTC DAYS) ---
     let currentStreak = user.dailyStreak || 0;
 
     if (!user.lastDaily) {
         // First ever claim
         currentStreak = 1;
     } else {
-        const timeSinceLastClaim = now.getTime() - user.lastDaily.getTime();
-
-        if (timeSinceLastClaim > ms('48h')) {
-            // Missed an entire day's window (missed yesterday), reset streak.
-            currentStreak = 1; // Start a new streak of 1 on successful claim
-        } else if (timeSinceLastClaim > ms('24h')) {
-            // Claimed in the previous UTC day (24-48h window), streak continues.
+        const lastDailyUTCStart = getUtcStart(user.lastDaily);
+        const diffDays = Math.round((startOfTodayUTC - lastDailyUTCStart) / ms('24h'));
+        
+        if (diffDays === 1) {
+            // Claimed yesterday (UTC), streak continues
             currentStreak++;
-        } else {
-            // Claimed today but the first check failed somehow (shouldn't happen here)
-            // Or a very fast second claim which is blocked by the first check.
-        }
+        } else if (diffDays > 1) {
+            // Missed one or more days, reset streak
+            currentStreak = 1;
+        } 
+        // Note: diffDays === 0 is handled by the initial check (early return).
     }
     
     // 7-Day Streak Bonus Logic
@@ -80,7 +83,7 @@ module.exports = {
     user.lastDaily = now;
 
     // Check for level up
-    const settings = await Settings.findOne({ guildId: interaction.guild.id });
+    const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
     const levelUpChannel = settings?.levelUpChannelId ? 
       interaction.guild.channels.cache.get(settings.levelUpChannelId) : 
       interaction.channel;
