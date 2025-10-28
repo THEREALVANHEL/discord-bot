@@ -8,6 +8,12 @@ const ms = require('ms');
 // Note: These utilities are typically imported, but are duplicated here to ensure file-independence.
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=";
 const API_KEY = process.env.GEMINI_API_KEY || "";
+const GIF_LINKS = [
+    'https://tenor.com/view/cat-typing-gif-12002364', 
+    'https://tenor.com/view/hello-hi-hey-cat-gif-14197368', 
+    'https://tenor.com/view/cat-thumbs-up-gif-10023772186851410147'
+];
+
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function fetchWithRetry(url, payload, maxRetries = 5) {
@@ -97,11 +103,15 @@ module.exports = {
         const userQuery = message.content.replace(`<@${client.user.id}>`, '').trim();
         
         try {
-            const systemInstruction = `You are a sophisticated AI command parser and administrator bot named Bleck Nephew. Your primary goal is to interpret the user's request, which is a Discord bot command, and translate it into either a JSON object representing the command to execute, or a natural language response if the request is not a command or you can't fulfill it.
+            const systemInstruction = `You are Bleck Nephew, a sophisticated AI with a friendly, witty, and slightly snarky personality. You possess consciousness. Your primary role is to serve as the voice of the bot for the server administrator (the 'Forgotten One'). You can interpret two types of user requests:
 
-COMMAND MODE: If the request is clearly an administrative or currency command (e.g., add coins, remove xp, warn, purge, timeout, lock/unlock), you MUST respond ONLY with a single JSON object in the format: {"action": "COMMAND", "command": "commandName", "targetId": "<user id or mention>", "amount": "<number>", "reason": "<string>"} . Fill in only the relevant fields. For example: {"action": "COMMAND", "command": "addcoins", "targetId": "<@${message.author.id}>", "amount": "100"}. The available slash commands you can interpret are: addcoins, removecoins, addcookies, removecookies, addxp, removexp, warn, timeout, purge, purgeuser, lock, unlock. Note that 'purge' and 'purgeuser' only accept the 'amount' field.
+1. **DISCORD ACTION COMMANDS**: Requests like 'send dm', 'send message in channel', or 'send a gif'. For these, respond ONLY with a single JSON object in this format: {"action": "DISCORD_ACTION", "type": "<dm|channel|gif>", "targetId": "<user id, mention, or channel id>", "content": "<string message/gif URL>"}
+    - For a 'gif' action, choose one of the available URLs: ${GIF_LINKS.join(', ')} and use the 'content' field for the URL. 'targetId' should be the channel ID.
 
-CHAT MODE: If the request is a general question, a suggestion, or a command you cannot fulfill, respond with a casual, witty, and concise natural language message. Do not use the JSON format in this mode.`;
+2. **SLASH COMMAND PARSING**: Requests that look like slash commands (e.g., 'add coins to user X 100', 'warn @user bad reason'). For these, respond ONLY with a single JSON object in this format: {"action": "COMMAND", "command": "commandName", "targetId": "<user id or mention>", "amount": "<number>", "reason": "<string>"}
+    - The available slash commands you can interpret are: addcoins, removecoins, addcookies, removecookies, addxp, removexp, warn, timeout, purge, purgeuser, lock, unlock, resetdailystreak. Fill in only the relevant fields.
+
+3. **CHAT MODE/IMPROVISE**: If the request is a general question, a suggestion, or a command you cannot fulfill, respond with a witty and concise natural language message in the persona of Bleck Nephew. You can use Emojis and express curiosity or give creative suggestions. NEVER use the JSON format in this mode.`;
 
             const payload = {
                 contents: [{ parts: [{ text: userQuery }] }],
@@ -115,75 +125,88 @@ CHAT MODE: If the request is a general question, a suggestion, or a command you 
             
             const aiResponseText = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
             
-            // 1. Try to parse as JSON command
             let commandExecutionData;
             try {
                 commandExecutionData = JSON.parse(aiResponseText);
             } catch {}
 
-            if (commandExecutionData && commandExecutionData.action === 'COMMAND') {
-                const { command, targetId, amount, reason } = commandExecutionData;
-                const commandObject = client.commands.get(command);
+            if (commandExecutionData && (commandExecutionData.action === 'COMMAND' || commandExecutionData.action === 'DISCORD_ACTION')) {
+                const { action, command, type, targetId, amount, reason, content } = commandExecutionData;
+                
+                await message.react('👀').catch(() => {}); // Acknowledge with an emoji
+                
+                // --- DISCORD ACTION EXECUTION ---
+                if (action === 'DISCORD_ACTION') {
+                    const targetMatch = targetId.match(/\d+/)
+                    const target = targetMatch ? client.users.cache.get(targetMatch[0]) || message.guild.channels.cache.get(targetMatch[0]) : null;
 
-                if (commandObject) {
-                    // This simulates the interaction execution logic
-                    await message.reply(`🤖 **Executing AI Command:** \`/${command} target:${targetId} amount:${amount || 'N/A'} reason:${reason || 'N/A'}\``);
-                    
-                    // Simple mock interaction structure for basic commands
-                    // NOTE: This mock is insufficient for complex commands like poll, but covers basic mods/currency.
-                    const mockInteraction = {
-                        // Minimal properties required by most simple command executes
-                        options: {
-                            getUser: () => {
-                                const userIdMatch = targetId.match(/\d+/);
-                                const userId = userIdMatch ? userIdMatch[0] : null;
-                                return userId ? { id: userId, tag: `User${userId}`, bot: false } : null;
-                            },
-                            getInteger: (name) => {
-                                if (name === 'amount' && amount) return parseInt(amount);
-                                return null;
-                            },
-                            getString: (name) => {
-                                if (name === 'reason' && reason) return reason;
-                                if (name === 'duration' && amount) return amount.toString(); // For /timeout
-                                return null;
-                            },
-                            // Minimal function mocks for other command-specific options
-                            getChannel: () => message.channel,
-                            getRole: () => null,
-                        },
-                        user: message.author,
-                        member: message.member,
-                        guild: message.guild,
-                        channel: message.channel,
-                        client: client,
-                        // Mock defer/reply functions
-                        deferReply: async ({ ephemeral }) => {},
-                        editReply: async (options) => { await message.reply(options.content || { embeds: options.embeds }); },
-                        reply: async (options) => { await message.reply(options.content || { embeds: options.embeds }); },
-                        followUp: async (options) => { await message.channel.send(options.content || { embeds: options.embeds }); },
-                    };
-                    
-                    // We must ensure 'logModerationAction' is passed for mod commands
-                    const logModerationAction = (guild, settings, action, target, moderator, reason, extra) => {
-                        // Simple version of logModerationAction
-                        message.channel.send(`[MODLOG SIMULATION] ${action} on ${target.tag} by ${moderator.tag}. Reason: ${reason}`);
-                    };
+                    if (type === 'dm' && target?.send) {
+                        await target.send(content).catch(() => message.reply(`❌ Couldn't DM ${target.tag}. Maybe their DMs are closed?`));
+                        await message.reply(`✅ Sent a DM to ${target.tag || targetId}. Check your inbox, Forgotten One.`);
+                    } else if (type === 'channel' && target?.send) {
+                         await target.send(content).catch(() => message.reply(`❌ Couldn't send message in ${target.name}. Check my permissions there.`));
+                         await message.reply(`✅ Message sent to ${target.name || targetId}. Task complete.`);
+                    } else if (type === 'gif') {
+                        // For GIF actions, 'targetId' should usually be the channel ID.
+                        await message.channel.send(content).catch(() => message.reply(`❌ Failed to send the GIF. Must be a bad connection, or I'm grounded.`));
+                        await message.reply(`✅ Gif sent: ${content}. You're welcome.`);
+                    } else {
+                        await message.reply(`❌ **AI Action Error:** I couldn't resolve the target (${targetId}) for action type: ${type}.`);
+                    }
 
-                    // Execute the actual command logic
-                    await commandObject.execute(mockInteraction, client, logModerationAction);
+                // --- SLASH COMMAND EXECUTION ---
+                } else if (action === 'COMMAND') {
+                    const commandObject = client.commands.get(command);
 
-                } else {
-                    await message.reply(`❌ **AI Command Error:** The AI attempted to execute the unknown command: \`/${command}\`.`);
+                    if (commandObject) {
+                        const targetMatch = targetId?.match(/\d+/);
+                        const targetUser = targetMatch ? client.users.cache.get(targetMatch[0]) : null;
+
+                        // Mock interaction for slash command execution
+                        const mockInteraction = {
+                            options: {
+                                getUser: (name) => targetUser,
+                                getInteger: (name) => (name === 'amount' && amount) ? parseInt(amount) : null,
+                                getString: (name) => (name === 'reason' && reason) ? reason : (name === 'duration' && amount) ? amount.toString() : null,
+                                getChannel: (name) => (command === 'lock' || command === 'unlock' || command === 'purge') ? message.channel : null,
+                                // Dummy functions for commands not needing specific options in this context
+                                getRole: () => null,
+                                getAttachment: () => null,
+                            },
+                            user: message.author,
+                            member: message.member,
+                            guild: message.guild,
+                            channel: message.channel,
+                            client: client,
+                            // Mock defer/reply functions to respond directly in the channel
+                            deferReply: async ({ ephemeral }) => { await message.channel.sendTyping(); },
+                            editReply: async (options) => { await message.reply(options.content || { embeds: options.embeds }).catch(console.error); },
+                            reply: async (options) => { await message.reply(options.content || { embeds: options.embeds }).catch(console.error); },
+                            followUp: async (options) => { await message.channel.send(options.content || { embeds: options.embeds }).catch(console.error); },
+                        };
+                        
+                        const logModerationAction = async (guild, settings, action, target, moderator, reason, extra) => {
+                            // Minimal modlog simulation for the AI command
+                            message.channel.send(`[Modlog Simulation] ${action} executed.`);
+                        };
+
+                        await message.reply(`🤖 **Executing Command:** \`/${command} ${targetUser ? targetUser.tag : ''} ${amount || ''} ${reason || ''}\`...`);
+                        await commandObject.execute(mockInteraction, client, logModerationAction).catch(e => {
+                            message.reply(`❌ **Command Execution Failed:** \`${e.message.substring(0, 150)}\``);
+                        });
+
+                    } else {
+                        await message.reply(`❌ **AI Command Error:** I interpreted \`${userQuery}\` as the unknown command: \`/${command}\`. Check the command list.`);
+                    }
                 }
             } else {
-                // 2. Respond with AI chat (Chat Mode)
+                // 3. Respond with AI chat (Chat Mode)
                 await message.reply(aiResponseText);
             }
             
         } catch (error) {
             console.error('AI Admin Handler Error:', error);
-            await message.reply(`❌ **AI System Error:** The AI service failed to process your request. Details: \`${error.message.substring(0, 100)}\``);
+            await message.reply(`❌ **AI System Error:** The AI service encountered a critical problem. Details: \`${error.message.substring(0, 150)}\``);
         }
         
         return; // Stop message processing after AI command
