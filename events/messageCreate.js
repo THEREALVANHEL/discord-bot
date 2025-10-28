@@ -1,4 +1,4 @@
-// events/messageCreate.js (REPLACE - Final Execution Flow Correction and Stealth Stabilization)
+// events/messageCreate.js (REPLACE - Final Execution Flow Correction)
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
@@ -362,7 +362,9 @@ Your task is to interpret the user's request. **If the request sounds like a com
                             guild: message.guild,
                             channel: message.channel,
                             client: client,
-                            deferReply: async (options) => { await message.channel.sendTyping(); },
+                            // CRITICAL FIX: The commands expect to defer or reply *directly to Discord*. We simulate this by simply performing the action and logging.
+                            // We do NOT use message.reply/message.followUp here.
+                            deferReply: async (options) => { /* Simulate deferral success */ },
                             editReply: replyMock, 
                             reply: replyMock, 
                             followUp: async (options) => { await message.channel.send(options.content || { embeds: options.embeds }).catch(console.error); },
@@ -383,7 +385,9 @@ Your task is to interpret the user's request. **If the request sounds like a com
                             logChannel.send({ embeds: [logEmbed] }).catch(console.error);
                         };
 
+                        // Execute the command logic
                         await commandObject.execute(mockInteraction, client, logModerationAction).catch(e => {
+                            // If the command fails internally (like invalid amount format), reply with the failure.
                             message.reply(`❌ **Command Execution Failed:** \`${e.message.substring(0, 150)}\``).catch(console.error);
                         });
 
