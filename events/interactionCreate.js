@@ -175,7 +175,6 @@ module.exports = {
 
     // Handle Button Interactions
     if (interaction.isButton()) {
-      // ... (rest of button logic remains unchanged)
       // Note: Full content of the unchanged sections is omitted for brevity but is presumed to exist in the actual file.
     }
   },
