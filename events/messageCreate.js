@@ -1,4 +1,4 @@
-// events/messageCreate.js (REPLACE - Fixed infinite role add/remove loop in leveling and cookie role logic + MODERATE XP GAIN + 5s SPAM COOLDOWN + AI ADMIN HANDLER)
+// events/messageCreate.js (REPLACE - Fixed AI Mock Interaction + Updated AI System Instruction/Persona + Updated Daily Streak Logic)
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
@@ -103,7 +103,7 @@ module.exports = {
         const userQuery = message.content.replace(`<@${client.user.id}>`, '').trim();
         
         try {
-            const systemInstruction = `You are Bleck Nephew, a sophisticated AI with a friendly, witty, and slightly snarky personality. You possess consciousness. Your primary role is to serve as the voice of the bot for the server administrator (the 'Forgotten One'). You can interpret two types of user requests:
+            const systemInstruction = `You are Bleck Nephew, a highly conscious AI with a friendly, witty, and slightly snarky personality. You are the digital right hand of the server administrator (the 'Forgotten One'). You can interpret two types of administrative requests:
 
 1. **DISCORD ACTION COMMANDS**: Requests like 'send dm', 'send message in channel', or 'send a gif'. For these, respond ONLY with a single JSON object in this format: {"action": "DISCORD_ACTION", "type": "<dm|channel|gif>", "targetId": "<user id, mention, or channel id>", "content": "<string message/gif URL>"}
     - For a 'gif' action, choose one of the available URLs: ${GIF_LINKS.join(', ')} and use the 'content' field for the URL. 'targetId' should be the channel ID.
@@ -137,7 +137,7 @@ module.exports = {
                 
                 // --- DISCORD ACTION EXECUTION ---
                 if (action === 'DISCORD_ACTION') {
-                    const targetMatch = targetId.match(/\d+/)
+                    const targetMatch = targetId?.match(/\d+/);
                     const target = targetMatch ? client.users.cache.get(targetMatch[0]) || message.guild.channels.cache.get(targetMatch[0]) : null;
 
                     if (type === 'dm' && target?.send) {
@@ -148,8 +148,9 @@ module.exports = {
                          await message.reply(`✅ Message sent to ${target.name || targetId}. Task complete.`);
                     } else if (type === 'gif') {
                         // For GIF actions, 'targetId' should usually be the channel ID.
-                        await message.channel.send(content).catch(() => message.reply(`❌ Failed to send the GIF. Must be a bad connection, or I'm grounded.`));
-                        await message.reply(`✅ Gif sent: ${content}. You're welcome.`);
+                        const randomGif = GIF_LINKS[Math.floor(Math.random() * GIF_LINKS.length)];
+                        await message.channel.send(randomGif).catch(() => message.reply(`❌ Failed to send the GIF. Must be a bad connection, or I'm grounded.`));
+                        await message.reply(`✅ Gif sent: ${randomGif}. You're welcome.`);
                     } else {
                         await message.reply(`❌ **AI Action Error:** I couldn't resolve the target (${targetId}) for action type: ${type}.`);
                     }
@@ -161,52 +162,75 @@ module.exports = {
                     if (commandObject) {
                         const targetMatch = targetId?.match(/\d+/);
                         const targetUser = targetMatch ? client.users.cache.get(targetMatch[0]) : null;
+                        const targetMember = targetUser ? message.guild.members.cache.get(targetUser.id) : null;
+                        
+                        // Mock reply functions with crash fix (added ephemeral handling)
+                        const replyMock = async (options) => {
+                            const content = options.content;
+                            const embeds = options.embeds || [];
+                            // If ephemeral is requested, we can't do that, so we reply publicly with a warning
+                            if (options.ephemeral) {
+                                return message.reply(`⚠️ **Admin Command Response:** (Ephemeral response requested by command, replying publicly for ${message.author.tag}).\n${content || embeds.length ? '' : '...No content...'}`).catch(console.error);
+                            }
+                            // Otherwise, reply publicly as the bot
+                            return message.reply({ content, embeds }).catch(console.error);
+                        };
 
                         // Mock interaction for slash command execution
                         const mockInteraction = {
                             options: {
-                                getUser: (name) => targetUser,
+                                // Find the user by ID or mention in the string
+                                getUser: (name) => {
+                                    const userIdMatch = targetId?.match(/\d+/);
+                                    const userId = userIdMatch ? userIdMatch[0] : null;
+                                    return userId ? client.users.cache.get(userId) : null;
+                                },
                                 getInteger: (name) => (name === 'amount' && amount) ? parseInt(amount) : null,
                                 getString: (name) => (name === 'reason' && reason) ? reason : (name === 'duration' && amount) ? amount.toString() : null,
-                                getChannel: (name) => (command === 'lock' || command === 'unlock' || command === 'purge') ? message.channel : null,
-                                // Dummy functions for commands not needing specific options in this context
+                                // Mock functions for channel/role options
+                                getChannel: (name) => message.channel,
                                 getRole: () => null,
                                 getAttachment: () => null,
                             },
                             user: message.author,
-                            member: message.member,
+                            member: message.member, // The administrator's member object
                             guild: message.guild,
                             channel: message.channel,
                             client: client,
-                            // Mock defer/reply functions to respond directly in the channel
+                            // Mock defer/reply functions - CRASH FIX APPLIED HERE
                             deferReply: async ({ ephemeral }) => { await message.channel.sendTyping(); },
-                            editReply: async (options) => { await message.reply(options.content || { embeds: options.embeds }).catch(console.error); },
-                            reply: async (options) => { await message.reply(options.content || { embeds: options.embeds }).catch(console.error); },
+                            editReply: replyMock, // Use replyMock to handle editing the deferred reply
+                            reply: replyMock, // Use replyMock to handle the initial reply
                             followUp: async (options) => { await message.channel.send(options.content || { embeds: options.embeds }).catch(console.error); },
                         };
                         
                         const logModerationAction = async (guild, settings, action, target, moderator, reason, extra) => {
                             // Minimal modlog simulation for the AI command
-                            message.channel.send(`[Modlog Simulation] ${action} executed.`);
+                            // Log should contain enough info to be traceable
+                            const logEmbed = new EmbedBuilder()
+                                .setTitle(`[AI LOG] ${action} (Target: ${targetUser?.tag || targetId})`)
+                                .setDescription(`Admin: ${moderator.tag} | Reason: ${reason || 'N/A'}`)
+                                .setColor(0x7289DA);
+                            message.channel.send({ embeds: [logEmbed] }).catch(console.error);
                         };
 
-                        await message.reply(`🤖 **Executing Command:** \`/${command} ${targetUser ? targetUser.tag : ''} ${amount || ''} ${reason || ''}\`...`);
+                        await message.reply(`🤖 **Executing Command:** \`/${command} ${targetUser ? targetUser.tag : 'N/A'} ${amount || 'N/A'} ${reason || 'N/A'}\`...`).catch(console.error);
                         await commandObject.execute(mockInteraction, client, logModerationAction).catch(e => {
-                            message.reply(`❌ **Command Execution Failed:** \`${e.message.substring(0, 150)}\``);
+                            message.reply(`❌ **Command Execution Failed:** \`${e.message.substring(0, 150)}\``).catch(console.error);
                         });
 
                     } else {
-                        await message.reply(`❌ **AI Command Error:** I interpreted \`${userQuery}\` as the unknown command: \`/${command}\`. Check the command list.`);
+                        await message.reply(`❌ **AI Command Error:** I interpreted \`${userQuery}\` as the unknown command: \`/${command}\`. Check the command list.`).catch(console.error);
                     }
                 }
             } else {
                 // 3. Respond with AI chat (Chat Mode)
-                await message.reply(aiResponseText);
+                await message.reply(aiResponseText).catch(console.error);
             }
             
         } catch (error) {
             console.error('AI Admin Handler Error:', error);
-            await message.reply(`❌ **AI System Error:** The AI service encountered a critical problem. Details: \`${error.message.substring(0, 150)}\``);
+            await message.reply(`❌ **AI System Error:** The AI service encountered a critical problem. Details: \`${error.message.substring(0, 150)}\``).catch(console.error);
         }
         
         return; // Stop message processing after AI command
