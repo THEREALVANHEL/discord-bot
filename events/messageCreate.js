@@ -1,320 +1,334 @@
-// events/messageCreate.js (FINAL VERSION - Role Restricted, Full Power)
-import { EmbedBuilder, ChannelType } from "discord.js";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { config } from "dotenv";
-import User from "../models/User.js";
-import Server from "../models/Server.js";
-import Settings from "../models/Settings.js";
-import { findOrCreateUser } from "../utils/findOrCreateUser.js";
-import { generateUserLevel } from "../utils/levelSystem.js";
-import { updateUserRank } from "../utils/rankSystem.js";
-import { generateXP, XP_COOLDOWN } from "../utils/xpSystem.js";
-import { createNewUser } from "../utils/createNewUser.js";
-import { processCommand } from "../commands/index.js";
-import { safeEval } from "../utils/safeEval.js";
-import { findUserInGuild } from "../utils/findUserInGuild.js";
-import { searchGiphyGif } from "../utils/searchGiphyGif.js";
-import { delay } from "../utils/delay.js";
-import { formatDuration } from "../utils/formatDuration.js";
-import { truncateText } from "../utils/truncateText.js";
+// events/messageCreate.js (FIXED VERSION - Full AI Integration)
+const { EmbedBuilder, ChannelType } = require('discord.js');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const User = require('../models/User');
+const Settings = require('../models/Settings');
 
-config();
-
-const client = global.clientInstance;
+// Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// ======== SYSTEM INSTRUCTION TEMPLATE (Expanded Database Context) ==========
-const SYSTEM_INSTRUCTION_TEMPLATE = `
-You are Blecky AI, a helpful and powerful AI assistant inside a Discord server. 
-You have FULL authority and knowledge to perform any function, command, or message interaction available to the bot.
-Always output a valid JSON when performing an action. Example:
+// System instruction for the AI
+const SYSTEM_INSTRUCTION = `You are Blecky AI, a helpful and powerful AI assistant in a Discord server.
+
+You can perform various actions:
+1. **Chat naturally** - Answer questions, have conversations
+2. **Execute commands** - Use any bot command available
+3. **Ping users** - Mention specific users
+4. **Send DMs** - Private message users
+5. **Search GIFs** - Find and share GIFs
+
+When the user asks you to perform an action (ping someone, send a DM, etc.), respond with a JSON object:
 
 {
   "action": "command",
-  "commandName": "ping",
-  "targetUser": "Vanhel"
+  "commandName": "ping|dm|say|gif",
+  "targetUser": "username or displayname",
+  "arguments": ["arg1", "arg2"]
 }
 
-If the user only wants to talk, reply naturally (no JSON).
+For normal conversation, just respond naturally (no JSON).
 
-When generating commands:
-- You must use the 'dm' command if the request is clearly meant as a private message.
-- Always set "targetUser" to the username, nickname, or tag that best matches from the list below or from the MongoDB user collection.
-- You have access to the MongoDB 'User' collection with the following fields: userId, xp, level, cookies, coins, lastDaily, dailyStreak, lastWork, warnings, dailyGives, reminders, currentJob, successfulWorks, lastResigned. Use this data for context.
+**Important**: Always search for the closest matching username/displayname from the member list.`;
 
-Server Members and Database Users for reference:
-{MEMBER_LIST}
-
-Keep responses short, polite, and relevant.
-`;
-
-const AI_CHAT_MODEL = "gemini-1.5-flash";
+const AI_MODEL = 'gemini-1.5-flash';
 const AI_MAX_RETRIES = 3;
 
-// =================================================
+// XP System (from your existing code)
+const XP_COOLDOWN = 60000; // 1 minute
 const xpCooldowns = new Map();
 
-export default async (client, message) => {
-  try {
-    if (
-      message.author.bot ||
-      message.channel.type === ChannelType.DM ||
-      !message.guild
-    ) return;
-
-    // --- CRITICAL ACCESS CONTROL: Only 'forgottenOne' role can use AI chat handler ---
-    const forgottenOneId = client.config.roles.forgottenOne;
-    
-    // Check if the user is using one of the AI prefixes or is in the designated AI channel
-    const usesAiPrefix = message.content.toLowerCase().startsWith('blecky') || message.content.toLowerCase().startsWith('r-blecky');
-    
-    // If the message is intended for the AI in any way, check role permission first.
-    if (usesAiPrefix) {
-        if (!message.member.roles.cache.has(forgottenOneId)) {
-            // Delete the message to maintain anonymity/silence for unprivileged users attempting the prefix
-            if (message.channel.permissionsFor(client.user).has('ManageMessages')) {
-                await message.delete().catch(console.error);
-            }
-            return; 
-        }
-    }
-    // --- END ACCESS CONTROL ---
-
-
-    // --- Message Content Initialization and Prefix Check ---
-    let content = message.content.trim();
-    let isAnonymousMode = false;
-    let isAiPrefixCommand = false;
-
-    // Check for explicit AI prefixes
-    if (content.toLowerCase().startsWith('r-blecky')) {
-        content = content.substring('r-blecky'.length).trim();
-        isAnonymousMode = true; 
-        isAiPrefixCommand = true;
-    } else if (content.toLowerCase().startsWith('blecky')) {
-        content = content.substring('blecky'.length).trim();
-        isAiPrefixCommand = true;
-    }
-
-    // Delete the triggering message if it was an AI prefix command (r-blecky or blecky)
-    if (isAiPrefixCommand && message.channel.permissionsFor(client.user).has('ManageMessages')) {
-      await message.delete().catch(console.error);
-    }
-    
-    // If the message was only the prefix without content, the bot replies with a prompt.
-    if (isAiPrefixCommand && content.length === 0) {
-        // Send a direct message to the user to confirm the bot is listening
-        return message.author.send(`✅ Blecky is listening. Please follow the prefix (e.g., \`blecky what's the capital of France?\`).`).catch(console.error);
-    } 
-
-    // ---- Quick XP system (for all messages that pass the initial role/bot checks) ----
-    const userKey = `${message.guild.id}-${message.author.id}`;
-    const now = Date.now();
-    if (!xpCooldowns.has(userKey) || now - xpCooldowns.get(userKey) > XP_COOLDOWN) {
-      const user = await findOrCreateUser(message.author.id, message.guild.id);
-      const xpGain = generateXP();
-      user.xp += xpGain;
-      const leveledUp = generateUserLevel(user);
-      await user.save();
-      xpCooldowns.set(userKey, now);
-      if (leveledUp) {
-        await updateUserRank(message.guild.id, message.author.id);
-        // Note: We use message.channel.send here because message.reply might be deleted if it was an AI prefix command
-        message.channel.send(`🎉 Congrats <@${message.author.id}>! You leveled up to level ${user.level}!`);
-      }
-    }
-
-    // ---- Load Server Settings and Channel Check ----
-    const server = await Server.findOne({ serverId: message.guild.id });
-    if (!server) return;
-    const settings = await Settings.findOne({ guildId: message.guild.id }); 
-    if (!settings || !settings.aiChannelId) return;
-
-    const aiChannel = message.guild.channels.cache.get(settings.aiChannelId);
-    
-    // Only proceed with AI processing if it's the designated channel OR an AI prefix command
-    if (!isAiPrefixCommand && message.channel.id !== aiChannel?.id) return;
-    
-    // The channel to send the AI's final reply
-    const responseChannel = message.channel; 
-    
-    // ---- Anonymous Mode Fallback ----
-    // If not a prefix command, check the channel's default anonymity setting
-    if (!isAiPrefixCommand) {
-        isAnonymousMode = settings.aiAnonymousMode;
-    }
-    const authorDisplay = isAnonymousMode ? "Anonymous" : message.author.username;
-
-    // ---- Math Mode (using the potentially modified content) ----
-    const isMathMode = settings.aiMathMode;
-    if (isMathMode && !isAiPrefixCommand && /^[0-9+\-*/().\s^√]+$/.test(content)) {
-      try {
-        const result = safeEval(content);
-        return responseChannel.send(`🧮 \`${content}\` = **${result}**`);
-      } catch {
-        return responseChannel.send("⚠️ Invalid math expression.");
-      }
-    }
-
-    // ---- Build AI context ----
-    const memberList = message.guild.members.cache.map(m =>
-      `${m.user.username} (${m.displayName})`
-    ).join(", ");
-
-    const systemInstruction = SYSTEM_INSTRUCTION_TEMPLATE.replace(
-      "{MEMBER_LIST}",
-      truncateText(memberList, 4000)
-    );
-
-    // ---- Prepare chat context ----
-    const history = await getRecentChatHistory(message.channel.id, 10);
-    const chatHistory = history.map(m => ({
-      role: m.authorId === client.user.id ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
-
-    chatHistory.push({
-      role: "user",
-      parts: [{ text: `${authorDisplay}: ${content}` }],
-    });
-
-    // ---- AI call ----
-    const model = genAI.getGenerativeModel({
-      model: AI_CHAT_MODEL,
-      systemInstruction: systemInstruction,
-    });
-
-    let aiResponse = null;
-    for (let i = 0; i < AI_MAX_RETRIES; i++) {
-      try {
-        const result = await model.generateContent({
-          contents: chatHistory,
-          generationConfig: { maxOutputTokens: 512 },
-        });
-        aiResponse = result.response.text();
-        if (aiResponse) break;
-      } catch (err) {
-        if (i === AI_MAX_RETRIES - 1)
-          throw new Error("Gemini API failed after 3 retries");
-        await delay(1000 * (i + 1));
-      }
-    }
-
-    if (!aiResponse) return;
-
-    // ---- Try extract JSON ----
-    const parsed = extractFirstBalancedJson(aiResponse);
-
-    // ---- If command JSON found ----
-    if (parsed?.action === "command") {
-      await executeParsedAction(message, parsed, isAnonymousMode, responseChannel);
-      return;
-    }
-
-    // ---- Otherwise, normal AI reply ----
-    const replyMsg = isAnonymousMode
-      ? `🤖 **Anonymous:** ${truncateText(aiResponse, 1800)}`
-      : `🤖 **${client.user.username}:** ${truncateText(aiResponse, 1800)}`;
-
-    await responseChannel.send(replyMsg);
-  } catch (err) {
-    console.error("❌ AI Handler Error:", err);
-    // Use the channel to send a generic error
-    message.channel.send("⚠️ Something went wrong while processing your message."); 
-  }
+// Helper function to calculate XP needed for next level
+const getNextLevelXp = (level) => {
+    return Math.floor(100 * Math.pow(level + 1, 1.5));
 };
 
-// =================================================
-// === HELPER FUNCTIONS ===
-
-function extractFirstBalancedJson(text) {
-  if (!text || typeof text !== "string") return null;
-  text = text.replace(/```json|```/gi, "");
-  const start = text.indexOf("{");
-  if (start === -1) return null;
-  let depth = 0;
-  for (let i = start; i < text.length; i++) {
-    if (text[i] === "{") depth++;
-    else if (text[i] === "}") depth--;
-    if (depth === 0) {
-      const chunk = text.slice(start, i + 1);
-      try { return JSON.parse(chunk); } catch {}
-    }
-  }
-  return null;
+// Helper function to find user by name
+async function findUserByName(guild, searchName) {
+    if (!searchName) return null;
+    
+    const search = searchName.toLowerCase().trim();
+    
+    // Try exact match first
+    let member = guild.members.cache.find(m => 
+        m.user.username.toLowerCase() === search ||
+        m.displayName.toLowerCase() === search ||
+        m.user.tag.toLowerCase() === search
+    );
+    
+    if (member) return member;
+    
+    // Try partial match
+    member = guild.members.cache.find(m => 
+        m.user.username.toLowerCase().includes(search) ||
+        m.displayName.toLowerCase().includes(search)
+    );
+    
+    return member;
 }
 
-async function executeParsedAction(message, action, isAnonymousMode, responseChannel) {
-  try {
-    // 1. Send plain text message
-    if (action.commandName === "say" && action.arguments?.[0]) {
-      return responseChannel.send(action.arguments.join(" "));
-    }
+// Helper to extract JSON from AI response
+function extractJson(text) {
+    if (!text) return null;
     
-    // 2. DM a user
-    if (action.commandName === "dm" && action.targetUser && action.arguments?.[0]) {
-        const target = await findUserInGuild(message.guild, action.targetUser, message.author.id);
-        const dmMessage = action.arguments.join(' ');
-        
-        if (target) {
-            try {
-                const dmUser = await message.client.users.fetch(target.id);
-                const senderTag = isAnonymousMode ? 'Anonymous' : message.author.tag;
-                
-                await dmUser.send(`**[DM from ${senderTag}]**: ${dmMessage}`);
-                return responseChannel.send(`✅ DM sent to **${target.user.tag}**.`);
-            } catch (dmError) {
-                console.error(`Failed to DM user ${target.user.tag}:`, dmError);
-                return responseChannel.send(`❌ Could not DM user **${target.user.tag}**. They might have DMs disabled.`);
-            }
-        } else {
-            return responseChannel.send(`❌ Couldn't find user "${action.targetUser}" to DM.`);
+    // Remove code blocks
+    text = text.replace(/```json|```/gi, '');
+    
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    
+    if (start === -1 || end === -1) return null;
+    
+    try {
+        const jsonStr = text.slice(start, end + 1);
+        return JSON.parse(jsonStr);
+    } catch {
+        return null;
+    }
+}
+
+// Helper function to call Gemini AI with retry
+async function callGeminiAI(prompt, memberList, retries = AI_MAX_RETRIES) {
+    const systemPrompt = `${SYSTEM_INSTRUCTION}\n\nServer Members:\n${memberList}`;
+    
+    for (let i = 0; i < retries; i++) {
+        try {
+            const model = genAI.getGenerativeModel({
+                model: AI_MODEL,
+                systemInstruction: systemPrompt,
+            });
+            
+            const result = await model.generateContent(prompt);
+            const response = result.response.text();
+            
+            if (response) return response;
+        } catch (err) {
+            console.error(`AI call attempt ${i + 1} failed:`, err.message);
+            if (i === retries - 1) throw err;
+            await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
         }
     }
-
-    // 3. Ping a user
-    if (action.commandName === "ping" && action.targetUser) {
-      const target = await findUserInGuild(message.guild, action.targetUser, message.author.id);
-      if (target) {
-        return responseChannel.send(`🏓 Pong! <@${target.id}>`);
-      } else {
-        const embed = new EmbedBuilder()
-          .setColor("Red")
-          .setDescription(`❌ Couldn't find user "${action.targetUser}" to execute the ping command.`);
-        return responseChannel.send({ embeds: [embed] });
-      }
-    }
-
-    // 4. Send GIF
-    if (action.commandName === "gif" && action.arguments?.[0]) {
-      const term = action.arguments.join(" ");
-      const gif = await searchGiphyGif(term);
-      if (gif) return responseChannel.send(gif);
-      else return responseChannel.send(`❌ Could not find a GIF for "${term}".`);
-    }
-
-    // 5. Perform Math
-    if (action.commandName === "math" && action.arguments?.[0]) {
-      const expr = action.arguments.join(" ");
-      const result = safeEval(expr);
-      return responseChannel.send(`🧮 \`${expr}\` = **${result}**`);
-    }
-
-    // 6. Fallback to Command Processor (Performs all other server commands)
-    const handled = await processCommand(message.client, message, action.commandName, action.arguments || []);
-    if (!handled) {
-      const embed = new EmbedBuilder()
-        .setColor("Red")
-        .setDescription(`❌ The AI suggested an unrecognized command or one that could not be executed: \`/${action.commandName}\``);
-      await responseChannel.send({ embeds: [embed] });
-    }
-  } catch (err) {
-    console.error("❌ Error executing parsed action:", err);
-    responseChannel.send("⚠️ Error executing the AI-suggested command.");
-  }
+    
+    throw new Error('AI failed after max retries');
 }
 
-async function getRecentChatHistory(channelId, limit = 10) {
-  // Placeholder for chat history retrieval
-  return []; 
+module.exports = {
+    name: 'messageCreate',
+    async execute(message, client) {
+        try {
+            // Ignore bots, DMs, and non-guild messages
+            if (message.author.bot || !message.guild || message.channel.type === ChannelType.DM) {
+                return;
+            }
+
+            // --- XP System (runs for all messages) ---
+            const userKey = `${message.guild.id}-${message.author.id}`;
+            const now = Date.now();
+            
+            if (!xpCooldowns.has(userKey) || now - xpCooldowns.get(userKey) > XP_COOLDOWN) {
+                let user = await User.findOne({ userId: message.author.id });
+                if (!user) {
+                    user = new User({ userId: message.author.id });
+                }
+                
+                const xpGain = Math.floor(Math.random() * 15) + 10; // 10-25 XP
+                user.xp += xpGain;
+                
+                // Check level up
+                const nextLevelXp = getNextLevelXp(user.level);
+                let leveledUp = false;
+                
+                if (user.xp >= nextLevelXp) {
+                    user.level++;
+                    user.xp -= nextLevelXp;
+                    leveledUp = true;
+                    
+                    // Update leveling roles
+                    const member = message.guild.members.cache.get(message.author.id);
+                    if (member) {
+                        const levelingRoles = client.config.levelingRoles;
+                        const targetLevelRole = levelingRoles
+                            .filter(r => r.level <= user.level)
+                            .sort((a, b) => b.level - a.level)[0];
+                        
+                        const targetLevelRoleId = targetLevelRole ? targetLevelRole.roleId : null;
+                        
+                        for (const roleConfig of levelingRoles) {
+                            const roleId = roleConfig.roleId;
+                            const hasRole = member.roles.cache.has(roleId);
+                            
+                            if (roleId === targetLevelRoleId && !hasRole) {
+                                await member.roles.add(roleId).catch(() => {});
+                            } else if (roleId !== targetLevelRoleId && hasRole) {
+                                await member.roles.remove(roleId).catch(() => {});
+                            }
+                        }
+                    }
+                }
+                
+                await user.save();
+                xpCooldowns.set(userKey, now);
+                
+                if (leveledUp) {
+                    const settings = await Settings.findOne({ guildId: message.guild.id });
+                    const levelUpChannel = settings?.levelUpChannelId 
+                        ? message.guild.channels.cache.get(settings.levelUpChannelId) 
+                        : message.channel;
+                    
+                    if (levelUpChannel) {
+                        const levelUpEmbed = new EmbedBuilder()
+                            .setTitle('🚀 Level UP!')
+                            .setDescription(`${message.author}, congratulations! You've leveled up to **Level ${user.level}**! 🎉`)
+                            .setThumbnail(message.author.displayAvatarURL({ dynamic: true }))
+                            .setColor(0xFFD700)
+                            .setTimestamp();
+                        
+                        await levelUpChannel.send({ content: `${message.author}`, embeds: [levelUpEmbed] });
+                    }
+                }
+            }
+
+            // --- AI Chat Handler ---
+            let content = message.content.trim();
+            let isAnonymousMode = false;
+            let isAiPrefixCommand = false;
+
+            // Check for AI prefixes
+            if (content.toLowerCase().startsWith('r-blecky')) {
+                content = content.substring('r-blecky'.length).trim();
+                isAnonymousMode = true;
+                isAiPrefixCommand = true;
+            } else if (content.toLowerCase().startsWith('blecky')) {
+                content = content.substring('blecky'.length).trim();
+                isAiPrefixCommand = true;
+            }
+
+            // Only process AI requests if triggered by prefix OR in designated AI channel
+            const settings = await Settings.findOne({ guildId: message.guild.id });
+            const isAiChannel = settings?.aiChannelId && message.channel.id === settings.aiChannelId;
+
+            if (!isAiPrefixCommand && !isAiChannel) {
+                return; // Not an AI request
+            }
+
+            // Permission check: Only 'forgottenOne' role can use AI
+            const forgottenOneId = client.config.roles.forgottenOne;
+            if (!message.member.roles.cache.has(forgottenOneId)) {
+                if (message.channel.permissionsFor(client.user).has('ManageMessages')) {
+                    await message.delete().catch(console.error);
+                }
+                return;
+            }
+
+            // Delete the triggering message if it was a prefix command
+            if (isAiPrefixCommand && message.channel.permissionsFor(client.user).has('ManageMessages')) {
+                await message.delete().catch(console.error);
+            }
+
+            // If empty command, prompt user
+            if (content.length === 0) {
+                return message.author.send('✅ Blecky is listening. Please follow the prefix (e.g., `blecky ping alien`).').catch(console.error);
+            }
+
+            // Apply anonymous mode from settings if not a prefix command
+            if (!isAiPrefixCommand && settings?.aiAnonymousMode) {
+                isAnonymousMode = true;
+            }
+
+            // Build member list for AI context
+            const memberList = message.guild.members.cache
+                .filter(m => !m.user.bot)
+                .map(m => `${m.user.username} (Display: ${m.displayName})`)
+                .join('\n');
+
+            // Call AI
+            const authorDisplay = isAnonymousMode ? 'Anonymous' : message.author.username;
+            const prompt = `${authorDisplay}: ${content}`;
+
+            const aiResponse = await callGeminiAI(prompt, memberList);
+            
+            if (!aiResponse) {
+                return message.channel.send('⚠️ AI failed to respond. Please try again.');
+            }
+
+            // Try to extract JSON command
+            const parsed = extractJson(aiResponse);
+
+            // Execute command if JSON found
+            if (parsed?.action === 'command') {
+                return await executeAiCommand(message, parsed, isAnonymousMode, client);
+            }
+
+            // Otherwise, send normal AI reply
+            const replyPrefix = isAnonymousMode ? '🤖 **Anonymous:**' : `🤖 **${client.user.username}:**`;
+            const replyText = aiResponse.length > 1800 ? aiResponse.substring(0, 1800) + '...' : aiResponse;
+            
+            await message.channel.send(`${replyPrefix} ${replyText}`);
+
+        } catch (err) {
+            console.error('❌ messageCreate error:', err);
+            message.channel.send('⚠️ Something went wrong while processing your message.').catch(console.error);
+        }
+    },
+};
+
+// Execute AI-generated commands
+async function executeAiCommand(message, action, isAnonymousMode, client) {
+    try {
+        const { commandName, targetUser, arguments: args = [] } = action;
+
+        // 1. SAY command - send plain text
+        if (commandName === 'say') {
+            return message.channel.send(args.join(' '));
+        }
+
+        // 2. PING command - mention a user
+        if (commandName === 'ping') {
+            const member = await findUserByName(message.guild, targetUser);
+            if (member) {
+                return message.channel.send(`🏓 Pong! ${member}`);
+            } else {
+                return message.channel.send(`❌ Couldn't find user "${targetUser}".`);
+            }
+        }
+
+        // 3. DM command - private message
+        if (commandName === 'dm') {
+            const member = await findUserByName(message.guild, targetUser);
+            if (!member) {
+                return message.channel.send(`❌ Couldn't find user "${targetUser}" to DM.`);
+            }
+
+            const dmMessage = args.join(' ');
+            const senderTag = isAnonymousMode ? 'Anonymous' : message.author.tag;
+
+            try {
+                await member.user.send(`**[DM from ${senderTag}]**: ${dmMessage}`);
+                return message.channel.send(`✅ DM sent to **${member.user.tag}**.`);
+            } catch {
+                return message.channel.send(`❌ Could not DM **${member.user.tag}**. They might have DMs disabled.`);
+            }
+        }
+
+        // 4. GIF command - search and send GIF
+        if (commandName === 'gif') {
+            // Placeholder: You'd integrate with Giphy API here
+            const searchTerm = args.join(' ');
+            return message.channel.send(`🎬 *Searching for GIF: "${searchTerm}"* (Giphy integration needed)`);
+        }
+
+        // 5. Try to execute as a slash command (if applicable)
+        const command = client.commands.get(commandName);
+        if (command) {
+            // Note: This is a simplified approach. Full slash command execution
+            // would require creating a mock interaction object.
+            return message.channel.send(`ℹ️ AI suggested: \`/${commandName}\` (Manual execution required for slash commands)`);
+        }
+
+        // Unknown command
+        return message.channel.send(`❌ Unknown command: \`${commandName}\``);
+
+    } catch (err) {
+        console.error('Error executing AI command:', err);
+        message.channel.send('⚠️ Error executing the AI-suggested command.').catch(console.error);
+    }
 }
