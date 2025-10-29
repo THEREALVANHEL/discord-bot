@@ -31,13 +31,6 @@ function levenshteinDistance(s1, s2) {
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=";
 const API_KEY = process.env.GEMINI_API_KEY || "";
-const GIF_LINKS = [
-    'https://tenor.com/view/cat-typing-gif-12002364', 
-    'https://tenor.com/view/hello-hi-hey-cat-gif-14197368', 
-    'https://tenor.com/view/cat-thumbs-up-gif-10023772186851410147',
-    'https://tenor.com/view/im-on-it-gif-18116520',
-    'https://tenor.com/view/ok-sure-whatever-cat-yawn-gif-17255153'
-];
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -53,7 +46,6 @@ async function fetchWithRetry(url, payload, maxRetries = 3) {
             });
 
             if (!response.ok) {
-                const errorBody = await response.json().catch(() => ({}));
                 throw new Error(`API error: ${response.status}`);
             }
             return await response.json();
@@ -65,6 +57,32 @@ async function fetchWithRetry(url, payload, maxRetries = 3) {
         }
     }
     throw lastError;
+}
+
+// Search Tenor API for GIFs
+async function searchTenorGif(query) {
+    const TENOR_KEY = process.env.TENOR_API_KEY || "AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCYQ"; // Default key
+    const searchUrl = `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(query)}&key=${TENOR_KEY}&limit=10`;
+    
+    try {
+        const response = await fetch(searchUrl);
+        const data = await response.json();
+        
+        if (data.results && data.results.length > 0) {
+            const randomIndex = Math.floor(Math.random() * data.results.length);
+            return data.results[randomIndex].url;
+        }
+    } catch (error) {
+        console.error('Tenor API error:', error);
+    }
+    
+    // Fallback gifs
+    const fallbackGifs = [
+        'https://tenor.com/view/cat-typing-gif-12002364',
+        'https://tenor.com/view/hello-hi-hey-cat-gif-14197368',
+        'https://tenor.com/view/cat-thumbs-up-gif-10023772186851410147'
+    ];
+    return fallbackGifs[Math.floor(Math.random() * fallbackGifs.length)];
 }
 
 // --- CORE UTILITIES ---
@@ -94,7 +112,7 @@ async function manageTieredRoles(member, userValue, roleConfigs, property) {
     }
 }
 
-// Enhanced user resolution with better fuzzy matching
+// Enhanced user resolution
 function resolveUser(guild, input) {
     if (!input || input.length < 2) return null;
     
@@ -112,7 +130,6 @@ function resolveUser(guild, input) {
     guild.members.cache.forEach(member => {
         const username = member.user.username.toLowerCase();
         const displayName = member.displayName.toLowerCase();
-        const tag = member.user.tag.toLowerCase();
         
         // Exact match
         if (username === searchKey || displayName === searchKey) {
@@ -121,8 +138,8 @@ function resolveUser(guild, input) {
             return;
         }
         
-        // Starts with
-        if (username.startsWith(searchKey) || displayName.startsWith(searchKey)) {
+        // Contains search term
+        if (username.includes(searchKey) || displayName.includes(searchKey)) {
             const score = Math.abs(username.length - searchKey.length);
             if (score < bestScore) {
                 bestScore = score;
@@ -146,148 +163,114 @@ function resolveUser(guild, input) {
     return bestMatch;
 }
 
-// Smart command parser - handles all commands locally without AI
+// Parse command locally
 function parseCommand(text, guild) {
     const lower = text.toLowerCase().trim();
     const words = lower.split(/\s+/);
     
-    // === INFO QUERIES (when, how many, what, who, show, check) ===
-    if (lower.match(/when\s+did|when\s+was|joined/i)) {
-        const target = findTargetInText(words, guild);
-        if (target) {
-            return {
-                type: 'INFO',
-                action: 'joined',
-                member: target
-            };
+    // Find target user in text
+    const findTarget = () => {
+        const skipWords = ['warn', 'add', 'send', 'dm', 'how', 'many', 'does', 'have', 'show', 'when', 'did', 'to', 'for', 'me', 'a', 'the', 'coins', 'coin', 'cookies', 'cookie', 'xp', 'level', 'saying', 'message', 'gif', 'give', 'remove', 'reason', 'is'];
+        
+        for (const word of words) {
+            if (skipWords.includes(word) || word.length < 2 || word.match(/^\d+$/)) continue;
+            const resolved = resolveUser(guild, word);
+            if (resolved) return resolved;
         }
-    }
+        return null;
+    };
     
-    if (lower.match(/how\s+many\s+(coins?|cookies?|xp|level)/i)) {
-        const target = findTargetInText(words, guild);
-        const queryType = lower.includes('coin') ? 'coins' : 
-                         lower.includes('cookie') ? 'cookies' :
-                         lower.includes('xp') ? 'xp' : 'level';
-        if (target) {
-            return {
-                type: 'INFO',
-                action: 'query',
-                member: target,
-                query: queryType
-            };
-        }
-    }
-    
-    // === SEND GIF ===
-    if (lower.match(/send.*(gif|me.*gif)/i)) {
+    // GIF request
+    if (lower.match(/send.*(gif|image)|gif/i)) {
+        const gifQuery = text.replace(/blecky|send|me|a|an|gif|image/gi, '').trim() || 'random';
         return {
-            type: 'ACTION',
-            action: 'gif'
+            type: 'GIF',
+            query: gifQuery
         };
     }
     
-    // === SEND DM ===
-    if (lower.match(/send\s+dm/i)) {
-        const target = findTargetInText(words, guild);
-        const contentMatch = text.match(/(?:saying|message|:)\s+(.+)/i);
+    // DM
+    if (lower.includes('dm')) {
+        const target = findTarget();
+        const contentMatch = text.match(/(?:saying|message|say|tell|:)\s+(.+)/i);
         const content = contentMatch ? contentMatch[1].trim() : "Hi!";
         
         if (target) {
             return {
-                type: 'COMMAND',
-                action: 'DISCORD_ACTION',
-                dmType: 'dm',
+                type: 'DM',
                 targetId: target.id,
+                targetTag: target.user.tag,
                 content: content
             };
         }
     }
     
-    // === WARN ===
+    // Warn
     if (lower.includes('warn')) {
-        const target = findTargetInText(words, guild);
+        const target = findTarget();
         const reasonMatch = text.match(/(?:reason|for|because|:)\s+(.+)/i);
-        const reason = reasonMatch ? reasonMatch[1].trim() : 'No reason provided';
+        const reason = reasonMatch ? reasonMatch[1].trim() : 'Warned by admin';
         
         if (target) {
             return {
-                type: 'COMMAND',
-                action: 'COMMAND',
-                command: 'warn',
+                type: 'WARN',
                 targetId: target.id,
+                targetTag: target.user.tag,
                 reason: reason
             };
         }
     }
     
-    // === TIMEOUT ===
-    if (lower.match(/timeout|mute/i)) {
-        const target = findTargetInText(words, guild);
-        const durationMatch = lower.match(/(\d+)\s*(m|min|minute|h|hour|d|day)/i);
-        const duration = durationMatch ? `${durationMatch[1]}${durationMatch[2][0]}` : '10m';
-        const reasonMatch = text.match(/(?:reason|for|because|:)\s+(.+)/i);
-        const reason = reasonMatch ? reasonMatch[1].trim() : 'Timeout by admin';
+    // Add currency
+    if (lower.match(/add|give/i) && lower.match(/coin|cookie|xp/i)) {
+        const target = findTarget();
+        const amountMatch = lower.match(/(\d+)/);
+        const amount = amountMatch ? parseInt(amountMatch[1]) : 1;
+        
+        let command = 'addcoins';
+        if (lower.includes('cookie')) command = 'addcookies';
+        if (lower.includes('xp')) command = 'addxp';
         
         if (target) {
             return {
-                type: 'COMMAND',
-                action: 'COMMAND',
-                command: 'timeout',
+                type: 'ADD_CURRENCY',
+                command: command,
                 targetId: target.id,
-                duration: duration,
-                reason: reason
-            };
-        }
-    }
-    
-    // === ADD CURRENCY (add X coins/cookies/xp to/for USER) ===
-    const addMatch = lower.match(/add\s+(?:a\s+)?(\d+)?\s*(coins?|cookies?|xp)/i);
-    if (addMatch) {
-        const target = findTargetInText(words, guild);
-        const amount = addMatch[1] ? parseInt(addMatch[1]) : 1;
-        const currency = addMatch[2].toLowerCase();
-        const commandMap = { 
-            coin: 'addcoins', coins: 'addcoins',
-            cookie: 'addcookies', cookies: 'addcookies',
-            xp: 'addxp'
-        };
-        
-        if (target) {
-            return {
-                type: 'COMMAND',
-                action: 'COMMAND',
-                command: commandMap[currency],
-                targetId: target.id,
+                targetTag: target.user.tag,
                 amount: amount
             };
         }
     }
     
-    // === PROFILE/INFO ===
-    if (lower.match(/profile|userinfo|info|stats|show.*info/i)) {
-        const target = findTargetInText(words, guild);
+    // Info queries
+    if (lower.match(/how many|how much/i)) {
+        const target = findTarget();
+        let query = 'coins';
+        if (lower.includes('cookie')) query = 'cookies';
+        if (lower.includes('xp')) query = 'xp';
+        if (lower.includes('level')) query = 'level';
+        
         if (target) {
             return {
-                type: 'COMMAND',
-                action: 'COMMAND',
-                command: 'profile',
-                targetId: target.id
+                type: 'INFO',
+                targetId: target.id,
+                targetTag: target.user.tag,
+                query: query
             };
         }
     }
     
-    return null;
-}
-
-// Helper to find target user in text
-function findTargetInText(words, guild) {
-    const skipWords = ['warn', 'add', 'send', 'dm', 'how', 'many', 'does', 'have', 'show', 'check', 'when', 'did', 'to', 'for', 'me', 'a', 'the', 'coins', 'coin', 'cookies', 'cookie', 'xp', 'level', 'saying', 'message'];
-    
-    for (const word of words) {
-        if (skipWords.includes(word) || word.length < 2 || word.match(/^\d+$/)) continue;
-        const resolved = resolveUser(guild, word);
-        if (resolved) return resolved;
+    if (lower.match(/when.*join/i)) {
+        const target = findTarget();
+        if (target) {
+            return {
+                type: 'JOINED',
+                targetId: target.id,
+                targetTag: target.user.tag
+            };
+        }
     }
+    
     return null;
 }
 
@@ -319,78 +302,102 @@ module.exports = {
         }
 
         try {
-            // Try local parsing first (fast path)
+            // Parse command locally
             const parsed = parseCommand(userQuery, message.guild);
             
             if (parsed) {
-                // Handle INFO queries locally
-                if (parsed.type === 'INFO') {
-                    if (parsed.action === 'joined') {
-                        const joinDate = `<t:${Math.floor(parsed.member.joinedTimestamp / 1000)}:F>`;
-                        await message.reply(`${parsed.member.user.username} joined ${joinDate}`);
-                        return;
-                    }
-                    
-                    if (parsed.action === 'query') {
-                        const userData = await User.findOne({ userId: parsed.member.id });
-                        let value = 0;
-                        
-                        switch(parsed.query) {
-                            case 'coins': value = userData?.coins || 0; break;
-                            case 'cookies': value = userData?.cookies || 0; break;
-                            case 'xp': value = userData?.xp || 0; break;
-                            case 'level': value = userData?.level || 0; break;
-                        }
-                        
-                        await message.reply(`${parsed.member.user.username} has ${value} ${parsed.query}`);
-                        return;
-                    }
-                }
-                
-                // Handle GIF locally
-                if (parsed.type === 'ACTION' && parsed.action === 'gif') {
-                    const gif = GIF_LINKS[Math.floor(Math.random() * GIF_LINKS.length)];
-                    await message.channel.send(gif);
+                // Handle GIF
+                if (parsed.type === 'GIF') {
+                    const gifUrl = await searchTenorGif(parsed.query);
+                    await message.channel.send(gifUrl);
                     return;
                 }
                 
-                // Handle commands
-                if (parsed.type === 'COMMAND') {
-                    await executeCommand(parsed, message, client, settings);
+                // Handle DM
+                if (parsed.type === 'DM') {
+                    const target = await client.users.fetch(parsed.targetId).catch(() => null);
+                    if (target) {
+                        await target.send(parsed.content).catch(() => {});
+                        await message.reply(`✅ DM sent`);
+                    } else {
+                        await message.reply(`❌ User not found`);
+                    }
+                    return;
+                }
+                
+                // Handle WARN
+                if (parsed.type === 'WARN') {
+                    const cmd = client.commands.get('warn');
+                    if (cmd) {
+                        await executeSlashCommand(cmd, parsed.targetId, message, client, settings, {
+                            reason: parsed.reason
+                        });
+                    }
+                    return;
+                }
+                
+                // Handle ADD_CURRENCY
+                if (parsed.type === 'ADD_CURRENCY') {
+                    const cmd = client.commands.get(parsed.command);
+                    if (cmd) {
+                        await executeSlashCommand(cmd, parsed.targetId, message, client, settings, {
+                            amount: parsed.amount
+                        });
+                    }
+                    return;
+                }
+                
+                // Handle INFO
+                if (parsed.type === 'INFO') {
+                    const userData = await User.findOne({ userId: parsed.targetId });
+                    let value = 0;
+                    
+                    switch(parsed.query) {
+                        case 'coins': value = userData?.coins || 0; break;
+                        case 'cookies': value = userData?.cookies || 0; break;
+                        case 'xp': value = userData?.xp || 0; break;
+                        case 'level': value = userData?.level || 0; break;
+                    }
+                    
+                    await message.reply(`${value} ${parsed.query}`);
+                    return;
+                }
+                
+                // Handle JOINED
+                if (parsed.type === 'JOINED') {
+                    const member = message.guild.members.cache.get(parsed.targetId);
+                    if (member) {
+                        const joinDate = `<t:${Math.floor(member.joinedTimestamp / 1000)}:F>`;
+                        await message.reply(`Joined ${joinDate}`);
+                    }
                     return;
                 }
             }
             
-            // If local parsing fails, use AI for complex queries
+            // Use AI for complex queries
             const members = Array.from(message.guild.members.cache.values())
-                .slice(0, 30)
-                .map(m => ({ id: m.id, name: m.user.username, display: m.displayName }));
+                .slice(0, 40)
+                .map(m => ({ id: m.id, username: m.user.username, display: m.displayName }));
             
-            const systemPrompt = `You are Bleck Nephew. Be concise and direct.
+            const systemPrompt = `You are Bleck Nephew. Give direct 1-sentence answers only. No yapping.
 
 MEMBERS: ${JSON.stringify(members)}
 
-OUTPUT RULES:
-1. For commands, output ONLY valid JSON (no text before/after)
-2. For info/questions, answer in 1-2 sentences max
-3. Never ask follow-up questions, just execute
+For commands, output ONLY this JSON format (nothing else):
+{"cmd":"warn","target":"USER_ID","reason":"text"}
+{"cmd":"addcoins","target":"USER_ID","amount":100}
+{"cmd":"dm","target":"USER_ID","message":"text"}
+{"cmd":"gif","query":"search term"}
 
-COMMAND FORMATS:
-{"action":"COMMAND","command":"warn","targetId":"ID","reason":"text"}
-{"action":"COMMAND","command":"addcoins","targetId":"ID","amount":100}
-{"action":"COMMAND","command":"profile","targetId":"ID"}
-{"action":"DISCORD_ACTION","type":"dm","targetId":"ID","content":"message"}
-{"action":"DISCORD_ACTION","type":"gif"}
+For info, answer in 5 words or less.
 
-Query: "${userQuery}"
-
-If it's a command, output ONLY JSON. If info query, answer briefly. Never yap.`;
+Query: "${userQuery}"`;
 
             const payload = {
                 contents: [{ parts: [{ text: systemPrompt }] }],
                 generationConfig: {
-                    temperature: 0.2,
-                    maxOutputTokens: 512,
+                    temperature: 0.1,
+                    maxOutputTokens: 256,
                 }
             };
             
@@ -409,21 +416,41 @@ If it's a command, output ONLY JSON. If info query, answer briefly. Never yap.`;
                 const cleaned = aiResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
                 cmdData = JSON.parse(cleaned);
             } catch {
-                // It's text response
-                await message.reply(aiResponse);
+                // Text response - keep it short
+                const shortResponse = aiResponse.split('.')[0]; // First sentence only
+                await message.reply(shortResponse);
                 return;
             }
 
-            // Execute command
-            if (cmdData && (cmdData.action === 'COMMAND' || cmdData.action === 'DISCORD_ACTION')) {
-                await executeCommand(cmdData, message, client, settings);
-            } else {
-                await message.reply(aiResponse);
+            // Execute AI command
+            if (cmdData) {
+                if (cmdData.cmd === 'gif') {
+                    const gifUrl = await searchTenorGif(cmdData.query || 'random');
+                    await message.channel.send(gifUrl);
+                    return;
+                }
+                
+                if (cmdData.cmd === 'dm') {
+                    const target = await client.users.fetch(cmdData.target).catch(() => null);
+                    if (target) {
+                        await target.send(cmdData.message).catch(() => {});
+                        await message.reply(`✅`);
+                    }
+                    return;
+                }
+                
+                const slashCmd = client.commands.get(cmdData.cmd);
+                if (slashCmd) {
+                    await executeSlashCommand(slashCmd, cmdData.target, message, client, settings, {
+                        amount: cmdData.amount,
+                        reason: cmdData.reason
+                    });
+                }
             }
             
         } catch (error) {
             console.error('AI Error:', error);
-            await message.reply(`Error: ${error.message.substring(0, 100)}`);
+            await message.reply(`Error: ${error.message.substring(0, 80)}`);
         }
         return;
     }
@@ -479,81 +506,59 @@ If it's a command, output ONLY JSON. If info query, answer briefly. Never yap.`;
   },
 };
 
-// Execute command helper
-async function executeCommand(cmdData, message, client, settings) {
-    const { action, command, type, targetId, amount, reason, content, duration, dmType } = cmdData;
+// Execute slash command helper
+async function executeSlashCommand(cmd, targetId, message, client, settings, options = {}) {
+    const targetUser = await client.users.fetch(targetId).catch(() => null);
     
-    // Discord actions (DM, GIF)
-    if (action === 'DISCORD_ACTION' || dmType === 'dm') {
-        if (type === 'dm' || dmType === 'dm') {
-            const target = await client.users.fetch(targetId).catch(() => null);
-            if (target) {
-                await target.send(content).catch(() => {});
-                await message.reply(`✅ Sent to ${target.username}`);
-            } else {
-                await message.reply(`❌ User not found`);
-            }
-            return;
-        }
-        if (type === 'gif') {
-            const gif = GIF_LINKS[Math.floor(Math.random() * GIF_LINKS.length)];
-            await message.channel.send(gif);
-            return;
-        }
-    }
-    
-    // Slash commands
-    if (action === 'COMMAND') {
-        const cmd = client.commands.get(command);
-        if (!cmd) {
-            await message.reply(`❌ Unknown command: ${command}`);
-            return;
-        }
-        
-        const targetUser = targetId ? await client.users.fetch(targetId).catch(() => null) : null;
-        
-        const mockInteraction = {
-            options: {
-                getUser: () => targetUser,
-                getInteger: (n) => (n === 'amount' && amount) ? parseInt(amount) : null,
-                getString: (n) => {
-                    if (n === 'reason') return reason || 'Admin action';
-                    if (n === 'duration') return duration || null;
-                    return null;
-                },
-                getChannel: () => message.channel,
+    const mockInteraction = {
+        options: {
+            getUser: () => targetUser,
+            getInteger: (n) => (n === 'amount' && options.amount) ? parseInt(options.amount) : null,
+            getString: (n) => {
+                if (n === 'reason') return options.reason || 'Admin action';
+                if (n === 'duration') return options.duration || null;
+                return null;
             },
-            user: message.author,
-            member: message.member,
-            guild: message.guild,
-            channel: message.channel,
-            client: client,
-            deferReply: async () => { await message.channel.sendTyping(); },
-            editReply: async (o) => message.reply(o).catch(console.error),
-            reply: async (o) => message.reply(o).catch(console.error),
-            followUp: async (o) => message.channel.send(o).catch(console.error),
-        };
+            getChannel: () => message.channel,
+        },
+        user: message.author,
+        member: message.member,
+        guild: message.guild,
+        channel: message.channel,
+        client: client,
+        deferReply: async () => { await message.channel.sendTyping(); },
+        editReply: async (o) => {
+            const content = o.content || '';
+            const shortMsg = content.split('\n')[0].substring(0, 100); // First line only
+            return message.reply({ content: shortMsg || '✅', embeds: o.embeds }).catch(console.error);
+        },
+        reply: async (o) => {
+            const content = o.content || '';
+            const shortMsg = content.split('\n')[0].substring(0, 100);
+            return message.reply({ content: shortMsg || '✅', embeds: o.embeds }).catch(console.error);
+        },
+        followUp: async (o) => message.channel.send(o).catch(console.error),
+    };
+    
+    const logAction = async (guild, settings, action, target, mod, reason) => {
+        const logId = settings?.aiLogChannelId || settings?.modlogChannelId;
+        if (!logId) return;
+        const logCh = guild.channels.cache.get(logId);
+        if (!logCh) return;
         
-        const logAction = async (guild, settings, action, target, mod, reason) => {
-            const logId = settings?.aiLogChannelId || settings?.modlogChannelId;
-            if (!logId) return;
-            const logCh = guild.channels.cache.get(logId);
-            if (!logCh) return;
-            
-            const embed = new EmbedBuilder()
-                .setTitle(`[AI] ${action}`)
-                .setDescription(`Target: ${target?.tag}\nAdmin: ${mod.tag}\nReason: ${reason}`)
-                .setColor(0x7289DA)
-                .setTimestamp();
-            
-            logCh.send({ embeds: [embed] }).catch(console.error);
-        };
+        const embed = new EmbedBuilder()
+            .setTitle(`[AI] ${action}`)
+            .setDescription(`Target: ${target?.tag}\nAdmin: ${mod.tag}\nReason: ${reason}`)
+            .setColor(0x7289DA)
+            .setTimestamp();
         
-        try {
-            await cmd.execute(mockInteraction, client, logAction);
-        } catch (e) {
-            console.error('Cmd error:', e);
-            await message.reply(`❌ Failed: ${e.message.substring(0, 80)}`);
-        }
+        logCh.send({ embeds: [embed] }).catch(console.error);
+    };
+    
+    try {
+        await cmd.execute(mockInteraction, client, logAction);
+    } catch (e) {
+        console.error('Cmd error:', e);
+        await message.reply(`❌ Failed`);
     }
 }
