@@ -1,4 +1,4 @@
-// models/Settings.js (REPLACE - Added aiLogChannelId)
+// models/Settings.js (UPDATED - Added AI channel settings)
 const mongoose = require('mongoose');
 
 const settingsSchema = new mongoose.Schema({
@@ -8,7 +8,10 @@ const settingsSchema = new mongoose.Schema({
   suggestionChannelId: { type: String, default: null },
   autologChannelId: { type: String, default: null },
   modlogChannelId: { type: String, default: null },
-  aiLogChannelId: { type: String, default: null }, // NEW: AI Log Channel
+  aiLogChannelId: { type: String, default: null },
+  aiChannelId: { type: String, default: null }, // NEW: Designated AI chat channel
+  aiAnonymousMode: { type: Boolean, default: false }, // NEW: Default anonymity for AI channel
+  aiMathMode: { type: Boolean, default: false }, // NEW: Enable math expression evaluation
   noXpChannels: { type: [String], default: [] },
   reactionRoles: [{
     messageId: String,
@@ -17,7 +20,7 @@ const settingsSchema = new mongoose.Schema({
   }],
   ticketPanelChannelId: { type: String, default: null },
   ticketCategoryId: { type: String, default: null },
-  levelUpChannelId: { type: String, default: null }, // NEW
+  levelUpChannelId: { type: String, default: null },
 });
 
 module.exports = mongoose.model('Settings', settingsSchema);
