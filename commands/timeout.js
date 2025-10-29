@@ -1,115 +1,108 @@
-// commands/timeout.js (REPLACE - Success reply now visible to everyone + GUI Update + User Tagging + Added deferReply)
-const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js'); // Added Permissions
+// commands/timeout.js (Converted to Prefix Command)
+const { EmbedBuilder, PermissionsBitField } = require('discord.js');
 const ms = require('ms');
+const Settings = require('../models/Settings');
+const { findUserInGuild } = require('../utils/findUserInGuild');
+const { logModerationAction } = require('../utils/logModerationAction');
 
 module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('timeout')
-    .setDescription('Timeout a user for a specified duration.')
-    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
-      option.setName('target')
-        .setDescription('User to timeout')
-        .setRequired(true))
-    .addStringOption(option =>
-      option.setName('duration')
-        .setDescription('Duration (e.g., 10m, 1h, 1d - Max 28d)')
-        .setRequired(true))
-    .addStringOption(option =>
-      option.setName('reason')
-        .setDescription('Reason for timeout')
-        .setRequired(true))
-    // Add default permissions
-    .setDefaultMemberPermissions(PermissionsBitField.Flags.ModerateMembers),
-  async execute(interaction, client, logModerationAction) {
-    // ADDED: Defer reply (public)
-    await interaction.deferReply();
+    name: 'timeout',
+    description: 'Timeout a user for a specified duration.',
+    aliases: ['mute', 'stfu'], // Example aliases
+    async execute(message, args, client) {
+        // 1. Permission Check
+        const config = client.config;
+         const member = message.member;
+         const isAdmin = member.permissions.has(PermissionsBitField.Flags.Administrator) ||
+                         [config.roles.forgottenOne, config.roles.overseer].some(roleId => member.roles.cache.has(roleId));
+         const isMod = isAdmin || [config.roles.leadMod, config.roles.mod].some(roleId => member.roles.cache.has(roleId)) ||
+                       member.permissions.has(PermissionsBitField.Flags.ModerateMembers);
 
-    const target = interaction.options.getUser('target');
-    const durationStr = interaction.options.getString('duration');
-    const reason = interaction.options.getString('reason');
-
-    const member = interaction.guild.members.cache.get(target.id);
-    if (!member) {
-      // Use editReply (ephemeral)
-      return interaction.editReply({ content: '❌ **Error:** User not found in this server.', ephemeral: true });
-    }
-
-    if (member.id === interaction.user.id) {
-       // Use editReply (ephemeral)
-       await interaction.editReply({ content: '❌ **Error:** You cannot timeout yourself.', ephemeral: true });
-       return;
-    }
-
-     // Check hierarchy and permissions
-     const botMember = await interaction.guild.members.fetch(client.user.id);
-     if (!botMember.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
-         return interaction.editReply({ content: '❌ **Error:** I do not have permission to timeout members.', ephemeral: true });
-     }
-     if (member.roles.highest.position >= interaction.member.roles.highest.position && interaction.guild.ownerId !== interaction.user.id) {
-         return interaction.editReply({ content: '❌ **Error:** You cannot timeout someone with an equal or higher role.', ephemeral: true });
-     }
-     if (member.roles.highest.position >= botMember.roles.highest.position) {
-         return interaction.editReply({ content: '❌ **Error:** I cannot timeout someone with an equal or higher role than me.', ephemeral: true });
-     }
-     if (member.isCommunicationDisabled()) {
-          return interaction.editReply({ content: `❌ **Error:** ${target.tag} is already timed out.`, ephemeral: true });
-     }
+         // Check for Temp Mod Access Role
+         const tempRole = message.guild.roles.cache.find(role => role.name === 'TempModAccess');
+         const hasTempAccess = tempRole && member.roles.cache.has(tempRole.id);
 
 
-    const durationMs = ms(durationStr);
-    // Discord limits timeouts to 28 days
-    const maxDurationMs = ms('28d');
-    if (!durationMs || durationMs < 5000 || durationMs > maxDurationMs) { // Min 5 seconds
-       // Use editReply (ephemeral)
-      return interaction.editReply({ content: '❌ **Error:** Invalid duration. Must be between 5 seconds (5s) and 28 days (28d). Example: 10m, 1h.', ephemeral: true });
-    }
+        if (!isMod && !hasTempAccess) {
+             return message.reply('🛡️ You need Moderator permissions or temporary access to use this command.');
+        }
 
-    try {
-      await member.timeout(durationMs, reason);
+        // 2. Argument Parsing: ?timeout <user> <duration> [reason]
+        if (args.length < 2) {
+            return message.reply('Usage: `?timeout <@user|userID|username> <duration (e.g., 10m, 1h)> [reason]`');
+        }
 
-      // DM the user (private) - Best effort
-      try {
-        const timeoutEndTimestamp = Math.floor((Date.now() + durationMs) / 1000);
-        await target.send(`You have been timed out in **${interaction.guild.name}** for **${durationStr}** for the reason: \`${reason}\`. You can communicate again <t:${timeoutEndTimestamp}:R> (at <t:${timeoutEndTimestamp}:F>).`);
-      } catch (dmError) {
-        console.log(`Could not DM ${target.tag} about timeout: ${dmError.message}`);
-      }
+        const targetIdentifier = args[0];
+        const durationStr = args[1];
+        const reason = args.slice(2).join(' ') || 'No reason provided.';
 
-      const timeoutEnd = Math.floor((Date.now() + durationMs) / 1000);
+        // 3. Find Target User/Member
+        const targetMember = await findUserInGuild(message.guild, targetIdentifier);
+        if (!targetMember) {
+            return message.reply(`❌ Could not find user: "${targetIdentifier}".`);
+        }
+        const target = targetMember.user;
 
-      const embed = new EmbedBuilder()
-        .setTitle('⏰ User Timed Out')
-        .setDescription(`Moderator ${interaction.user} has restricted messaging for a member.`)
-        .addFields(
-            { name: 'Target', value: `${target} (\`${target.tag}\`)`, inline: true },
-            { name: 'Duration', value: `**${durationStr}**`, inline: true },
-            { name: 'Timeout Ends', value: `<t:${timeoutEnd}:R>`, inline: true }, // Relative time
-            { name: 'Reason', value: reason, inline: false }
-        )
-        .setColor(0xFFA500) // Orange
-        .setTimestamp();
+        // 4. Basic & Hierarchy Checks
+        if (targetMember.id === message.author.id) {
+            return message.reply('❌ You cannot timeout yourself.');
+        }
+         const botMember = message.guild.members.me || await message.guild.members.fetch(client.user.id);
+         if (!botMember.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
+             return message.reply('❌ I do not have permission to timeout members.');
+         }
+         if (targetMember.roles.highest.position >= member.roles.highest.position && message.guild.ownerId !== message.author.id) {
+             return message.reply('❌ You cannot timeout someone with an equal or higher role.');
+         }
+         if (targetMember.roles.highest.position >= botMember.roles.highest.position) {
+             return message.reply('❌ I cannot timeout someone with an equal or higher role than me.');
+         }
+         if (targetMember.isCommunicationDisabled()) {
+             return message.reply(`❌ ${target.tag} is already timed out.`);
+         }
 
-      // Public confirmation (visible to everyone) - Use editReply
-      await interaction.editReply({ embeds: [embed] });
+        // 5. Parse Duration
+        const durationMs = ms(durationStr);
+        const maxDurationMs = ms('28d');
+        if (!durationMs || durationMs < 5000 || durationMs > maxDurationMs) { // Min 5s, Max 28d
+            return message.reply('❌ Invalid duration. Must be between 5 seconds (5s) and 28 days (28d). Example: 10m, 1h.');
+        }
 
-      // Log
-      try {
-          const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
-          if (logModerationAction && settings) {
-             await logModerationAction(interaction.guild, settings, 'Timeout', target, interaction.user, reason, `Duration: ${durationStr}`);
-          }
-      } catch (logError) {
-          console.error("Error logging timeout:", logError);
-      }
+        // 6. Apply Timeout
+        try {
+            await targetMember.timeout(durationMs, reason);
+            const timeoutEndTimestamp = Math.floor((Date.now() + durationMs) / 1000);
 
-    } catch (error) {
-      console.error("Timeout error:", error);
-       // Use editReply or followUp for error after defer
-       try {
-           await interaction.editReply({ content: '❌ **Error:** Failed to timeout user. Check my permissions (Moderate Members) and role hierarchy.', ephemeral: true });
-       } catch (replyError) {
-           await interaction.followUp({ content: '❌ **Error:** Failed to timeout user. Check my permissions (Moderate Members) and role hierarchy.', ephemeral: true }).catch(console.error);
-       }
-    }
-  },
+            // 7. DM User (Best effort)
+            try {
+                await target.send(`You have been timed out in **${message.guild.name}** for **${durationStr}** for the reason: \`${reason}\`. You can communicate again <t:${timeoutEndTimestamp}:R>.`);
+            } catch (dmError) {
+                console.log(`Could not DM ${target.tag} about timeout.`);
+            }
+
+            // 8. Public Confirmation Embed
+            const embed = new EmbedBuilder()
+                .setTitle('⏰ User Timed Out')
+                .setDescription(`Moderator ${message.author} has restricted messaging.`)
+                .addFields(
+                    { name: 'Target', value: `${target} (\`${target.tag}\`)`, inline: true },
+                    { name: 'Duration', value: `**${durationStr}**`, inline: true },
+                    { name: 'Timeout Ends', value: `<t:${timeoutEndTimestamp}:R>`, inline: true },
+                    { name: 'Reason', value: reason, inline: false }
+                )
+                .setColor(0xFFA500)
+                .setTimestamp();
+            await message.channel.send({ embeds: [embed] });
+
+            // 9. Log Action
+             const settings = await Settings.findOne({ guildId: message.guild.id });
+             if (settings && settings.modlogChannelId) {
+                await logModerationAction(message.guild, settings, 'Timeout', target, message.author, reason, `Duration: ${durationStr}`);
+             }
+
+        } catch (error) {
+            console.error("Timeout error:", error);
+            message.reply('❌ Failed to timeout user. Check my permissions (Moderate Members) and role hierarchy.');
+        }
+    },
 };
