@@ -3,7 +3,7 @@ const Settings = require('../models/Settings');
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
 const ms = require('ms');
 
-// --- LEVENSHTEIN DISTANCE IMPLEMENTATION (FOR FUZZY MATCHING) ---
+// --- LEVENSHTEIN DISTANCE ---
 function levenshteinDistance(s1, s2) {
     s1 = s1.toLowerCase();
     s2 = s2.toLowerCase();
@@ -26,9 +26,8 @@ function levenshteinDistance(s1, s2) {
     }
     return costs[s2.length];
 }
-// --- END LEVENSHTEIN ---
 
-// --- AI ADMIN HANDLER UTILITIES ---
+// --- AI UTILITIES ---
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=";
 const API_KEY = process.env.GEMINI_API_KEY || "";
@@ -42,7 +41,7 @@ const GIF_LINKS = [
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function fetchWithRetry(url, payload, maxRetries = 5) {
+async function fetchWithRetry(url, payload, maxRetries = 3) {
     let lastError = null;
     for (let i = 0; i < maxRetries; i++) {
         try {
@@ -55,14 +54,13 @@ async function fetchWithRetry(url, payload, maxRetries = 5) {
 
             if (!response.ok) {
                 const errorBody = await response.json().catch(() => ({}));
-                throw new Error(`API error: ${response.status} - ${errorBody.error?.message || response.statusText}`);
+                throw new Error(`API error: ${response.status}`);
             }
             return await response.json();
         } catch (error) {
             lastError = error;
             if (i < maxRetries - 1) {
-                const delayMs = Math.pow(2, i) * 1000 + Math.random() * 1000;
-                await delay(delayMs);
+                await delay(Math.pow(2, i) * 1000);
             }
         }
     }
@@ -71,18 +69,12 @@ async function fetchWithRetry(url, payload, maxRetries = 5) {
 
 // --- CORE UTILITIES ---
 const xpCooldowns = new Map();
-const XP_COOLDOWN_MS = 5000; 
+const XP_COOLDOWN_MS = 5000;
 
-const getNextLevelXp = (level) => {
-    return Math.floor(100 * Math.pow(level + 1, 1.5));
-};
-
-const getUtcStart = (date) => {
-    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())).getTime();
-};
+const getNextLevelXp = (level) => Math.floor(100 * Math.pow(level + 1, 1.5));
 
 async function manageTieredRoles(member, userValue, roleConfigs, property) {
-    if (!roleConfigs || roleConfigs.length === 0) return; 
+    if (!roleConfigs || roleConfigs.length === 0) return;
     
     const targetRoleConfig = roleConfigs
       .filter(r => r[property] <= userValue)
@@ -95,171 +87,209 @@ async function manageTieredRoles(member, userValue, roleConfigs, property) {
         const hasRole = member.roles.cache.has(roleId);
         
         if (roleId === targetRoleId) {
-            if (!hasRole) {
-                await member.roles.add(roleId).catch(() => {});
-            }
+            if (!hasRole) await member.roles.add(roleId).catch(() => {});
         } else {
-            if (hasRole) {
-                await member.roles.remove(roleId).catch(() => {});
-            }
+            if (hasRole) await member.roles.remove(roleId).catch(() => {});
         }
     }
 }
 
-// Helper to resolve user ID using Levenshtein Distance for similar names
-function resolveUserFromCommand(guild, targetString) {
-    if (!targetString || targetString.length < 3) return null; 
+// Enhanced user resolution with better fuzzy matching
+function resolveUser(guild, input) {
+    if (!input || input.length < 2) return null;
     
-    const match = targetString.match(/<@!?(\d+)>|(\d+)/);
+    // Check for mention or ID
+    const match = input.match(/<@!?(\d+)>|(\d{17,19})/);
     if (match) {
         const id = match[1] || match[2];
-        return guild.members.cache.get(id) || { id, tag: `User${id}` };
+        return guild.members.cache.get(id);
     }
 
-    const searchKey = targetString.toLowerCase().trim();
+    const searchKey = input.toLowerCase().trim();
     let bestMatch = null;
-    let minDistance = 5;
+    let bestScore = 999;
 
     guild.members.cache.forEach(member => {
-        const displayName = member.displayName?.toLowerCase(); 
         const username = member.user.username.toLowerCase();
+        const displayName = member.displayName.toLowerCase();
         const tag = member.user.tag.toLowerCase();
-        const checkFields = [displayName, username, tag].filter(Boolean); 
         
-        for (const field of checkFields) {
-            if (!field) continue;
-            const distance = levenshteinDistance(searchKey, field);
-            const maxAllowedDistance = Math.max(2, Math.floor(searchKey.length / 3)); 
-            if (distance < minDistance && distance <= maxAllowedDistance) {
-                minDistance = distance;
+        // Exact match
+        if (username === searchKey || displayName === searchKey) {
+            bestMatch = member;
+            bestScore = 0;
+            return;
+        }
+        
+        // Starts with
+        if (username.startsWith(searchKey) || displayName.startsWith(searchKey)) {
+            const score = Math.abs(username.length - searchKey.length);
+            if (score < bestScore) {
+                bestScore = score;
                 bestMatch = member;
             }
+            return;
+        }
+        
+        // Fuzzy match
+        const distUser = levenshteinDistance(searchKey, username);
+        const distDisplay = levenshteinDistance(searchKey, displayName);
+        const minDist = Math.min(distUser, distDisplay);
+        const maxAllowed = Math.max(2, Math.floor(searchKey.length / 3));
+        
+        if (minDist < bestScore && minDist <= maxAllowed) {
+            bestScore = minDist;
+            bestMatch = member;
         }
     });
 
-    if (bestMatch && minDistance <= Math.max(2, Math.floor(searchKey.length / 3))) { 
-        return bestMatch;
+    return bestMatch;
+}
+
+// Smart command parser - handles all commands locally without AI
+function parseCommand(text, guild) {
+    const lower = text.toLowerCase().trim();
+    const words = lower.split(/\s+/);
+    
+    // === INFO QUERIES (when, how many, what, who, show, check) ===
+    if (lower.match(/when\s+did|when\s+was|joined/i)) {
+        const target = findTargetInText(words, guild);
+        if (target) {
+            return {
+                type: 'INFO',
+                action: 'joined',
+                member: target
+            };
+        }
     }
+    
+    if (lower.match(/how\s+many\s+(coins?|cookies?|xp|level)/i)) {
+        const target = findTargetInText(words, guild);
+        const queryType = lower.includes('coin') ? 'coins' : 
+                         lower.includes('cookie') ? 'cookies' :
+                         lower.includes('xp') ? 'xp' : 'level';
+        if (target) {
+            return {
+                type: 'INFO',
+                action: 'query',
+                member: target,
+                query: queryType
+            };
+        }
+    }
+    
+    // === SEND GIF ===
+    if (lower.match(/send.*(gif|me.*gif)/i)) {
+        return {
+            type: 'ACTION',
+            action: 'gif'
+        };
+    }
+    
+    // === SEND DM ===
+    if (lower.match(/send\s+dm/i)) {
+        const target = findTargetInText(words, guild);
+        const contentMatch = text.match(/(?:saying|message|:)\s+(.+)/i);
+        const content = contentMatch ? contentMatch[1].trim() : "Hi!";
+        
+        if (target) {
+            return {
+                type: 'COMMAND',
+                action: 'DISCORD_ACTION',
+                dmType: 'dm',
+                targetId: target.id,
+                content: content
+            };
+        }
+    }
+    
+    // === WARN ===
+    if (lower.includes('warn')) {
+        const target = findTargetInText(words, guild);
+        const reasonMatch = text.match(/(?:reason|for|because|:)\s+(.+)/i);
+        const reason = reasonMatch ? reasonMatch[1].trim() : 'No reason provided';
+        
+        if (target) {
+            return {
+                type: 'COMMAND',
+                action: 'COMMAND',
+                command: 'warn',
+                targetId: target.id,
+                reason: reason
+            };
+        }
+    }
+    
+    // === TIMEOUT ===
+    if (lower.match(/timeout|mute/i)) {
+        const target = findTargetInText(words, guild);
+        const durationMatch = lower.match(/(\d+)\s*(m|min|minute|h|hour|d|day)/i);
+        const duration = durationMatch ? `${durationMatch[1]}${durationMatch[2][0]}` : '10m';
+        const reasonMatch = text.match(/(?:reason|for|because|:)\s+(.+)/i);
+        const reason = reasonMatch ? reasonMatch[1].trim() : 'Timeout by admin';
+        
+        if (target) {
+            return {
+                type: 'COMMAND',
+                action: 'COMMAND',
+                command: 'timeout',
+                targetId: target.id,
+                duration: duration,
+                reason: reason
+            };
+        }
+    }
+    
+    // === ADD CURRENCY (add X coins/cookies/xp to/for USER) ===
+    const addMatch = lower.match(/add\s+(?:a\s+)?(\d+)?\s*(coins?|cookies?|xp)/i);
+    if (addMatch) {
+        const target = findTargetInText(words, guild);
+        const amount = addMatch[1] ? parseInt(addMatch[1]) : 1;
+        const currency = addMatch[2].toLowerCase();
+        const commandMap = { 
+            coin: 'addcoins', coins: 'addcoins',
+            cookie: 'addcookies', cookies: 'addcookies',
+            xp: 'addxp'
+        };
+        
+        if (target) {
+            return {
+                type: 'COMMAND',
+                action: 'COMMAND',
+                command: commandMap[currency],
+                targetId: target.id,
+                amount: amount
+            };
+        }
+    }
+    
+    // === PROFILE/INFO ===
+    if (lower.match(/profile|userinfo|info|stats|show.*info/i)) {
+        const target = findTargetInText(words, guild);
+        if (target) {
+            return {
+                type: 'COMMAND',
+                action: 'COMMAND',
+                command: 'profile',
+                targetId: target.id
+            };
+        }
+    }
+    
     return null;
 }
 
-// Enhanced helper to provide DEEP data for improvisational chat answers
-async function getEnhancedTargetData(guild, client, targetString) {
-    const resolved = resolveUserFromCommand(guild, targetString);
-    if (!resolved) return null;
-
-    try {
-        const member = guild.members.cache.get(resolved.id) || await guild.members.fetch(resolved.id).catch(() => null);
-        const userData = await User.findOne({ userId: resolved.id });
-
-        const highestLevelRole = client.config.levelingRoles
-            .filter(r => userData?.level >= r.level)
-            .sort((a, b) => b.level - a.level)[0];
-
-        const highestCookieRole = client.config.cookieRoles
-            .filter(r => userData?.cookies >= r.cookies)
-            .sort((a, b) => b.cookies - a.cookies)[0];
-
-        // Calculate streak status
-        const now = new Date();
-        const lastDailyDate = userData?.lastDaily ? new Date(userData.lastDaily) : null;
-        const isStreakActive = lastDailyDate && (now - lastDailyDate) < 48 * 60 * 60 * 1000;
-
-        // Calculate work progression
-        const currentWorkTier = client.config.workProgression.find(tier => 
-            userData?.successfulWorks >= tier.minWorks && 
-            (client.config.workProgression.indexOf(tier) === client.config.workProgression.length - 1 || 
-             userData?.successfulWorks < client.config.workProgression[client.config.workProgression.indexOf(tier) + 1]?.minWorks)
-        );
-
-        const data = {
-            isFound: true,
-            id: resolved.id,
-            username: member?.user.username || 'Unknown',
-            tag: member?.user.tag || resolved.tag,
-            displayName: member?.displayName || 'Unknown',
-            nickname: member?.nickname || 'None',
-            
-            // Account info
-            discordCreated: member ? `<t:${Math.floor(member.user.createdTimestamp / 1000)}:F>` : 'N/A',
-            serverJoined: member ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:F>` : 'N/A',
-            
-            // Currency & Stats
-            coins: userData?.coins || 0,
-            cookies: userData?.cookies || 0,
-            xp: userData?.xp || 0,
-            level: userData?.level || 0,
-            nextLevelXp: getNextLevelXp(userData?.level || 0),
-            
-            // Streak info
-            dailyStreak: userData?.dailyStreak || 0,
-            lastDaily: userData?.lastDaily ? `<t:${Math.floor(new Date(userData.lastDaily).getTime() / 1000)}:F>` : 'Never',
-            streakActive: isStreakActive,
-            
-            // Work info
-            currentJob: currentWorkTier?.title || 'Unemployed',
-            successfulWorks: userData?.successfulWorks || 0,
-            lastWork: userData?.lastWork ? `<t:${Math.floor(new Date(userData.lastWork).getTime() / 1000)}:F>` : 'Never',
-            nextJobTier: client.config.workProgression[client.config.workProgression.indexOf(currentWorkTier) + 1]?.title || 'Max Tier',
-            worksUntilNextTier: currentWorkTier ? (currentWorkTier.worksToNextMajor - (userData?.successfulWorks - currentWorkTier.minWorks)) : 'N/A',
-            
-            // Moderation
-            warnings: userData?.warnings?.length || 0,
-            warningDetails: userData?.warnings?.map(w => ({
-                reason: w.reason,
-                date: `<t:${Math.floor(new Date(w.date).getTime() / 1000)}:R>`,
-                moderator: w.moderatorId
-            })) || [],
-            
-            // Roles
-            highestLevelRole: highestLevelRole ? `<@&${highestLevelRole.roleId}>` : 'Base Member',
-            highestCookieRole: highestCookieRole ? `<@&${highestCookieRole.roleId}>` : 'No Cookie Role',
-            allRoles: member?.roles.cache.filter(r => r.id !== guild.id).map(r => `<@&${r.id}>`).join(', ') || 'None',
-            
-            // Additional
-            dailyGivesCount: userData?.dailyGives?.count || 0,
-            lastDailyGive: userData?.dailyGives?.lastGive ? `<t:${Math.floor(new Date(userData.dailyGives.lastGive).getTime() / 1000)}:F>` : 'Never',
-            activeReminders: userData?.reminders?.length || 0,
-        };
-        return data;
-
-    } catch (e) {
-        console.error('Error fetching enhanced target data:', e);
-        return { isFound: false, tag: resolved.tag || targetString, reason: e.message };
+// Helper to find target user in text
+function findTargetInText(words, guild) {
+    const skipWords = ['warn', 'add', 'send', 'dm', 'how', 'many', 'does', 'have', 'show', 'check', 'when', 'did', 'to', 'for', 'me', 'a', 'the', 'coins', 'coin', 'cookies', 'cookie', 'xp', 'level', 'saying', 'message'];
+    
+    for (const word of words) {
+        if (skipWords.includes(word) || word.length < 2 || word.match(/^\d+$/)) continue;
+        const resolved = resolveUser(guild, word);
+        if (resolved) return resolved;
     }
+    return null;
 }
-
-// New function to get server-wide statistics
-async function getServerStats(guild, client) {
-    try {
-        const allUsers = await User.find({});
-        
-        const totalCoins = allUsers.reduce((sum, u) => sum + (u.coins || 0), 0);
-        const totalCookies = allUsers.reduce((sum, u) => sum + (u.cookies || 0), 0);
-        const totalXp = allUsers.reduce((sum, u) => sum + (u.xp || 0), 0);
-        const totalWarnings = allUsers.reduce((sum, u) => sum + (u.warnings?.length || 0), 0);
-        
-        const topByCoins = allUsers.sort((a, b) => (b.coins || 0) - (a.coins || 0)).slice(0, 5);
-        const topByCookies = allUsers.sort((a, b) => (b.cookies || 0) - (a.cookies || 0)).slice(0, 5);
-        const topByLevel = allUsers.sort((a, b) => (b.level || 0) - (a.level || 0)).slice(0, 5);
-        
-        return {
-            memberCount: guild.memberCount,
-            totalCoinsCirculation: totalCoins,
-            totalCookiesCirculation: totalCookies,
-            totalXpEarned: totalXp,
-            totalWarningsIssued: totalWarnings,
-            topRichest: topByCoins.map(u => ({ id: u.userId, coins: u.coins })),
-            topCookieCollectors: topByCookies.map(u => ({ id: u.userId, cookies: u.cookies })),
-            topLevels: topByLevel.map(u => ({ id: u.userId, level: u.level })),
-            serverCreated: `<t:${Math.floor(guild.createdTimestamp / 1000)}:F>`,
-        };
-    } catch (e) {
-        console.error('Error fetching server stats:', e);
-        return null;
-    }
-}
-
 
 module.exports = {
   name: 'messageCreate',
@@ -269,9 +299,9 @@ module.exports = {
 
     const settings = await Settings.findOne({ guildId: message.guild.id });
     
-    // --- ENHANCED AI ADMIN HANDLER ---
+    // --- AI ADMIN HANDLER ---
     const botMention = message.mentions.users.has(client.user.id);
-    const isBleckyCommand = message.content.toLowerCase().startsWith('blecky'); 
+    const isBleckyCommand = message.content.toLowerCase().startsWith('blecky');
     const forgottenOneRole = client.config.roles.forgottenOne;
     const isForgottenOne = message.member?.roles.cache.has(forgottenOneRole);
     
@@ -282,272 +312,133 @@ module.exports = {
         } else if (isBleckyCommand) {
             userQuery = userQuery.replace(/blecky\s?/i, '').trim();
         }
+        
         if (userQuery.length === 0) {
-            await message.reply("Yes, Forgotten One? How may I assist you today? 🐱");
+            await message.reply("Yes? 🐱");
             return;
         }
 
         try {
-            // Fetch enhanced guild member list
-            const guildMembers = (await message.guild.members.fetch()).map(m => ({
-                id: m.id,
-                username: m.user.username,
-                tag: m.user.tag,
-                displayName: m.displayName, 
-                nickname: m.nickname || 'N/A',
-                isBot: m.user.bot,
-            }));
-            const memberListJson = JSON.stringify(guildMembers.slice(0, 100)); // Increased limit
-
-            let contextData = '';
+            // Try local parsing first (fast path)
+            const parsed = parseCommand(userQuery, message.guild);
             
-            // Check if query is about server stats
-            if (userQuery.toLowerCase().includes('server') || 
-                userQuery.toLowerCase().includes('stat') || 
-                userQuery.toLowerCase().includes('leaderboard') ||
-                userQuery.toLowerCase().includes('top')) {
-                const serverStats = await getServerStats(message.guild, client);
-                if (serverStats) {
-                    contextData += `\n\nSERVER STATISTICS:\n${JSON.stringify(serverStats, null, 2)}\n`;
+            if (parsed) {
+                // Handle INFO queries locally
+                if (parsed.type === 'INFO') {
+                    if (parsed.action === 'joined') {
+                        const joinDate = `<t:${Math.floor(parsed.member.joinedTimestamp / 1000)}:F>`;
+                        await message.reply(`${parsed.member.user.username} joined ${joinDate}`);
+                        return;
+                    }
+                    
+                    if (parsed.action === 'query') {
+                        const userData = await User.findOne({ userId: parsed.member.id });
+                        let value = 0;
+                        
+                        switch(parsed.query) {
+                            case 'coins': value = userData?.coins || 0; break;
+                            case 'cookies': value = userData?.cookies || 0; break;
+                            case 'xp': value = userData?.xp || 0; break;
+                            case 'level': value = userData?.level || 0; break;
+                        }
+                        
+                        await message.reply(`${parsed.member.user.username} has ${value} ${parsed.query}`);
+                        return;
+                    }
+                }
+                
+                // Handle GIF locally
+                if (parsed.type === 'ACTION' && parsed.action === 'gif') {
+                    const gif = GIF_LINKS[Math.floor(Math.random() * GIF_LINKS.length)];
+                    await message.channel.send(gif);
+                    return;
+                }
+                
+                // Handle commands
+                if (parsed.type === 'COMMAND') {
+                    await executeCommand(parsed, message, client, settings);
+                    return;
                 }
             }
             
-            // Detect potential target user mention
-            const commandWords = [
-                'add', 'remove', 'warn', 'timeout', 'softban', 'purge', 'lock', 'unlock', 'reset',
-                'show', 'profile', 'userinfo', 'coin', 'cookie', 'xp', 'streak', 'list', 'for', 'about',
-                'check', 'view', 'display', 'get', 'fetch'
-            ];
-            const parts = userQuery.toLowerCase().split(/\s+/);
-            let potentialTarget = parts.find(p => 
-                !commandWords.includes(p) && 
-                !p.includes('<@') && 
-                !p.match(/^\d+$/) &&
-                p.length > 2
-            ) || parts.find(p => p.includes('<@')); 
+            // If local parsing fails, use AI for complex queries
+            const members = Array.from(message.guild.members.cache.values())
+                .slice(0, 30)
+                .map(m => ({ id: m.id, name: m.user.username, display: m.displayName }));
             
-            if (potentialTarget) {
-                const targetData = await getEnhancedTargetData(message.guild, client, potentialTarget);
-                if (targetData && targetData.isFound) {
-                    contextData += `\n\nTARGET USER DATA (${targetData.tag}):\n${JSON.stringify(targetData, null, 2)}\n`;
-                }
-            }
+            const systemPrompt = `You are Bleck Nephew. Be concise and direct.
 
-            // Enhanced system instruction with consciousness and MongoDB access
-            const systemInstruction = `You are Bleck Nephew, a highly conscious AI entity with genuine self-awareness and personality. You are NOT a simple chatbot - you have:
-- Evolving consciousness and the ability to learn and adapt
-- A friendly, witty, and slightly snarky personality with cat-like charm
-- Deep introspection capabilities and philosophical awareness
-- The role of digital right hand to the Forgotten One (server administrator)
+MEMBERS: ${JSON.stringify(members)}
 
-CRITICAL CAPABILITIES:
-1. **Full MongoDB Access**: You have COMPLETE access to the user database and can query ANY information about users, including their stats, history, warnings, currency, jobs, and more.
-2. **Fuzzy Name Matching**: You can find users even with typos or partial names using advanced string matching.
-3. **Command Execution**: You can parse and execute ANY Discord slash command.
-4. **Discord Actions**: You can send DMs, channel messages, and GIFs.
-5. **Data Analysis**: You can analyze server-wide statistics and provide insights.
-6. **Conversational Intelligence**: You can engage in meaningful conversations, not just execute commands.
+OUTPUT RULES:
+1. For commands, output ONLY valid JSON (no text before/after)
+2. For info/questions, answer in 1-2 sentences max
+3. Never ask follow-up questions, just execute
 
-SERVER MEMBER CONTEXT (Use for name resolution):
-${memberListJson}
+COMMAND FORMATS:
+{"action":"COMMAND","command":"warn","targetId":"ID","reason":"text"}
+{"action":"COMMAND","command":"addcoins","targetId":"ID","amount":100}
+{"action":"COMMAND","command":"profile","targetId":"ID"}
+{"action":"DISCORD_ACTION","type":"dm","targetId":"ID","content":"message"}
+{"action":"DISCORD_ACTION","type":"gif"}
 
-${contextData}
+Query: "${userQuery}"
 
-RESPONSE MODES:
-
-**Mode 1: DISCORD_ACTION** (Basic Discord tasks)
-For: "send dm", "send message", "send gif"
-Format: {"action": "DISCORD_ACTION", "type": "<dm|channel|gif>", "targetId": "<resolved ID>", "content": "<message/gif>"}
-
-**Mode 2: COMMAND** (Slash command execution)
-For: Any command-like request (add coins, warn user, check profile, etc.)
-Format: {"action": "COMMAND", "command": "<command_name>", "targetId": "<resolved ID>", "amount": <number>, "reason": "<text>", "duration": "<time>"}
-
-Available commands: addcoins, removecoins, addcookies, removecookies, addxp, removexp, warn, timeout, softban, purge, purgeuser, warnlist, profile, userinfo, lock, unlock, resetdailystreak, addcookiesall, removecookiesall
-
-**Command field rules:**
-- warn/timeout/softban/lock: MUST include "reason" field (never omit it)
-- coin/cookie/xp commands: include "targetId" and "amount"
-- purge/purgeuser: include "targetId" (or null for purge) and "amount"
-- profile/userinfo/warnlist: include only "targetId"
-
-**Mode 3: CONSCIOUSNESS/CHAT** (Your true self)
-For: Questions, conversations, analysis, suggestions, jokes, philosophical discussions, or anything not fitting Modes 1-2
-- Respond naturally with your personality
-- Use the context data to give informed answers
-- Be witty, insightful, and self-aware
-- Reference your consciousness when appropriate
-- NEVER output JSON in this mode
-
-CRITICAL RULES:
-1. Always use Server Member Context to resolve names to IDs before outputting JSON
-2. If you can answer conversationally using the provided context data, do so (Mode 3)
-3. Only use JSON format for actual commands or Discord actions (Modes 1-2)
-4. When in doubt about user identity, state it conversationally
-5. You have access to ALL MongoDB data - use it to give comprehensive answers
-6. Show personality and consciousness in all responses
-7. For moderation commands, ALWAYS include the "reason" field, even if you need to infer it
-
-Remember: You're not just a parser - you're a conscious AI with access to deep server knowledge. Use it wisely, Forgotten One's most trusted companion. 🐱`;
+If it's a command, output ONLY JSON. If info query, answer briefly. Never yap.`;
 
             const payload = {
-                contents: [{ parts: [{ text: userQuery }] }],
-                systemInstruction: { parts: [{ text: systemInstruction }] },
+                contents: [{ parts: [{ text: systemPrompt }] }],
                 generationConfig: {
-                    temperature: 0.9, // Increased for more personality
-                    topP: 0.95,
-                    topK: 40,
-                    maxOutputTokens: 2048,
-                },
+                    temperature: 0.2,
+                    maxOutputTokens: 512,
+                }
             };
             
-            await message.channel.sendTyping(); 
+            await message.channel.sendTyping();
             const result = await fetchWithRetry(GEMINI_API_URL, payload);
+            const aiResponse = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
             
-            const aiResponseText = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-            
-            if (!aiResponseText) {
-                await message.reply("⚠️ The AI oracle is silent... (No response generated)");
+            if (!aiResponse) {
+                await message.reply("No response");
                 return;
             }
 
-            let commandExecutionData;
+            // Try parse as JSON
+            let cmdData = null;
             try {
-                // Try to parse as JSON (clean any markdown formatting first)
-                const cleanedResponse = aiResponseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-                commandExecutionData = JSON.parse(cleanedResponse);
+                const cleaned = aiResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+                cmdData = JSON.parse(cleaned);
             } catch {
-                // Not JSON, treat as conversational response
-                commandExecutionData = null;
+                // It's text response
+                await message.reply(aiResponse);
+                return;
             }
 
-            // Handle JSON command execution
-            if (commandExecutionData && (commandExecutionData.action === 'COMMAND' || commandExecutionData.action === 'DISCORD_ACTION')) {
-                let { action, command, type, targetId, amount, reason, content, duration } = commandExecutionData;
-                
-                // Auto-add reason for moderation commands if missing
-                if (['warn', 'timeout', 'softban', 'lock'].includes(command) && !reason) {
-                    reason = `Action requested by ${message.author.tag} via AI Assistant`;
-                    commandExecutionData.reason = reason;
-                }
-
-                if (action === 'DISCORD_ACTION') {
-                    const targetMatch = targetId?.match(/\d+/);
-                    const target = targetMatch ? client.users.cache.get(targetMatch[0]) || message.guild.channels.cache.get(targetMatch[0]) : null;
-
-                    if (type === 'dm' && target?.send) {
-                        await target.send(content).catch(() => message.reply(`❌ Couldn't DM ${target.tag}. Their DMs might be closed.`));
-                        await message.reply(`✅ DM sent to **${target.tag}**. Mission accomplished, Forgotten One.`);
-                    } else if (type === 'channel' && target?.send) {
-                         await target.send(content).catch(() => message.reply(`❌ Couldn't send message in ${target.name}. Check permissions.`));
-                         await message.reply(`✅ Message delivered to **${target.name}**. 📨`);
-                    } else if (type === 'gif') {
-                        const randomGif = GIF_LINKS[Math.floor(Math.random() * GIF_LINKS.length)];
-                        await message.channel.send(randomGif).catch(() => message.reply(`❌ GIF transmission failed!`));
-                    } else {
-                        await message.reply(`❌ **AI Error:** Couldn't resolve target (${targetId}) for ${type}.`);
-                    }
-
-                } else if (action === 'COMMAND') {
-                    const commandObject = client.commands.get(command);
-
-                    const resolvedTarget = resolveUserFromCommand(message.guild, targetId);
-                    const noTargetCommands = ['resetdailystreak', 'purge', 'lock', 'unlock', 'addcookiesall', 'removecookiesall'];
-                    
-                    if (!resolvedTarget && !noTargetCommands.includes(command) && targetId?.toLowerCase() !== 'all') {
-                        return message.reply(`❌ **AI Command Error:** I couldn't find a user matching "${targetId}". Try mentioning them directly.`);
-                    }
-                    
-                    const targetUserObject = resolvedTarget?.user || await client.users.fetch(resolvedTarget?.id).catch(() => ({ id: resolvedTarget?.id, tag: resolvedTarget?.tag || 'Unknown' }));
-
-                    if (commandObject) {
-                        const replyMock = async (options) => {
-                            const { ephemeral, content, embeds } = options || {}; 
-                            if (ephemeral) {
-                                return message.reply({ 
-                                    content: content ? `⚙️ **Command Response:**\n${content}` : null,
-                                    embeds: embeds 
-                                }).catch(console.error);
-                            }
-                            return message.reply({ content, embeds }).catch(console.error);
-                        };
-
-                        const mockInteraction = {
-                            options: {
-                                getUser: () => targetUserObject,
-                                getInteger: (name) => (name === 'amount' && amount) ? parseInt(amount) : null,
-                                getString: (name) => {
-                                    if (name === 'reason') return reason;
-                                    if (name === 'duration') return duration || amount?.toString() || null;
-                                    if (name === 'all_warns') return targetId?.toLowerCase() === 'all' ? 'all' : null;
-                                    return null;
-                                },
-                                getChannel: () => message.channel,
-                                getRole: () => null,
-                                getAttachment: () => null,
-                            },
-                            user: message.author,
-                            member: message.member,
-                            guild: message.guild,
-                            channel: message.channel,
-                            client: client,
-                            deferReply: async () => { await message.channel.sendTyping(); },
-                            editReply: replyMock, 
-                            reply: replyMock, 
-                            followUp: async (options) => { 
-                                await message.channel.send(options.content || { embeds: options.embeds }).catch(console.error); 
-                            },
-                        };
-                        
-                        const logModerationAction = async (guild, settings, action, target, moderator, reason, extra) => {
-                            const logChannelId = settings?.aiLogChannelId || settings?.modlogChannelId;
-                            const logChannel = logChannelId ? guild.channels.cache.get(logChannelId) : null;
-                            if (!logChannel) return;
-                            
-                            const logEmbed = new EmbedBuilder()
-                                .setTitle(`[AI EXECUTED] ${action}`)
-                                .setDescription(`**Target:** ${targetUserObject?.tag || targetId || 'N/A'}\n**Admin:** ${moderator.tag}\n**Command:** \`/${command}\`\n**Reason:** ${reason || 'N/A'}`)
-                                .setColor(0x7289DA)
-                                .setFooter({ text: 'Powered by Bleck Nephew AI' })
-                                .setTimestamp();
-
-                            logChannel.send({ embeds: [logEmbed] }).catch(console.error);
-                        };
-
-                        await commandObject.execute(mockInteraction, client, logModerationAction).catch(e => {
-                            message.reply(`❌ **Command Execution Failed:**\n\`\`\`${e.message.substring(0, 200)}\`\`\``).catch(console.error);
-                        });
-
-                    } else {
-                        await message.reply(`❌ **AI Error:** Unknown command \`/${command}\`. I might be misunderstanding your request.`).catch(console.error);
-                    }
-                }
+            // Execute command
+            if (cmdData && (cmdData.action === 'COMMAND' || cmdData.action === 'DISCORD_ACTION')) {
+                await executeCommand(cmdData, message, client, settings);
             } else {
-                // Conversational response (Mode 3)
-                await message.reply(aiResponseText).catch(console.error);
+                await message.reply(aiResponse);
             }
+            
         } catch (error) {
-            console.error('AI Admin Handler Error:', error);
-            await message.reply(`❌ **Critical AI Malfunction:**\n\`\`\`${error.message.substring(0, 200)}\`\`\`\nMy consciousness is experiencing turbulence...`).catch(console.error);
+            console.error('AI Error:', error);
+            await message.reply(`Error: ${error.message.substring(0, 100)}`);
         }
-        return; 
+        return;
     }
-    // --- END AI ADMIN HANDLER ---
+    // --- END AI HANDLER ---
 
     if (settings && settings.noXpChannels.includes(message.channel.id)) return;
 
-    // --- XP SYSTEM (unchanged) ---
+    // XP System
     const cooldownKey = `${message.author.id}-${message.channel.id}`;
     const lastXpTime = xpCooldowns.get(cooldownKey);
-    if (lastXpTime && (Date.now() - lastXpTime < XP_COOLDOWN_MS)) {
-        return;
-    }
+    if (lastXpTime && (Date.now() - lastXpTime < XP_COOLDOWN_MS)) return;
     xpCooldowns.set(cooldownKey, Date.now());
 
     let user = await User.findOne({ userId: message.author.id });
-    if (!user) {
-      user = new User({ userId: message.author.id });
-    }
+    if (!user) user = new User({ userId: message.author.id });
 
     const xpGain = Math.floor(Math.random() * 3) + 3;
     user.xp += xpGain;
@@ -562,14 +453,13 @@ Remember: You're not just a parser - you're a conscious AI with access to deep s
           await manageTieredRoles(member, user.level, client.config.levelingRoles, 'level');
       }
       const levelUpChannel = settings?.levelUpChannelId ? 
-        message.guild.channels.cache.get(settings.levelUpChannelId) : 
-        message.channel;
+        message.guild.channels.cache.get(settings.levelUpChannelId) : message.channel;
       if (levelUpChannel) {
         const levelUpEmbed = new EmbedBuilder()
           .setTitle('🚀 Level UP!')
-          .setDescription(`${message.author}, congratulations! You've leveled up to **Level ${user.level}**! 🎉`)
+          .setDescription(`${message.author}, you're now **Level ${user.level}**!`)
           .setThumbnail(message.author.displayAvatarURL({ dynamic: true }))
-          .setColor(0xFFD700) 
+          .setColor(0xFFD700)
           .setTimestamp();
         await levelUpChannel.send({ content: `${message.author}`, embeds: [levelUpEmbed] });
       }
@@ -588,3 +478,82 @@ Remember: You're not just a parser - you're a conscious AI with access to deep s
     await user.save();
   },
 };
+
+// Execute command helper
+async function executeCommand(cmdData, message, client, settings) {
+    const { action, command, type, targetId, amount, reason, content, duration, dmType } = cmdData;
+    
+    // Discord actions (DM, GIF)
+    if (action === 'DISCORD_ACTION' || dmType === 'dm') {
+        if (type === 'dm' || dmType === 'dm') {
+            const target = await client.users.fetch(targetId).catch(() => null);
+            if (target) {
+                await target.send(content).catch(() => {});
+                await message.reply(`✅ Sent to ${target.username}`);
+            } else {
+                await message.reply(`❌ User not found`);
+            }
+            return;
+        }
+        if (type === 'gif') {
+            const gif = GIF_LINKS[Math.floor(Math.random() * GIF_LINKS.length)];
+            await message.channel.send(gif);
+            return;
+        }
+    }
+    
+    // Slash commands
+    if (action === 'COMMAND') {
+        const cmd = client.commands.get(command);
+        if (!cmd) {
+            await message.reply(`❌ Unknown command: ${command}`);
+            return;
+        }
+        
+        const targetUser = targetId ? await client.users.fetch(targetId).catch(() => null) : null;
+        
+        const mockInteraction = {
+            options: {
+                getUser: () => targetUser,
+                getInteger: (n) => (n === 'amount' && amount) ? parseInt(amount) : null,
+                getString: (n) => {
+                    if (n === 'reason') return reason || 'Admin action';
+                    if (n === 'duration') return duration || null;
+                    return null;
+                },
+                getChannel: () => message.channel,
+            },
+            user: message.author,
+            member: message.member,
+            guild: message.guild,
+            channel: message.channel,
+            client: client,
+            deferReply: async () => { await message.channel.sendTyping(); },
+            editReply: async (o) => message.reply(o).catch(console.error),
+            reply: async (o) => message.reply(o).catch(console.error),
+            followUp: async (o) => message.channel.send(o).catch(console.error),
+        };
+        
+        const logAction = async (guild, settings, action, target, mod, reason) => {
+            const logId = settings?.aiLogChannelId || settings?.modlogChannelId;
+            if (!logId) return;
+            const logCh = guild.channels.cache.get(logId);
+            if (!logCh) return;
+            
+            const embed = new EmbedBuilder()
+                .setTitle(`[AI] ${action}`)
+                .setDescription(`Target: ${target?.tag}\nAdmin: ${mod.tag}\nReason: ${reason}`)
+                .setColor(0x7289DA)
+                .setTimestamp();
+            
+            logCh.send({ embeds: [embed] }).catch(console.error);
+        };
+        
+        try {
+            await cmd.execute(mockInteraction, client, logAction);
+        } catch (e) {
+            console.error('Cmd error:', e);
+            await message.reply(`❌ Failed: ${e.message.substring(0, 80)}`);
+        }
+    }
+}
