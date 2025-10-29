@@ -1,6 +1,7 @@
-// events/interactionCreate.js (REPLACED - Added permission check for resetdailystreak)
+// events/interactionCreate.js (REPLACED - Added permission check for resetdailystreak, and handlers for /work, /poll, /reminders buttons)
 const { EmbedBuilder, PermissionsBitField } = require('discord.js'); 
 const Settings = require('../models/Settings');
+const User = require('../models/User'); // ADDED: Import User model
 
 async function logModerationAction(guild, settings, action, target, moderator, reason = 'No reason provided', extra = '') {
   if (!settings || !settings.modlogChannelId) return;
@@ -173,9 +174,99 @@ module.exports = {
         return; // End of ChatInputCommand logic
     }
 
-    // Handle Button Interactions
+    // Handle Button Interactions (FIXED /work apply bug here)
     if (interaction.isButton()) {
-      // Note: Full content of the unchanged sections is omitted for brevity but is presumed to exist in the actual file.
+      const customId = interaction.customId;
+      
+      // 1. /work apply button handling
+      if (customId.startsWith('job_apply_')) {
+          await interaction.deferReply({ ephemeral: true }); // Acknowledge the click quickly
+          
+          const jobId = customId.split('_')[2];
+          let user = await User.findOne({ userId: interaction.user.id });
+          
+          if (!user) {
+              return interaction.editReply({ content: '❌ Error: User data not found. Please try /profile first.' });
+          }
+
+          const workProgression = client.config.workProgression;
+          const newJob = workProgression.find(job => job.id === jobId);
+
+          if (!newJob) {
+              return interaction.editReply({ content: '❌ Error: Invalid job selected.' });
+          }
+          
+          // Eligibility Check: Must be the next sequential job AND meets work requirement.
+          const currentIndex = workProgression.findIndex(j => j.id === user.currentJob);
+          const newJobIndex = workProgression.findIndex(j => j.id === jobId);
+
+          const isEligible = (!user.currentJob && newJobIndex === 0) || 
+                             (newJobIndex === currentIndex + 1 && user.successfulWorks >= newJob.minWorks);
+          
+          if (!isEligible) {
+              return interaction.editReply({ content: "❌ **Error:** You are not currently eligible for this position or you tried to skip a tier. Check /work apply again." });
+          }
+
+          // Apply Logic
+          user.currentJob = jobId;
+          user.lastResigned = null; // Clear resignation cooldown
+          await user.save();
+          
+          return interaction.editReply({ 
+              content: `✅ **Application Successful!** You are now a **${newJob.title}**! Get to work with \`/work job\`.` 
+          });
+      }
+      
+      // 2. /poll result button handling
+      else if (customId === 'poll_result_manual') {
+          if (!isMod) {
+              return interaction.reply({ content: '❌ You do not have permission to manually end a poll.', ephemeral: true });
+          }
+          
+          await interaction.deferReply({ ephemeral: true });
+          
+          const pollCommand = client.commands.get('poll');
+          if (!pollCommand || !pollCommand.endPoll) {
+               return interaction.editReply({ content: '❌ Poll management function not found.' });
+          }
+
+          // The poll message ID is the interaction's message ID
+          await pollCommand.endPoll(interaction.channel, interaction.message.id, client, interaction, true);
+          // endPoll sends public results; we just confirm ephemerally
+          return interaction.editReply({ content: `✅ **Poll Ended!** Results posted.` });
+      }
+      
+      // 3. /reminders remove button handling
+      else if (customId.startsWith('remove_reminder_')) {
+          await interaction.deferReply({ ephemeral: true });
+          
+          const reminderId = customId.split('_')[2];
+          let user = await User.findOne({ userId: interaction.user.id });
+          
+          if (!user) {
+               return interaction.editReply({ content: '❌ Error: User data not found.' });
+          }
+          
+          const initialCount = user.reminders.length;
+          // Filter out the reminder to remove
+          user.reminders = user.reminders.filter(r => r._id.toString() !== reminderId);
+          await user.save();
+          
+          if (initialCount === user.reminders.length) {
+              return interaction.editReply({ content: '❌ Error: Reminder not found.' });
+          }
+          
+          // Clear the corresponding timeout in memory
+          const timeout = client.reminders.get(reminderId);
+          if (timeout) {
+              clearTimeout(timeout);
+              client.reminders.delete(reminderId);
+          }
+          
+          // Remove buttons from the original message and confirm removal
+          await interaction.message.edit({ components: [] }).catch(() => {});
+          return interaction.editReply({ content: `✅ Reminder ID \`${reminderId}\` removed successfully.` });
+      }
     }
   },
 };
