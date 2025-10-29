@@ -1,4 +1,4 @@
-// events/messageCreate.js (FINALIZED)
+// events/messageCreate.js (FINALIZED: AI Max Power, Role Restricted, Database Context)
 import { EmbedBuilder, ChannelType } from "discord.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "dotenv";
@@ -23,10 +23,10 @@ config();
 const client = global.clientInstance;
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// ======== SYSTEM INSTRUCTION TEMPLATE ==========
+// ======== SYSTEM INSTRUCTION TEMPLATE (Expanded Database Context) ==========
 const SYSTEM_INSTRUCTION_TEMPLATE = `
 You are Blecky AI, a helpful and powerful AI assistant inside a Discord server. 
-You can perform any function, command, or message interaction available to the bot.
+You have FULL authority and knowledge to perform any function, command, or message interaction available to the bot.
 Always output a valid JSON when performing an action. Example:
 
 {
@@ -38,9 +38,9 @@ Always output a valid JSON when performing an action. Example:
 If the user only wants to talk, reply naturally (no JSON).
 
 When generating commands:
+- You must use the 'dm' command if the request is clearly meant as a private message.
 - Always set "targetUser" to the username, nickname, or tag that best matches from the list below or from the MongoDB user collection.
-- You may assume access to MongoDB 'User' collection, which contains every user's username, tag, displayName, and userId.
-- If you cannot find a match, omit targetUser or set it to null.
+- You have access to the MongoDB 'User' collection with the following fields: userId, xp, level, cookies, coins, lastDaily, dailyStreak, lastWork, warnings, dailyGives, reminders, currentJob, successfulWorks, lastResigned. Use this data for context.
 
 Server Members and Database Users for reference:
 {MEMBER_LIST}
@@ -61,29 +61,44 @@ export default async (client, message) => {
       message.channel.type === ChannelType.DM ||
       !message.guild
     ) return;
-    
+
+    // --- CRITICAL ACCESS CONTROL: Only 'forgottenOne' role can use AI chat handler ---
+    const forgottenOneId = client.config.roles.forgottenOne;
+    if (!message.member.roles.cache.has(forgottenOneId)) {
+        // If they are not the 'forgottenOne' but sent an AI prefix command, delete it and exit silently.
+        if (message.content.toLowerCase().startsWith('blecky') || message.content.toLowerCase().startsWith('r-blecky')) {
+             if (message.channel.permissionsFor(client.user).has('ManageMessages')) {
+                await message.delete().catch(console.error);
+            }
+        }
+        return; 
+    }
+    // --- END ACCESS CONTROL ---
+
+
     // --- Message Content Initialization and Prefix Check ---
     let content = message.content.trim();
     let isAnonymousMode = false;
     let isAiPrefixCommand = false;
 
-    // Check for explicit AI prefixes (deletes original message)
+    // Check for explicit AI prefixes (r-blecky deletes original message AND forces anonymity)
     if (content.toLowerCase().startsWith('r-blecky')) {
         content = content.substring('r-blecky'.length).trim();
-        isAnonymousMode = true; // Use r-blecky to indicate forced anonymity
+        isAnonymousMode = true; 
         isAiPrefixCommand = true;
     } else if (content.toLowerCase().startsWith('blecky')) {
         content = content.substring('blecky'.length).trim();
         isAiPrefixCommand = true;
     }
 
-    // Delete the triggering message if it was an AI prefix command
+    // Delete the triggering message if it was an AI prefix command (r-blecky or blecky)
+    // NOTE: This happens AFTER role check, so only the allowed user's message is deleted.
     if (isAiPrefixCommand && message.channel.permissionsFor(client.user).has('ManageMessages')) {
       await message.delete().catch(console.error);
     }
     
-    // Exit if the message was only the prefix without content
-    if (isAiPrefixCommand && content.length === 0) return;
+    // If the message was processed by the XP system, we need the original message for the reply.
+    if (content.length === 0 && isAiPrefixCommand) return; 
 
     // ---- Quick XP system ----
     const userKey = `${message.guild.id}-${message.author.id}`;
@@ -122,7 +137,7 @@ export default async (client, message) => {
     }
     const authorDisplay = isAnonymousMode ? "Anonymous" : message.author.username;
 
-    // ---- Math Mode ----
+    // ---- Math Mode (using the potentially modified content) ----
     const isMathMode = settings.aiMathMode;
     if (isMathMode && /^[0-9+\-*/().\s^√]+$/.test(content)) {
       try {
@@ -133,7 +148,7 @@ export default async (client, message) => {
       }
     }
 
-    // ---- Build AI context ----
+    // ---- Build AI context (using the potentially modified content) ----
     const memberList = message.guild.members.cache.map(m =>
       `${m.user.username} (${m.displayName})`
     ).join(", ");
@@ -196,6 +211,7 @@ export default async (client, message) => {
     await responseChannel.send(replyMsg);
   } catch (err) {
     console.error("❌ AI Handler Error:", err);
+    // Use the original channel as a fallback for severe errors
     message.channel.send("⚠️ Something went wrong while processing your message."); 
   }
 };
@@ -220,7 +236,6 @@ function extractFirstBalancedJson(text) {
   return null;
 }
 
-// NOTE: Added responseChannel parameter to direct replies from AI-generated commands
 async function executeParsedAction(message, action, isAnonymousMode, responseChannel) {
   try {
     // 1. Send plain text message
@@ -279,6 +294,7 @@ async function executeParsedAction(message, action, isAnonymousMode, responseCha
     }
 
     // 6. Fallback to Command Processor (Performs all other server commands)
+    // NOTE: This relies on processCommand being robust enough to handle replies correctly.
     const handled = await processCommand(message.client, message, action.commandName, action.arguments || []);
     if (!handled) {
       const embed = new EmbedBuilder()
