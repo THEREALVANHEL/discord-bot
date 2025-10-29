@@ -95,7 +95,6 @@ async function manageTieredRoles(member, userValue, roleConfigs, property) {
 function resolveUser(guild, input, authorId) {
     if (!input || input.length < 2) return null;
     
-    // Check for mention or ID first
     const match = input.match(/<@!?(\d+)>|(\d{17,19})/);
     if (match) {
         const id = match[1] || match[2];
@@ -106,7 +105,6 @@ function resolveUser(guild, input, authorId) {
 
     const searchKey = input.toLowerCase().trim();
     
-    // Priority 1: Exact username or display name match
     let exactMatch = guild.members.cache.find(m => 
         m.id !== authorId && 
         (m.user.username.toLowerCase() === searchKey || 
@@ -115,7 +113,6 @@ function resolveUser(guild, input, authorId) {
     );
     if (exactMatch) return exactMatch;
     
-    // Priority 2: Username starts with search
     let startsWithMatch = guild.members.cache.find(m =>
         m.id !== authorId &&
         (m.user.username.toLowerCase().startsWith(searchKey) || 
@@ -123,7 +120,6 @@ function resolveUser(guild, input, authorId) {
     );
     if (startsWithMatch) return startsWithMatch;
     
-    // Priority 3: Username contains search
     let containsMatch = guild.members.cache.find(m =>
         m.id !== authorId &&
         (m.user.username.toLowerCase().includes(searchKey) || 
@@ -131,7 +127,6 @@ function resolveUser(guild, input, authorId) {
     );
     if (containsMatch) return containsMatch;
     
-    // Priority 4: Fuzzy match
     let bestMatch = null;
     let bestScore = 999;
 
@@ -160,10 +155,8 @@ function parseCommand(text, guild, authorId) {
     const lower = text.toLowerCase().trim();
     const words = lower.split(/\s+/);
     
-    // Skip words for target detection
     const skipWords = ['blecky', 'warn', 'add', 'remove', 'send', 'show', 'dm', 'how', 'many', 'does', 'have', 'get', 'view', 'check', 'what', 'whats', 'when', 'did', 'to', 'for', 'from', 'me', 'my', 'a', 'an', 'the', 'coins', 'coin', 'cookies', 'cookie', 'xp', 'level', 'saying', 'say', 'message', 'gif', 'give', 'reason', 'is', 'with', 'picture', 'avatar', 'profile', 'image', 'ping', 'warnlist', 'list', 'of', 'warning', 'warnings', 'one', 'their', 'his', 'her'];
     
-    // Find target user
     const findTarget = () => {
         const mentionMatch = text.match(/<@!?(\d+)>/);
         if (mentionMatch) {
@@ -173,7 +166,6 @@ function parseCommand(text, guild, authorId) {
             return member;
         }
         
-        // Try multi-word names first (like "ali" could be part of "vanhel")
         for (let wordCount = 3; wordCount >= 1; wordCount--) {
             for (let i = 0; i <= words.length - wordCount; i++) {
                 const phrase = words.slice(i, i + wordCount).join(' ');
@@ -188,17 +180,12 @@ function parseCommand(text, guild, authorId) {
         return null;
     };
     
-    // === LOG COMMAND (New) ===
     if (lower.match(/what.*log|show.*log|whats.*log/i)) {
         const numberMatch = lower.match(/(\d+)/);
         const logNumber = numberMatch ? parseInt(numberMatch[1]) : 10;
-        return {
-            type: 'LOG',
-            count: Math.min(logNumber, 50) // Cap at 50
-        };
+        return { type: 'LOG', count: Math.min(logNumber, 50) };
     }
     
-    // === REMOVE WARNING ===
     if (lower.match(/remove.*warning|remove.*warn|delete.*warn/i)) {
         const target = findTarget();
         if (target?.self) return { type: 'ERROR', message: "❌ Can't remove your own warnings" };
@@ -207,17 +194,11 @@ function parseCommand(text, guild, authorId) {
         const warnIndex = warnNumMatch ? parseInt(warnNumMatch[1] || warnNumMatch[2] || warnNumMatch[3]) : 1;
         
         if (target) {
-            return {
-                type: 'REMOVE_WARNING',
-                targetId: target.id,
-                targetTag: target.user.tag,
-                warnIndex: warnIndex
-            };
+            return { type: 'REMOVE_WARNING', targetId: target.id, targetTag: target.user.tag, warnIndex: warnIndex };
         }
-        return { type: 'ERROR', message: "❌ User not found. Try mentioning them or using their exact name." };
+        return { type: 'ERROR', message: "❌ User not found" };
     }
     
-    // === REMOVE CURRENCY ===
     if (lower.match(/remove|take/i) && lower.match(/coin|cookie/i)) {
         const target = findTarget();
         if (target?.self) return { type: 'ERROR', message: "❌ Can't remove from yourself" };
@@ -229,73 +210,41 @@ function parseCommand(text, guild, authorId) {
         if (lower.includes('cookie')) command = 'removecookies';
         
         if (target) {
-            return {
-                type: 'REMOVE_CURRENCY',
-                command: command,
-                targetId: target.id,
-                targetTag: target.user.tag,
-                amount: amount
-            };
+            return { type: 'REMOVE_CURRENCY', command: command, targetId: target.id, targetTag: target.user.tag, amount: amount };
         }
-        return { type: 'ERROR', message: "❌ User not found. Try mentioning them or using their exact name." };
+        return { type: 'ERROR', message: "❌ User not found" };
     }
     
-    // === WARNLIST ===
     if (lower.match(/(?:show|get|view|check|what|whats|display).*(?:warnlist|warnings|warn list)|warnlist.*(?:of|for)|warnings.*(?:of|for)/i)) {
         const target = findTarget();
         if (target?.self) return { type: 'ERROR', message: "❌ Check your own warnlist with /warnlist" };
         if (target) {
-            return {
-                type: 'WARNLIST',
-                targetId: target.id,
-                targetTag: target.user.tag
-            };
+            return { type: 'WARNLIST', targetId: target.id, targetTag: target.user.tag };
         }
-        return { type: 'ERROR', message: "❌ User not found. Try: 'blecky show warnlist of @user' or 'blecky warnlist vanhel'" };
+        return { type: 'ERROR', message: "❌ User not found" };
     }
     
-    // === PING ===
     if (lower.match(/^ping\s+/i) && !lower.includes('saying') && !lower.includes('dm')) {
         const target = findTarget();
         if (target?.self) return { type: 'ERROR', message: "❌ Can't ping yourself" };
-        if (target) {
-            return {
-                type: 'PING',
-                targetId: target.id
-            };
-        }
+        if (target) return { type: 'PING', targetId: target.id };
         return { type: 'ERROR', message: "❌ User not found" };
     }
     
-    // === PROFILE / AVATAR ===
     if (lower.match(/(?:send|show|get|what|whats|display).*(?:profile|avatar|picture|pfp|pic)/i)) {
         const target = findTarget();
-        if (target?.self) return { type: 'ERROR', message: "❌ Use /avatar to see your own avatar" };
-        if (target) {
-            return {
-                type: 'AVATAR',
-                targetId: target.id,
-                targetTag: target.user.tag
-            };
-        }
+        if (target?.self) return { type: 'ERROR', message: "❌ Use /avatar" };
+        if (target) return { type: 'AVATAR', targetId: target.id, targetTag: target.user.tag };
         return { type: 'ERROR', message: "❌ User not found" };
     }
     
-    // === ACCOUNT CREATED ===
     if (lower.match(/when.*(?:make|create|made|start).*(?:account|discord)/i)) {
         const target = findTarget();
-        if (target?.self) return { type: 'ERROR', message: "❌ Check your own profile with /userinfo" };
-        if (target) {
-            return {
-                type: 'ACCOUNT_CREATED',
-                targetId: target.id,
-                targetTag: target.user.tag
-            };
-        }
+        if (target?.self) return { type: 'ERROR', message: "❌ Use /userinfo" };
+        if (target) return { type: 'ACCOUNT_CREATED', targetId: target.id, targetTag: target.user.tag };
         return { type: 'ERROR', message: "❌ User not found" };
     }
     
-    // === GIF - Improved extraction ===
     if (lower.match(/send.*gif|show.*gif|gif.*of|get.*gif|.*gif$/i)) {
         let gifQuery = text
             .replace(/blecky/gi, '')
@@ -311,36 +260,21 @@ function parseCommand(text, guild, authorId) {
             .replace(/\bof\b/gi, '')
             .trim();
         
-        if (!gifQuery || gifQuery.length === 0) {
-            gifQuery = 'random funny';
-        }
-        
-        return {
-            type: 'GIF',
-            query: gifQuery
-        };
+        if (!gifQuery || gifQuery.length === 0) gifQuery = 'random funny';
+        return { type: 'GIF', query: gifQuery };
     }
     
-    // === DM ===
     if (lower.includes('dm') || (lower.includes('message') && !lower.includes('delete'))) {
         const target = findTarget();
         if (target?.self) return { type: 'ERROR', message: "❌ Can't DM yourself" };
         
         const contentMatch = text.match(/(?:saying|say|message|tell|with|:)\s+(.+)/i);
-        const content = contentMatch ? contentMatch[1].trim() : "Hi from the admin team! 👋";
+        const content = contentMatch ? contentMatch[1].trim() : "Hi! 👋";
         
-        if (target) {
-            return {
-                type: 'DM',
-                targetId: target.id,
-                targetTag: target.user.tag,
-                content: content
-            };
-        }
+        if (target) return { type: 'DM', targetId: target.id, targetTag: target.user.tag, content: content };
         return { type: 'ERROR', message: "❌ User not found" };
     }
     
-    // === WARN ===
     if (lower.includes('warn') && !lower.includes('warnlist') && !lower.includes('remove')) {
         const target = findTarget();
         if (target?.self) return { type: 'ERROR', message: "❌ Can't warn yourself" };
@@ -348,18 +282,10 @@ function parseCommand(text, guild, authorId) {
         const reasonMatch = text.match(/(?:reason|for|because|:)\s+(.+)/i);
         const reason = reasonMatch ? reasonMatch[1].trim() : 'Warned by admin';
         
-        if (target) {
-            return {
-                type: 'WARN',
-                targetId: target.id,
-                targetTag: target.user.tag,
-                reason: reason
-            };
-        }
+        if (target) return { type: 'WARN', targetId: target.id, targetTag: target.user.tag, reason: reason };
         return { type: 'ERROR', message: "❌ User not found" };
     }
     
-    // === ADD CURRENCY ===
     if (lower.match(/add|give/i) && lower.match(/coin|cookie|xp/i) && !lower.includes('remove')) {
         const target = findTarget();
         if (target?.self) return { type: 'ERROR', message: "❌ Can't add to yourself" };
@@ -371,19 +297,10 @@ function parseCommand(text, guild, authorId) {
         if (lower.includes('cookie')) command = 'addcookies';
         if (lower.includes('xp')) command = 'addxp';
         
-        if (target) {
-            return {
-                type: 'ADD_CURRENCY',
-                command: command,
-                targetId: target.id,
-                targetTag: target.user.tag,
-                amount: amount
-            };
-        }
+        if (target) return { type: 'ADD_CURRENCY', command: command, targetId: target.id, targetTag: target.user.tag, amount: amount };
         return { type: 'ERROR', message: "❌ User not found" };
     }
     
-    // === INFO QUERIES ===
     if (lower.match(/how many|how much|what.*balance|check.*balance/i)) {
         const target = findTarget();
         let query = 'coins';
@@ -391,29 +308,15 @@ function parseCommand(text, guild, authorId) {
         if (lower.includes('xp')) query = 'xp';
         if (lower.includes('level')) query = 'level';
         
-        if (target?.self) return { type: 'ERROR', message: "❌ Check your own stats with /profile" };
-        if (target) {
-            return {
-                type: 'INFO',
-                targetId: target.id,
-                targetTag: target.user.tag,
-                query: query
-            };
-        }
+        if (target?.self) return { type: 'ERROR', message: "❌ Use /profile" };
+        if (target) return { type: 'INFO', targetId: target.id, targetTag: target.user.tag, query: query };
         return { type: 'ERROR', message: "❌ User not found" };
     }
     
-    // === JOINED DATE ===
     if (lower.match(/when.*join/i)) {
         const target = findTarget();
-        if (target?.self) return { type: 'ERROR', message: "❌ Use /userinfo to check your join date" };
-        if (target) {
-            return {
-                type: 'JOINED',
-                targetId: target.id,
-                targetTag: target.user.tag
-            };
-        }
+        if (target?.self) return { type: 'ERROR', message: "❌ Use /userinfo" };
+        if (target) return { type: 'JOINED', targetId: target.id, targetTag: target.user.tag };
         return { type: 'ERROR', message: "❌ User not found" };
     }
     
@@ -428,7 +331,6 @@ module.exports = {
 
     const settings = await Settings.findOne({ guildId: message.guild.id });
     
-    // --- AI ADMIN HANDLER ---
     const botMention = message.mentions.users.has(client.user.id);
     const isBleckyCommand = message.content.toLowerCase().startsWith('blecky');
     const forgottenOneRole = client.config.roles.forgottenOne;
@@ -456,13 +358,9 @@ module.exports = {
             }
             
             if (parsed) {
-                // === LOG COMMAND ===
                 if (parsed.type === 'LOG') {
                     const messages = await message.channel.messages.fetch({ limit: Math.min(parsed.count + 1, 50) });
-                    const messageList = Array.from(messages.values())
-                        .filter(m => m.id !== message.id)
-                        .slice(0, parsed.count)
-                        .reverse();
+                    const messageList = Array.from(messages.values()).filter(m => m.id !== message.id).slice(0, parsed.count).reverse();
                     
                     const embed = new EmbedBuilder()
                         .setTitle(`📜 Last ${messageList.length} Messages`)
@@ -471,24 +369,18 @@ module.exports = {
                     
                     messageList.forEach((msg, index) => {
                         const content = msg.content.length > 100 ? msg.content.substring(0, 100) + '...' : msg.content;
-                        embed.addFields({
-                            name: `${index + 1}. ${msg.author.tag}`,
-                            value: content || '*[No content/embed]*',
-                            inline: false
-                        });
+                        embed.addFields({ name: `${index + 1}. ${msg.author.tag}`, value: content || '*[No content]*', inline: false });
                     });
                     
                     await message.reply({ embeds: [embed] });
                     return;
                 }
                 
-                // === PING ===
                 if (parsed.type === 'PING') {
                     await message.channel.send(`<@${parsed.targetId}>`);
                     return;
                 }
                 
-                // === WARNLIST ===
                 if (parsed.type === 'WARNLIST') {
                     const targetUser = await User.findOne({ userId: parsed.targetId });
                     const member = message.guild.members.cache.get(parsed.targetId);
@@ -518,7 +410,6 @@ module.exports = {
                     return;
                 }
                 
-                // === REMOVE WARNING ===
                 if (parsed.type === 'REMOVE_WARNING') {
                     const targetUser = await User.findOne({ userId: parsed.targetId });
                     const member = message.guild.members.cache.get(parsed.targetId);
@@ -539,7 +430,6 @@ module.exports = {
                     
                     await message.reply(`✅ Removed warning #${parsed.warnIndex} from **${member?.user.tag}**\n**Reason was:** ${removedWarn.reason}`);
                     
-                    // Log to modlog
                     if (settings?.modlogChannelId) {
                         const logChannel = message.guild.channels.cache.get(settings.modlogChannelId);
                         if (logChannel) {
@@ -559,123 +449,6 @@ module.exports = {
                     return;
                 }
                 
-                // === ADD_CURRENCY ===
-                if (parsed.type === 'ADD_CURRENCY') {
-                    let targetUser = await User.findOne({ userId: parsed.targetId });
-                    if (!targetUser) {
-                        targetUser = new User({ userId: parsed.targetId });
-                    }
-                    
-                    const member = message.guild.members.cache.get(parsed.targetId);
-                    const currencyType = parsed.command === 'addcoins' ? 'coins' : 
-                                       parsed.command === 'addcookies' ? 'cookies' : 'xp';
-                    
-                    targetUser[currencyType] += parsed.amount;
-                    await targetUser.save();
-                    
-                    if (currencyType === 'cookies' && member) {
-                        await manageTieredRoles(member, targetUser.cookies, client.config.cookieRoles, 'cookies');
-                    }
-                    
-                    await message.reply(`✅ Added **${parsed.amount}** ${currencyType} to **${member?.user.tag}**\nThey now have **${targetUser[currencyType]}** ${currencyType}`);
-                    return;
-                }
-                
-                // === INFO ===
-                if (parsed.type === 'INFO') {
-                    const targetUser = await User.findOne({ userId: parsed.targetId });
-                    const member = message.guild.members.cache.get(parsed.targetId);
-                    let value = 0;
-                    
-                    switch(parsed.query) {
-                        case 'coins': value = targetUser?.coins || 0; break;
-                        case 'cookies': value = targetUser?.cookies || 0; break;
-                        case 'xp': value = targetUser?.xp || 0; break;
-                        case 'level': value = targetUser?.level || 0; break;
-                    }
-                    
-                    await message.reply(`**${member?.user.tag}** has **${value}** ${parsed.query}`);
-                    return;
-                }
-                
-                // === JOINED ===
-                if (parsed.type === 'JOINED') {
-                    const member = message.guild.members.cache.get(parsed.targetId);
-                    if (member) {
-                        const joinDate = `<t:${Math.floor(member.joinedTimestamp / 1000)}:F>`;
-                        await message.reply(`**${member.user.tag}** joined the server on ${joinDate}`);
-                    }
-                    return;
-                }
-            }
-            
-            // Fallback for unrecognized commands
-            await message.reply("❓ I couldn't understand that command. Try:\n• `blecky ping @user`\n• `blecky show warnlist of @user`\n• `blecky send alien gif`\n• `blecky warn @user reason: being rude`\n• `blecky add 100 coins to @user`\n• `blecky what log 10`");
-            
-        } catch (error) {
-            console.error('AI Command Error:', error);
-            await message.reply(`❌ Error processing command: ${error.message}`);
-        }
-        return;
-    }
-    // --- END AI HANDLER ---
-
-    if (settings && settings.noXpChannels.includes(message.channel.id)) return;
-
-    // XP System
-    const cooldownKey = `${message.author.id}-${message.channel.id}`;
-    const lastXpTime = xpCooldowns.get(cooldownKey);
-    if (lastXpTime && (Date.now() - lastXpTime < XP_COOLDOWN_MS)) return;
-    xpCooldowns.set(cooldownKey, Date.now());
-
-    let user = await User.findOne({ userId: message.author.id });
-    if (!user) user = new User({ userId: message.author.id });
-
-    const xpGain = Math.floor(Math.random() * 3) + 3;
-    user.xp += xpGain;
-
-    const nextLevelXp = getNextLevelXp(user.level);
-    if (user.xp >= nextLevelXp) {
-      user.level++;
-      user.xp -= nextLevelXp;
-
-      const member = message.member;
-      if (member) {
-          await manageTieredRoles(member, user.level, client.config.levelingRoles, 'level');
-      }
-      const levelUpChannel = settings?.levelUpChannelId ? 
-        message.guild.channels.cache.get(settings.levelUpChannelId) : message.channel;
-      if (levelUpChannel) {
-        const levelUpEmbed = new EmbedBuilder()
-          .setTitle('🚀 Level UP!')
-          .setDescription(`${message.author}, you're now **Level ${user.level}**!`)
-          .setThumbnail(message.author.displayAvatarURL({ dynamic: true }))
-          .setColor(0xFFD700)
-          .setTimestamp();
-        await levelUpChannel.send({ content: `${message.author}`, embeds: [levelUpEmbed] });
-      }
-    }
-
-    const member = message.member;
-    if (member) {
-        await manageTieredRoles(member, user.cookies, client.config.cookieRoles, 'cookies');
-    }
-    
-    const autoJoinRoleId = client.config.roles.autoJoin;
-    if (autoJoinRoleId && member && !member.roles.cache.has(autoJoinRoleId)) {
-      await member.roles.add(autoJoinRoleId).catch(() => {});
-    }
-
-    await user.save();
-  },
-};
-                            logChannel.send({ embeds: [logEmbed] });
-                        }
-                    }
-                    return;
-                }
-                
-                // === REMOVE CURRENCY ===
                 if (parsed.type === 'REMOVE_CURRENCY') {
                     const targetUser = await User.findOne({ userId: parsed.targetId });
                     if (!targetUser) {
@@ -702,7 +475,6 @@ module.exports = {
                     return;
                 }
                 
-                // === AVATAR ===
                 if (parsed.type === 'AVATAR') {
                     const member = message.guild.members.cache.get(parsed.targetId);
                     if (member) {
@@ -716,7 +488,6 @@ module.exports = {
                     return;
                 }
                 
-                // === ACCOUNT_CREATED ===
                 if (parsed.type === 'ACCOUNT_CREATED') {
                     const member = message.guild.members.cache.get(parsed.targetId);
                     if (member) {
@@ -726,20 +497,12 @@ module.exports = {
                     return;
                 }
                 
-                // === GIF ===
                 if (parsed.type === 'GIF') {
                     const gifUrl = await searchGiphyGif(parsed.query);
-                    await message.channel.send({
-                        content: `🎬 Here's a gif about **${parsed.query}**:`,
-                        embeds: [{
-                            image: { url: gifUrl },
-                            color: 0x7289DA
-                        }]
-                    });
+                    await message.channel.send(gifUrl);
                     return;
                 }
                 
-                // === DM ===
                 if (parsed.type === 'DM') {
                     const target = await client.users.fetch(parsed.targetId).catch(() => null);
                     if (target) {
@@ -747,18 +510,15 @@ module.exports = {
                             await target.send(parsed.content);
                             await message.reply(`✅ Sent DM to **${target.tag}**: "${parsed.content}"`);
                         } catch {
-                            await message.reply(`❌ Couldn't DM **${target.tag}** (DMs may be closed)`);
+                            await message.reply(`❌ Couldn't DM **${target.tag}** (DMs closed)`);
                         }
                     }
                     return;
                 }
                 
-                // === WARN ===
                 if (parsed.type === 'WARN') {
                     let targetUser = await User.findOne({ userId: parsed.targetId });
-                    if (!targetUser) {
-                        targetUser = new User({ userId: parsed.targetId });
-                    }
+                    if (!targetUser) targetUser = new User({ userId: parsed.targetId });
                     
                     targetUser.warnings.push({
                         reason: parsed.reason,
@@ -770,15 +530,13 @@ module.exports = {
                     const member = message.guild.members.cache.get(parsed.targetId);
                     await message.reply(`✅ Warned **${member?.user.tag}**\n**Reason:** ${parsed.reason}\n**Total warnings:** ${targetUser.warnings.length}`);
                     
-                    // Auto-timeout after 5 warnings
                     if (targetUser.warnings.length >= 5 && member) {
                         try {
-                            await member.timeout(5 * 60 * 1000, 'Automatic timeout - 5 warnings reached');
-                            await message.channel.send(`⏰ **${member.user.tag}** has been timed out for 5 minutes (5 warnings reached)`);
+                            await member.timeout(5 * 60 * 1000, '5 warnings reached');
+                            await message.channel.send(`⏰ **${member.user.tag}** timed out for 5 minutes (5 warnings)`);
                         } catch {}
                     }
                     
-                    // Log to modlog
                     if (settings?.modlogChannelId) {
                         const logChannel = message.guild.channels.cache.get(settings.modlogChannelId);
                         if (logChannel) {
@@ -789,6 +547,59 @@ module.exports = {
                                     { name: 'Target', value: `${member?.user.tag} (${parsed.targetId})` },
                                     { name: 'Admin', value: `${message.author.tag} (${message.author.id})` },
                                     { name: 'Reason', value: parsed.reason },
-                                    { name: 'Total Warnings', value: `${targetUser.warnings.length}` }
+                                    { name: 'Total', value: `${targetUser.warnings.length}` }
                                 )
                                 .setTimestamp();
+                            logChannel.send({ embeds: [logEmbed] });
+                        }
+                    }
+                    return;
+                }
+                
+                if (parsed.type === 'ADD_CURRENCY') {
+                    let targetUser = await User.findOne({ userId: parsed.targetId });
+                    if (!targetUser) targetUser = new User({ userId: parsed.targetId });
+                    
+                    const member = message.guild.members.cache.get(parsed.targetId);
+                    const currencyType = parsed.command === 'addcoins' ? 'coins' : parsed.command === 'addcookies' ? 'cookies' : 'xp';
+                    
+                    targetUser[currencyType] += parsed.amount;
+                    await targetUser.save();
+                    
+                    if (currencyType === 'cookies' && member) {
+                        await manageTieredRoles(member, targetUser.cookies, client.config.cookieRoles, 'cookies');
+                    }
+                    
+                    await message.reply(`✅ Added **${parsed.amount}** ${currencyType} to **${member?.user.tag}**\nThey now have **${targetUser[currencyType]}** ${currencyType}`);
+                    return;
+                }
+                
+                if (parsed.type === 'INFO') {
+                    const targetUser = await User.findOne({ userId: parsed.targetId });
+                    const member = message.guild.members.cache.get(parsed.targetId);
+                    let value = 0;
+                    
+                    switch(parsed.query) {
+                        case 'coins': value = targetUser?.coins || 0; break;
+                        case 'cookies': value = targetUser?.cookies || 0; break;
+                        case 'xp': value = targetUser?.xp || 0; break;
+                        case 'level': value = targetUser?.level || 0; break;
+                    }
+                    
+                    await message.reply(`**${member?.user.tag}** has **${value}** ${parsed.query}`);
+                    return;
+                }
+                
+                if (parsed.type === 'JOINED') {
+                    const member = message.guild.members.cache.get(parsed.targetId);
+                    if (member) {
+                        const joinDate = `<t:${Math.floor(member.joinedTimestamp / 1000)}:F>`;
+                        await message.reply(`**${member.user.tag}** joined the server on ${joinDate}`);
+                    }
+                    return;
+                }
+            }
+            
+            await message.reply("❓ I couldn't understand that. Try:\n• `blecky ping ali`\n• `blecky show warnlist of vanhel`\n• `blecky send alien gif`\n• `blecky what log 10`");
+            
+        }
