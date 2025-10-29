@@ -59,28 +59,28 @@ async function fetchWithRetry(url, payload, maxRetries = 3) {
     throw lastError;
 }
 
-// Search Tenor API for GIFs
-async function searchTenorGif(query) {
-    const TENOR_KEY = process.env.TENOR_API_KEY || "AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCYQ"; // Default key
-    const searchUrl = `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(query)}&key=${TENOR_KEY}&limit=10`;
+// Search Giphy API for GIFs
+async function searchGiphyGif(query) {
+    const GIPHY_KEY = process.env.GIPHY_API_KEY || "YOUR_GIPHY_API_KEY_HERE"; // Add your Giphy API key
+    const searchUrl = `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(query)}&limit=25&rating=g`;
     
     try {
         const response = await fetch(searchUrl);
         const data = await response.json();
         
-        if (data.results && data.results.length > 0) {
-            const randomIndex = Math.floor(Math.random() * data.results.length);
-            return data.results[randomIndex].url;
+        if (data.data && data.data.length > 0) {
+            const randomIndex = Math.floor(Math.random() * Math.min(data.data.length, 10));
+            return data.data[randomIndex].url;
         }
     } catch (error) {
-        console.error('Tenor API error:', error);
+        console.error('Giphy API error:', error);
     }
     
-    // Fallback gifs
+    // Fallback gifs if Giphy fails
     const fallbackGifs = [
-        'https://tenor.com/view/cat-typing-gif-12002364',
-        'https://tenor.com/view/hello-hi-hey-cat-gif-14197368',
-        'https://tenor.com/view/cat-thumbs-up-gif-10023772186851410147'
+        'https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif',
+        'https://media.giphy.com/media/mlvseq9yvZhba/giphy.gif',
+        'https://media.giphy.com/media/ICOgUNjpvO0PC/giphy.gif'
     ];
     return fallbackGifs[Math.floor(Math.random() * fallbackGifs.length)];
 }
@@ -112,15 +112,18 @@ async function manageTieredRoles(member, userValue, roleConfigs, property) {
     }
 }
 
-// Enhanced user resolution
-function resolveUser(guild, input) {
+// Enhanced user resolution - checks self-warn prevention
+function resolveUser(guild, input, authorId) {
     if (!input || input.length < 2) return null;
     
     // Check for mention or ID
     const match = input.match(/<@!?(\d+)>|(\d{17,19})/);
     if (match) {
         const id = match[1] || match[2];
-        return guild.members.cache.get(id);
+        const member = guild.members.cache.get(id);
+        // Prevent self-targeting
+        if (id === authorId) return { self: true };
+        return member;
     }
 
     const searchKey = input.toLowerCase().trim();
@@ -128,6 +131,9 @@ function resolveUser(guild, input) {
     let bestScore = 999;
 
     guild.members.cache.forEach(member => {
+        // Skip the command author
+        if (member.id === authorId) return;
+        
         const username = member.user.username.toLowerCase();
         const displayName = member.displayName.toLowerCase();
         
@@ -164,21 +170,48 @@ function resolveUser(guild, input) {
 }
 
 // Parse command locally
-function parseCommand(text, guild) {
+function parseCommand(text, guild, authorId) {
     const lower = text.toLowerCase().trim();
     const words = lower.split(/\s+/);
     
     // Find target user in text
     const findTarget = () => {
-        const skipWords = ['warn', 'add', 'send', 'dm', 'how', 'many', 'does', 'have', 'show', 'when', 'did', 'to', 'for', 'me', 'a', 'the', 'coins', 'coin', 'cookies', 'cookie', 'xp', 'level', 'saying', 'message', 'gif', 'give', 'remove', 'reason', 'is'];
+        const skipWords = ['warn', 'add', 'send', 'dm', 'how', 'many', 'does', 'have', 'show', 'when', 'did', 'to', 'for', 'me', 'a', 'the', 'coins', 'coin', 'cookies', 'cookie', 'xp', 'level', 'saying', 'message', 'gif', 'give', 'remove', 'reason', 'is', 'with', 'picture', 'avatar', 'profile', 'image'];
         
         for (const word of words) {
             if (skipWords.includes(word) || word.length < 2 || word.match(/^\d+$/)) continue;
-            const resolved = resolveUser(guild, word);
+            const resolved = resolveUser(guild, word, authorId);
+            if (resolved?.self) return { self: true };
             if (resolved) return resolved;
         }
         return null;
     };
+    
+    // Profile picture / avatar request
+    if (lower.match(/(?:send|show|get).*(?:profile|avatar|picture|pfp)/i)) {
+        const target = findTarget();
+        if (target?.self) return { type: 'ERROR', message: "Can't get your own avatar via command" };
+        if (target) {
+            return {
+                type: 'AVATAR',
+                targetId: target.id,
+                targetTag: target.user.tag
+            };
+        }
+    }
+    
+    // Account creation date
+    if (lower.match(/when.*(?:make|create|made|join).*(?:account|discord)/i)) {
+        const target = findTarget();
+        if (target?.self) return { type: 'ERROR', message: "Check your own profile" };
+        if (target) {
+            return {
+                type: 'ACCOUNT_CREATED',
+                targetId: target.id,
+                targetTag: target.user.tag
+            };
+        }
+    }
     
     // GIF request
     if (lower.match(/send.*(gif|image)|gif/i)) {
@@ -189,10 +222,13 @@ function parseCommand(text, guild) {
         };
     }
     
-    // DM
+    // DM - extract target and message properly
     if (lower.includes('dm')) {
         const target = findTarget();
-        const contentMatch = text.match(/(?:saying|message|say|tell|:)\s+(.+)/i);
+        if (target?.self) return { type: 'ERROR', message: "Can't DM yourself" };
+        
+        // Extract message after "saying", "message", or colon
+        const contentMatch = text.match(/(?:saying|say|message|tell|with.*saying|:)\s+(.+)/i);
         const content = contentMatch ? contentMatch[1].trim() : "Hi!";
         
         if (target) {
@@ -208,6 +244,8 @@ function parseCommand(text, guild) {
     // Warn
     if (lower.includes('warn')) {
         const target = findTarget();
+        if (target?.self) return { type: 'ERROR', message: "You cannot warn yourself" };
+        
         const reasonMatch = text.match(/(?:reason|for|because|:)\s+(.+)/i);
         const reason = reasonMatch ? reasonMatch[1].trim() : 'Warned by admin';
         
@@ -224,6 +262,8 @@ function parseCommand(text, guild) {
     // Add currency
     if (lower.match(/add|give/i) && lower.match(/coin|cookie|xp/i)) {
         const target = findTarget();
+        if (target?.self) return { type: 'ERROR', message: "Can't add currency to yourself" };
+        
         const amountMatch = lower.match(/(\d+)/);
         const amount = amountMatch ? parseInt(amountMatch[1]) : 1;
         
@@ -250,6 +290,7 @@ function parseCommand(text, guild) {
         if (lower.includes('xp')) query = 'xp';
         if (lower.includes('level')) query = 'level';
         
+        if (target?.self) return { type: 'ERROR', message: "Check your own stats" };
         if (target) {
             return {
                 type: 'INFO',
@@ -260,8 +301,10 @@ function parseCommand(text, guild) {
         }
     }
     
+    // Server join date
     if (lower.match(/when.*join/i)) {
         const target = findTarget();
+        if (target?.self) return { type: 'ERROR', message: "Check your own join date" };
         if (target) {
             return {
                 type: 'JOINED',
@@ -302,21 +345,50 @@ module.exports = {
         }
 
         try {
-            // Parse command locally
-            const parsed = parseCommand(userQuery, message.guild);
+            // Parse command locally with author check
+            const parsed = parseCommand(userQuery, message.guild, message.author.id);
+            
+            // Handle errors
+            if (parsed?.type === 'ERROR') {
+                await message.reply(`❌ ${parsed.message}`);
+                return;
+            }
             
             if (parsed) {
+                // Handle AVATAR
+                if (parsed.type === 'AVATAR') {
+                    const member = message.guild.members.cache.get(parsed.targetId);
+                    if (member) {
+                        const avatarUrl = member.user.displayAvatarURL({ dynamic: true, size: 1024 });
+                        await message.channel.send(avatarUrl);
+                    } else {
+                        await message.reply("❌ User not found");
+                    }
+                    return;
+                }
+                
+                // Handle ACCOUNT_CREATED
+                if (parsed.type === 'ACCOUNT_CREATED') {
+                    const member = message.guild.members.cache.get(parsed.targetId);
+                    if (member) {
+                        const createdDate = `<t:${Math.floor(member.user.createdTimestamp / 1000)}:F>`;
+                        await message.reply(`Account created ${createdDate}`);
+                    }
+                    return;
+                }
+                
                 // Handle GIF
                 if (parsed.type === 'GIF') {
-                    const gifUrl = await searchTenorGif(parsed.query);
+                    const gifUrl = await searchGiphyGif(parsed.query);
                     await message.channel.send(gifUrl);
                     return;
                 }
                 
-                // Handle DM
+                // Handle DM with ping
                 if (parsed.type === 'DM') {
                     const target = await client.users.fetch(parsed.targetId).catch(() => null);
                     if (target) {
+                        // Send DM with content
                         await target.send(parsed.content).catch(() => {});
                         await message.reply(`✅ DM sent`);
                     } else {
@@ -374,20 +446,24 @@ module.exports = {
                 }
             }
             
-            // Use AI for complex queries
+            // Use AI for complex queries only
             const members = Array.from(message.guild.members.cache.values())
+                .filter(m => m.id !== message.author.id) // Exclude command author
                 .slice(0, 40)
                 .map(m => ({ id: m.id, username: m.user.username, display: m.displayName }));
             
-            const systemPrompt = `You are Bleck Nephew. Give direct 1-sentence answers only. No yapping.
+            const systemPrompt = `You are Bleck Nephew. Give direct 1-sentence answers. No yapping.
 
 MEMBERS: ${JSON.stringify(members)}
 
-For commands, output ONLY this JSON format (nothing else):
+IMPORTANT: User cannot target themselves. Never return commands targeting the command author.
+
+For commands, output ONLY this JSON (nothing else):
 {"cmd":"warn","target":"USER_ID","reason":"text"}
 {"cmd":"addcoins","target":"USER_ID","amount":100}
 {"cmd":"dm","target":"USER_ID","message":"text"}
 {"cmd":"gif","query":"search term"}
+{"cmd":"avatar","target":"USER_ID"}
 
 For info, answer in 5 words or less.
 
@@ -417,15 +493,30 @@ Query: "${userQuery}"`;
                 cmdData = JSON.parse(cleaned);
             } catch {
                 // Text response - keep it short
-                const shortResponse = aiResponse.split('.')[0]; // First sentence only
+                const shortResponse = aiResponse.split('.')[0];
                 await message.reply(shortResponse);
                 return;
             }
 
             // Execute AI command
             if (cmdData) {
+                // Prevent self-targeting
+                if (cmdData.target === message.author.id) {
+                    await message.reply("❌ Cannot target yourself");
+                    return;
+                }
+                
+                if (cmdData.cmd === 'avatar') {
+                    const member = message.guild.members.cache.get(cmdData.target);
+                    if (member) {
+                        const avatarUrl = member.user.displayAvatarURL({ dynamic: true, size: 1024 });
+                        await message.channel.send(avatarUrl);
+                    }
+                    return;
+                }
+                
                 if (cmdData.cmd === 'gif') {
-                    const gifUrl = await searchTenorGif(cmdData.query || 'random');
+                    const gifUrl = await searchGiphyGif(cmdData.query || 'random');
                     await message.channel.send(gifUrl);
                     return;
                 }
@@ -434,7 +525,7 @@ Query: "${userQuery}"`;
                     const target = await client.users.fetch(cmdData.target).catch(() => null);
                     if (target) {
                         await target.send(cmdData.message).catch(() => {});
-                        await message.reply(`✅`);
+                        await message.reply(`✅ DM sent`);
                     }
                     return;
                 }
@@ -450,7 +541,7 @@ Query: "${userQuery}"`;
             
         } catch (error) {
             console.error('AI Error:', error);
-            await message.reply(`Error: ${error.message.substring(0, 80)}`);
+            await message.reply(`❌ Error: ${error.message.substring(0, 80)}`);
         }
         return;
     }
@@ -528,14 +619,10 @@ async function executeSlashCommand(cmd, targetId, message, client, settings, opt
         client: client,
         deferReply: async () => { await message.channel.sendTyping(); },
         editReply: async (o) => {
-            const content = o.content || '';
-            const shortMsg = content.split('\n')[0].substring(0, 100); // First line only
-            return message.reply({ content: shortMsg || '✅', embeds: o.embeds }).catch(console.error);
+            return message.reply({ content: '✅', embeds: o.embeds }).catch(console.error);
         },
         reply: async (o) => {
-            const content = o.content || '';
-            const shortMsg = content.split('\n')[0].substring(0, 100);
-            return message.reply({ content: shortMsg || '✅', embeds: o.embeds }).catch(console.error);
+            return message.reply({ content: '✅', embeds: o.embeds }).catch(console.error);
         },
         followUp: async (o) => message.channel.send(o).catch(console.error),
     };
