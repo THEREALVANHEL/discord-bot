@@ -26,6 +26,7 @@ client.giveaways = new Map();
 client.locks = new Map();
 client.reminders = new Map(); // New map for in-memory reminders
 client.polls = new Map(); // NEW map for in-memory poll data
+client.xpCooldowns = new Map(); // NEW: Added for messageCreate.js XP handler
 
 client.config = {
   guildId: process.env.GUILD_ID,
