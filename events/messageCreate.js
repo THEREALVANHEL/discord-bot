@@ -1,4 +1,4 @@
-// events/messageCreate.js (IMPROVED - AI Conversation Memory & Unified Action Executor)
+// events/messageCreate.js (FINAL VERSION - Fixes API error, adds Conversation Memory, and implements Anonymous Command Feature 'r-blecky')
 
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -27,7 +27,7 @@ function getHistory(userId) {
     return conversationHistory.get(userId) || [];
 }
 
-// --- GIPHY API (Unchanged) ---
+// --- GIPHY API ---
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 async function searchGiphyGif(query) {
@@ -108,19 +108,15 @@ async function callGeminiAI(history, guildMembers, latestMessage) {
     const systemInstruction = SYSTEM_INSTRUCTION.replace("{MEMBER_LIST}", memberNames);
 
     const contents = [
-        // System instruction is now part of the history context
+        // System instruction sent as a user message to guide the model
+        { role: 'user', parts: [{ text: systemInstruction }] }, 
         ...history,
         { role: 'user', parts: [{ text: latestMessage }] }
     ];
 
+    // FIX: Removed the unsupported 'config' field and nested parameters.
     const payload = {
         contents: contents,
-        systemInstruction: systemInstruction,
-        config: {
-            temperature: 0.1,
-            topK: 1,
-            topP: 1
-        }
     };
     
     try {
@@ -241,8 +237,10 @@ async function executeParsedAction(message, client, parsed, targetMember) {
     if (action === 'calculate' && parsed.mathExpression) {
         // Use an external utility (like the original AI call in the old file, but simplified)
         const calcPrompt = `Calculate this math expression and return ONLY the number result, up to 2 decimal places: ${parsed.mathExpression}`;
-        const result = await callGeminiAI([], [], calcPrompt).catch(() => 'Error');
-        const number = result.match(/[\d,]+\.?\d*/)?.[0] || result.trim();
+        
+        // Temporarily clear history for calculation context to ensure a clean calculation prompt
+        const calculationResult = await callGeminiAI([], [], calcPrompt).catch(() => 'Error');
+        const number = calculationResult.match(/[\d,]+\.?\d*/)?.[0] || calculationResult.trim();
         await message.reply(`**${parsed.mathExpression}** = **${number}**`);
         return true;
     }
@@ -529,91 +527,115 @@ module.exports = {
 
     const settings = await Settings.findOne({ guildId: message.guild.id });
     
+    // --- COMMAND CHECK PREFIXES ---
     const botMention = message.mentions.users.has(client.user.id);
     const isBleckyCommand = message.content.toLowerCase().startsWith('blecky');
-    const forgottenOneRole = client.config.roles.forgottenOne;
-    const isForgottenOne = message.member?.roles.cache.has(forgottenOneRole);
+    const isAnonymousCommand = message.content.toLowerCase().startsWith('r-blecky'); // NEW PREFIX
     
-    // --- AI COMMAND AND CONVERSATION HANDLING (Requires Forgotten One role for access) ---
-    if ((botMention || isBleckyCommand) && isForgottenOne && API_KEY) {
-        let userQuery = message.content;
-        // Clean up the query string
-        if (botMention) {
-            userQuery = userQuery.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
-        } else if (isBleckyCommand) {
-            userQuery = userQuery.replace(/^blecky\s*/i, '').trim();
-        }
-        
-        if (userQuery.length === 0) {
-            await message.reply("Yes? 🐱");
-            return;
-        }
-        
-        // Add user message to history *before* calling the AI
-        addToHistory(message.author.id, 'user', userQuery);
+    // Determine the query source and if the message should be deleted
+    let userQuery = message.content;
+    let shouldDeleteMessage = false;
 
-        try {
-            const guildMembers = Array.from(message.guild.members.cache.values());
-            const history = getHistory(message.author.id);
-            
-            // AI call for conversational or structured response
-            const aiResponseText = await callGeminiAI(history, guildMembers, userQuery);
-            
-            // Check for structured JSON action
-            const jsonMatch = aiResponseText.match(/\{[\s\S]*\}/);
-            
-            if (jsonMatch) {
-                const parsed = JSON.parse(jsonMatch[0]);
-                console.log('AI Parsed Action:', parsed);
-                
-                let targetMember = null;
-                if (parsed.targetUser) {
-                    // This finds the member object using the AI's best guess (username, tag, etc.)
-                    targetMember = findUserInGuild(message.guild, parsed.targetUser, message.author.id);
-                    if (!targetMember && parsed.action !== 'calculate') {
-                        await message.reply(`❌ Couldn't find user "${parsed.targetUser}" to execute the **${parsed.action}** command.`);
-                        // Remove last user message as it led to an error state
-                        getHistory(message.author.id).pop(); 
-                        return;
-                    }
-                }
-                
-                // Execute the action via the new centralized function
-                const actionExecuted = await executeParsedAction(message, client, parsed, targetMember);
-
-                if (actionExecuted) {
-                    // Don't add the AI's structured response to history, only the successful conversational reply will be added.
-                    return; 
-                }
-                // If it was a JSON response but no action was executed (e.g., bad target for a command)
-                // The error message is handled within executeParsedAction
-            }
-            
-            // If it's a conversational response (or failed JSON detection)
-            const conversationalResponse = aiResponseText.replace(/\{[\s\S]*\}/g, '').trim();
-
-            if (conversationalResponse.length > 0) {
-                 await message.reply(conversationalResponse);
-                 addToHistory(message.author.id, 'model', conversationalResponse);
-            } else {
-                 await message.reply("🤔 That was interesting. Try rephrasing that command or question!");
-                 // Remove last user message if AI couldn't parse or respond meaningfully
-                 getHistory(message.author.id).pop(); 
-            }
-            
-        } catch (error) {
-            console.error('AI Command/Conversation Error:', error);
-            await message.reply("❌ The AI system failed. Try checking the `GEMINI_API_KEY` or rephrasing your request.");
-            // Remove last user message if AI threw an exception
-            getHistory(message.author.id).pop(); 
-        }
+    if (isAnonymousCommand) {
+        userQuery = userQuery.replace(/^r-blecky\s*/i, '').trim();
+        shouldDeleteMessage = true;
+    } else if (botMention) {
+        userQuery = userQuery.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
+    } else if (isBleckyCommand) {
+        userQuery = userQuery.replace(/^blecky\s*/i, '').trim();
+    } else {
+        // Not a bot command/mention, skip AI command logic
+        await handleXpGain(message, client, settings);
         return;
     }
 
-    // --- END AI COMMAND HANDLING ---
+    // --- AI PERMISSION CHECK ---
+    const API_KEY = process.env.GEMINI_API_KEY || "";
+    const forgottenOneRole = client.config.roles.forgottenOne;
+    const isForgottenOne = message.member?.roles.cache.has(forgottenOneRole);
+    
+    if (!isForgottenOne || !API_KEY) {
+        if (userQuery.length > 0) {
+            await message.reply("❌ The AI command system is restricted to Administrators (`forgottenOne` role) only.");
+        }
+        // Handle XP gain only if the message was NOT a command attempt by a non-admin
+        if (!isAnonymousCommand && !botMention && !isBleckyCommand) {
+             await handleXpGain(message, client, settings);
+        }
+        return;
+    }
+    
+    // --- PROCESS AI COMMAND ---
+    if (userQuery.length === 0) {
+        await message.reply("Yes? 🐱");
+        return;
+    }
+    
+    // Add user message to history *before* calling the AI
+    addToHistory(message.author.id, 'user', userQuery);
 
+    try {
+        // Delete original message if the anonymous prefix was used
+        if (shouldDeleteMessage) {
+            await message.delete().catch(e => console.error("Failed to delete anonymous message:", e));
+        }
 
-    // --- STANDARD XP/ROLE LOGIC ---
-    await handleXpGain(message, client, settings);
+        const guildMembers = Array.from(message.guild.members.cache.values());
+        const history = getHistory(message.author.id);
+        
+        // AI call for conversational or structured response
+        const aiResponseText = await callGeminiAI(history, guildMembers, userQuery);
+        
+        // Check for structured JSON action
+        const jsonMatch = aiResponseText.match(/\{[\s\S]*\}/);
+        
+        if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            console.log('AI Parsed Action:', parsed);
+            
+            let targetMember = null;
+            if (parsed.targetUser) {
+                targetMember = findUserInGuild(message.guild, parsed.targetUser, message.author.id);
+                if (!targetMember && parsed.action !== 'calculate') {
+                    // Send error message without ping if the original message was deleted
+                    const errorReplyTarget = shouldDeleteMessage ? message.channel : message;
+                    await errorReplyTarget.send(`❌ Couldn't find user "${parsed.targetUser}" to execute the **${parsed.action}** command.`);
+                    // Remove last user message as it led to an error state
+                    getHistory(message.author.id).pop(); 
+                    return;
+                }
+            }
+            
+            // Execute the action via the new centralized function
+            const actionExecuted = await executeParsedAction(message, client, parsed, targetMember);
+
+            if (actionExecuted) {
+                // Action successful, don't add JSON to history
+                return; 
+            }
+            // If action failed (e.g. permission denied) the error is handled inside executeParsedAction
+        }
+        
+        // If it's a conversational response (or failed JSON detection)
+        const conversationalResponse = aiResponseText.replace(/\{[\s\S]*\}/g, '').trim();
+
+        if (conversationalResponse.length > 0) {
+             const replyTarget = shouldDeleteMessage ? message.channel : message;
+             await replyTarget.send(conversationalResponse);
+             addToHistory(message.author.id, 'model', conversationalResponse);
+        } else {
+             const replyTarget = shouldDeleteMessage ? message.channel : message;
+             await replyTarget.send("🤔 That was interesting. Try rephrasing that command or question!");
+             // Remove last user message if AI couldn't parse or respond meaningfully
+             getHistory(message.author.id).pop(); 
+        }
+        
+    } catch (error) {
+        console.error('AI Command/Conversation Error:', error);
+        const replyTarget = shouldDeleteMessage ? message.channel : message;
+        await replyTarget.send("❌ The AI system failed. Try checking the `GEMINI_API_KEY` or rephrasing your request.");
+        // Remove last user message if AI threw an exception
+        getHistory(message.author.id).pop(); 
+    }
   },
 };
