@@ -61,7 +61,7 @@ async function fetchWithRetry(url, payload, maxRetries = 3) {
 
 // Search Giphy API for GIFs
 async function searchGiphyGif(query) {
-    const GIPHY_KEY = process.env.GIPHY_API_KEY || "YOUR_GIPHY_API_KEY_HERE"; // Add your Giphy API key
+    const GIPHY_KEY = process.env.GIPHY_API_KEY || "YOUR_GIPHY_API_KEY_HERE";
     const searchUrl = `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(query)}&limit=25&rating=g`;
     
     try {
@@ -76,7 +76,6 @@ async function searchGiphyGif(query) {
         console.error('Giphy API error:', error);
     }
     
-    // Fallback gifs if Giphy fails
     const fallbackGifs = [
         'https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif',
         'https://media.giphy.com/media/mlvseq9yvZhba/giphy.gif',
@@ -112,7 +111,7 @@ async function manageTieredRoles(member, userValue, roleConfigs, property) {
     }
 }
 
-// Enhanced user resolution - checks self-warn prevention
+// Enhanced user resolution
 function resolveUser(guild, input, authorId) {
     if (!input || input.length < 2) return null;
     
@@ -121,7 +120,6 @@ function resolveUser(guild, input, authorId) {
     if (match) {
         const id = match[1] || match[2];
         const member = guild.members.cache.get(id);
-        // Prevent self-targeting
         if (id === authorId) return { self: true };
         return member;
     }
@@ -131,7 +129,6 @@ function resolveUser(guild, input, authorId) {
     let bestScore = 999;
 
     guild.members.cache.forEach(member => {
-        // Skip the command author
         if (member.id === authorId) return;
         
         const username = member.user.username.toLowerCase();
@@ -176,7 +173,7 @@ function parseCommand(text, guild, authorId) {
     
     // Find target user in text
     const findTarget = () => {
-        const skipWords = ['warn', 'add', 'send', 'dm', 'how', 'many', 'does', 'have', 'show', 'when', 'did', 'to', 'for', 'me', 'a', 'the', 'coins', 'coin', 'cookies', 'cookie', 'xp', 'level', 'saying', 'message', 'gif', 'give', 'remove', 'reason', 'is', 'with', 'picture', 'avatar', 'profile', 'image'];
+        const skipWords = ['warn', 'add', 'send', 'dm', 'how', 'many', 'does', 'have', 'show', 'when', 'did', 'to', 'for', 'me', 'a', 'the', 'coins', 'coin', 'cookies', 'cookie', 'xp', 'level', 'saying', 'message', 'gif', 'give', 'remove', 'reason', 'is', 'with', 'picture', 'avatar', 'profile', 'image', 'ping', 'warnlist', 'list', 'of'];
         
         for (const word of words) {
             if (skipWords.includes(word) || word.length < 2 || word.match(/^\d+$/)) continue;
@@ -186,6 +183,31 @@ function parseCommand(text, guild, authorId) {
         }
         return null;
     };
+    
+    // Warnlist command
+    if (lower.match(/(?:show|get|view).*warnlist|warnlist.*(?:of|for)/i)) {
+        const target = findTarget();
+        if (target?.self) return { type: 'ERROR', message: "Check your own warnlist" };
+        if (target) {
+            return {
+                type: 'WARNLIST',
+                targetId: target.id,
+                targetTag: target.user.tag
+            };
+        }
+    }
+    
+    // Ping command
+    if (lower.match(/^ping\s+/i) && !lower.includes('saying') && !lower.includes('dm')) {
+        const target = findTarget();
+        if (target?.self) return { type: 'ERROR', message: "Can't ping yourself" };
+        if (target) {
+            return {
+                type: 'PING',
+                targetId: target.id
+            };
+        }
+    }
     
     // Profile picture / avatar request
     if (lower.match(/(?:send|show|get).*(?:profile|avatar|picture|pfp)/i)) {
@@ -213,21 +235,30 @@ function parseCommand(text, guild, authorId) {
         }
     }
     
-    // GIF request
-    if (lower.match(/send.*(gif|image)|gif/i)) {
-        const gifQuery = text.replace(/blecky|send|me|a|an|gif|image/gi, '').trim() || 'random';
+    // GIF request - extract the subject properly
+    if (lower.match(/send.*gif|gif/i)) {
+        // Extract what type of gif (e.g., "alien" from "send a alien gif")
+        let gifQuery = 'random';
+        
+        // Remove common words
+        const cleanedText = text.replace(/blecky|send|me|a|an|the|gif|image/gi, '').trim();
+        
+        // If there's something left, use it as the query
+        if (cleanedText && cleanedText.length > 0) {
+            gifQuery = cleanedText.split(/\s+/)[0]; // Take first meaningful word
+        }
+        
         return {
             type: 'GIF',
             query: gifQuery
         };
     }
     
-    // DM - extract target and message properly
+    // DM
     if (lower.includes('dm')) {
         const target = findTarget();
         if (target?.self) return { type: 'ERROR', message: "Can't DM yourself" };
         
-        // Extract message after "saying", "message", or colon
         const contentMatch = text.match(/(?:saying|say|message|tell|with.*saying|:)\s+(.+)/i);
         const content = contentMatch ? contentMatch[1].trim() : "Hi!";
         
@@ -242,9 +273,9 @@ function parseCommand(text, guild, authorId) {
     }
     
     // Warn
-    if (lower.includes('warn')) {
+    if (lower.includes('warn') && !lower.includes('warnlist')) {
         const target = findTarget();
-        if (target?.self) return { type: 'ERROR', message: "You cannot warn yourself" };
+        if (target?.self) return { type: 'ERROR', message: "Can't warn yourself" };
         
         const reasonMatch = text.match(/(?:reason|for|because|:)\s+(.+)/i);
         const reason = reasonMatch ? reasonMatch[1].trim() : 'Warned by admin';
@@ -345,7 +376,7 @@ module.exports = {
         }
 
         try {
-            // Parse command locally with author check
+            // Parse command locally
             const parsed = parseCommand(userQuery, message.guild, message.author.id);
             
             // Handle errors
@@ -355,6 +386,21 @@ module.exports = {
             }
             
             if (parsed) {
+                // Handle PING
+                if (parsed.type === 'PING') {
+                    await message.channel.send(`<@${parsed.targetId}>`);
+                    return;
+                }
+                
+                // Handle WARNLIST
+                if (parsed.type === 'WARNLIST') {
+                    const cmd = client.commands.get('warnlist');
+                    if (cmd) {
+                        await executeSlashCommand(cmd, parsed.targetId, message, client, settings, {});
+                    }
+                    return;
+                }
+                
                 // Handle AVATAR
                 if (parsed.type === 'AVATAR') {
                     const member = message.guild.members.cache.get(parsed.targetId);
@@ -384,15 +430,14 @@ module.exports = {
                     return;
                 }
                 
-                // Handle DM with ping
+                // Handle DM
                 if (parsed.type === 'DM') {
                     const target = await client.users.fetch(parsed.targetId).catch(() => null);
                     if (target) {
-                        // Send DM with content
                         await target.send(parsed.content).catch(() => {});
-                        await message.reply(`✅ DM sent`);
+                        await message.reply(`✅ Sent`);
                     } else {
-                        await message.reply(`❌ User not found`);
+                        await message.reply(`❌ Not found`);
                     }
                     return;
                 }
@@ -446,26 +491,23 @@ module.exports = {
                 }
             }
             
-            // Use AI for complex queries only
+            // Fallback to AI for very complex queries
             const members = Array.from(message.guild.members.cache.values())
-                .filter(m => m.id !== message.author.id) // Exclude command author
+                .filter(m => m.id !== message.author.id)
                 .slice(0, 40)
                 .map(m => ({ id: m.id, username: m.user.username, display: m.displayName }));
             
-            const systemPrompt = `You are Bleck Nephew. Give direct 1-sentence answers. No yapping.
+            const systemPrompt = `You are Bleck Nephew. Answer in 5 words max.
 
 MEMBERS: ${JSON.stringify(members)}
 
-IMPORTANT: User cannot target themselves. Never return commands targeting the command author.
-
-For commands, output ONLY this JSON (nothing else):
+For commands, output ONLY JSON:
 {"cmd":"warn","target":"USER_ID","reason":"text"}
+{"cmd":"warnlist","target":"USER_ID"}
+{"cmd":"ping","target":"USER_ID"}
 {"cmd":"addcoins","target":"USER_ID","amount":100}
-{"cmd":"dm","target":"USER_ID","message":"text"}
-{"cmd":"gif","query":"search term"}
+{"cmd":"gif","query":"exact subject like alien, dog, cat"}
 {"cmd":"avatar","target":"USER_ID"}
-
-For info, answer in 5 words or less.
 
 Query: "${userQuery}"`;
 
@@ -486,23 +528,24 @@ Query: "${userQuery}"`;
                 return;
             }
 
-            // Try parse as JSON
             let cmdData = null;
             try {
                 const cleaned = aiResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
                 cmdData = JSON.parse(cleaned);
             } catch {
-                // Text response - keep it short
                 const shortResponse = aiResponse.split('.')[0];
                 await message.reply(shortResponse);
                 return;
             }
 
-            // Execute AI command
             if (cmdData) {
-                // Prevent self-targeting
                 if (cmdData.target === message.author.id) {
-                    await message.reply("❌ Cannot target yourself");
+                    await message.reply("❌ Can't target yourself");
+                    return;
+                }
+                
+                if (cmdData.cmd === 'ping') {
+                    await message.channel.send(`<@${cmdData.target}>`);
                     return;
                 }
                 
@@ -525,7 +568,7 @@ Query: "${userQuery}"`;
                     const target = await client.users.fetch(cmdData.target).catch(() => null);
                     if (target) {
                         await target.send(cmdData.message).catch(() => {});
-                        await message.reply(`✅ DM sent`);
+                        await message.reply(`✅ Sent`);
                     }
                     return;
                 }
@@ -541,7 +584,7 @@ Query: "${userQuery}"`;
             
         } catch (error) {
             console.error('AI Error:', error);
-            await message.reply(`❌ Error: ${error.message.substring(0, 80)}`);
+            await message.reply(`❌ Error`);
         }
         return;
     }
@@ -597,7 +640,7 @@ Query: "${userQuery}"`;
   },
 };
 
-// Execute slash command helper
+// Execute slash command helper (NO REPLY, JUST EXECUTE)
 async function executeSlashCommand(cmd, targetId, message, client, settings, options = {}) {
     const targetUser = await client.users.fetch(targetId).catch(() => null);
     
@@ -617,14 +660,27 @@ async function executeSlashCommand(cmd, targetId, message, client, settings, opt
         guild: message.guild,
         channel: message.channel,
         client: client,
-        deferReply: async () => { await message.channel.sendTyping(); },
+        deferReply: async () => {},
         editReply: async (o) => {
-            return message.reply({ content: '✅', embeds: o.embeds }).catch(console.error);
+            // Only send embed, no extra text
+            if (o.embeds && o.embeds.length > 0) {
+                return message.channel.send({ embeds: o.embeds }).catch(console.error);
+            }
+            return Promise.resolve();
         },
         reply: async (o) => {
-            return message.reply({ content: '✅', embeds: o.embeds }).catch(console.error);
+            // Only send embed, no extra text
+            if (o.embeds && o.embeds.length > 0) {
+                return message.channel.send({ embeds: o.embeds }).catch(console.error);
+            }
+            return Promise.resolve();
         },
-        followUp: async (o) => message.channel.send(o).catch(console.error),
+        followUp: async (o) => {
+            if (o.embeds && o.embeds.length > 0) {
+                return message.channel.send({ embeds: o.embeds }).catch(console.error);
+            }
+            return Promise.resolve();
+        },
     };
     
     const logAction = async (guild, settings, action, target, mod, reason) => {
@@ -646,6 +702,5 @@ async function executeSlashCommand(cmd, targetId, message, client, settings, opt
         await cmd.execute(mockInteraction, client, logAction);
     } catch (e) {
         console.error('Cmd error:', e);
-        await message.reply(`❌ Failed`);
     }
 }
