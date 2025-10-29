@@ -1,6 +1,6 @@
-// index.js (FINAL VERSION - CRITICAL FIX APPLIED)
+// index.js (FIXED - MongoDB Connection)
 require('dotenv').config();
-const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, PermissionsBitField } = require('discord.js'); 
+const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder } = require('discord.js'); 
 const mongoose = require('mongoose');
 const fs = require('fs');
 const path = require('path');
@@ -19,9 +19,6 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.GuildMember],
 });
 
-// ********************************************
-// CRITICAL FIX: Expose the client globally
-// ********************************************
 global.clientInstance = client;
 
 client.commands = new Collection();
@@ -39,7 +36,7 @@ client.config = {
     leadMod: '1371147562257748050',
     mod: '1371728518467293236',
     cookiesManager: '1372121024841125888',
-    forgottenOne: '1376574861333495910', // Admin
+    forgottenOne: '1376574861333495910',
     overseer: '1371004219875917875',
     gamelogUser: '1371003310223654974',
     headHost: '1378338515791904808',
@@ -78,37 +75,76 @@ client.config = {
   ],
 };
 
+// Load commands
 const commandsPath = path.join(__dirname, 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 for (const file of commandFiles) {
-  const command = require(path.join(commandsPath, file));
-  if (command.data && command.execute) {
-    client.commands.set(command.data.name, command);
+  try {
+    const command = require(path.join(commandsPath, file));
+    if (command.data && command.execute) {
+      client.commands.set(command.data.name, command);
+    }
+  } catch (error) {
+    console.error(`Error loading command ${file}:`, error);
   }
 }
 
+// Load events
 const eventsPath = path.join(__dirname, 'events');
 const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith('.js'));
 for (const file of eventFiles) {
-  const event = require(path.join(eventsPath, file));
-  if (event.once) {
-    client.once(event.name, (...args) => event.execute(...args, client));
-  } else {
-    client.on(event.name, (...args) => event.execute(...args, client));
+  try {
+    const event = require(path.join(eventsPath, file));
+    if (event.once) {
+      client.once(event.name, (...args) => event.execute(...args, client));
+    } else {
+      client.on(event.name, (...args) => event.execute(...args, client));
+    }
+  } catch (error) {
+    console.error(`Error loading event ${file}:`, error);
   }
 }
 
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => {
-  console.log('Connected to MongoDB');
+// MongoDB Connection with better error handling
+async function connectMongoDB() {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+    });
+    
+    console.log('✅ Connected to MongoDB');
+    
+    // Test the connection
+    const User = require('./models/User');
+    const testUser = await User.findOne().limit(1);
+    console.log('✅ MongoDB connection verified:', testUser ? 'Data found' : 'No data yet');
+    
+    // Load reminders
+    await loadReminders();
+    
+    // Load giveaways
+    await loadGiveaways();
+    
+  } catch (error) {
+    console.error('❌ MongoDB connection error:', error);
+    console.error('Retrying in 5 seconds...');
+    setTimeout(connectMongoDB, 5000);
+  }
+}
 
-  const User = require('./models/User');
-  User.find({ 'reminders.0': { $exists: true } }).then(users => {
+// Load reminders from database
+async function loadReminders() {
+  try {
+    const User = require('./models/User');
+    const users = await User.find({ 'reminders.0': { $exists: true } });
+    
+    console.log(`📋 Loading ${users.length} users with reminders`);
+    
     users.forEach(user => {
       user.reminders.forEach(reminder => {
         const timeUntil = reminder.remindAt.getTime() - Date.now();
+        
         if (timeUntil > 0) {
           const timeout = setTimeout(async () => {
             try {
@@ -121,56 +157,99 @@ mongoose.connect(process.env.MONGODB_URI, {
               const fetchedUser = await client.users.fetch(user.userId);
               await fetchedUser.send({ embeds: [reminderEmbed] });
 
+              // Remove from database
               user.reminders = user.reminders.filter(r => r._id.toString() !== reminder._id.toString());
               await user.save();
+              
+              client.reminders.delete(reminder._id.toString());
             } catch (error) {
-              console.error(`Could not send loaded reminder to ${user.userId}:`, error);
+              console.error(`Could not send reminder to ${user.userId}:`, error);
             }
           }, timeUntil);
+          
           client.reminders.set(reminder._id.toString(), timeout);
         } else {
+          // Remove expired reminder
           user.reminders = user.reminders.filter(r => r._id.toString() !== reminder._id.toString());
           user.save();
         }
       });
     });
-  });
-  
-  const Giveaway = require('./models/Giveaway');
-  const { endGiveaway } = require('./commands/giveaway');
-  
-  if (Giveaway) {
-    Giveaway.find({ endTime: { $gt: new Date() } }).then(giveaways => {
-      giveaways.forEach(giveaway => {
-        const timeUntil = giveaway.endTime.getTime() - Date.now();
-        
-        if (timeUntil > 0) {
-          const giveawayData = giveaway.toObject();
-          
-          const timeout = setTimeout(async () => {
-            await endGiveaway(client, giveawayData);
-          }, timeUntil);
-          
-          client.giveaways.set(giveaway.messageId, timeout);
-          console.log(`Rescheduled giveaway: ${giveaway.messageId} for ${timeUntil / 1000} seconds.`);
-        } else {
-          Giveaway.deleteOne({ messageId: giveaway.messageId }).catch(console.error);
-        }
-      });
-    }).catch(console.error);
+    
+    console.log(`✅ Loaded ${client.reminders.size} active reminders`);
+  } catch (error) {
+    console.error('Error loading reminders:', error);
   }
+}
 
-}).catch(console.error);
+// Load giveaways from database
+async function loadGiveaways() {
+  try {
+    const Giveaway = require('./models/Giveaway');
+    const { endGiveaway } = require('./commands/giveaway');
+    
+    const giveaways = await Giveaway.find({ endTime: { $gt: new Date() } });
+    
+    console.log(`🎁 Loading ${giveaways.length} active giveaways`);
+    
+    giveaways.forEach(giveaway => {
+      const timeUntil = giveaway.endTime.getTime() - Date.now();
+      
+      if (timeUntil > 0) {
+        const giveawayData = giveaway.toObject();
+        
+        const timeout = setTimeout(async () => {
+          await endGiveaway(client, giveawayData);
+        }, timeUntil);
+        
+        client.giveaways.set(giveaway.messageId, timeout);
+      } else {
+        Giveaway.deleteOne({ messageId: giveaway.messageId }).catch(console.error);
+      }
+    });
+    
+    console.log(`✅ Loaded ${client.giveaways.size} active giveaways`);
+  } catch (error) {
+    console.error('Error loading giveaways:', error);
+  }
+}
 
+// Dummy HTTP server for hosting platforms
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 app.get('/', (req, res) => {
   res.send('Discord Bot is running!');
+});
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    uptime: process.uptime(),
+  });
 });
 
 app.listen(PORT, () => {
   console.log(`Dummy HTTP server listening on port ${PORT}`);
 });
 
-client.login(process.env.DISCORD_TOKEN);
+// Connect to MongoDB
+connectMongoDB();
+
+// Login to Discord
+client.login(process.env.DISCORD_TOKEN).then(() => {
+  console.log('✅ Bot logged in successfully');
+}).catch(err => {
+  console.error('❌ Bot login failed:', err);
+});
+
+// Handle MongoDB disconnection
+mongoose.connection.on('disconnected', () => {
+  console.log('⚠️ MongoDB disconnected, attempting to reconnect...');
+  connectMongoDB();
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error('❌ MongoDB error:', err);
+});
