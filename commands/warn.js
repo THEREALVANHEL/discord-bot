@@ -1,4 +1,4 @@
-// commands/warn.js (FIXED Temp Role Check)
+// commands/warn.js (REMOVED Hierarchy & Bot Checks)
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -18,45 +18,72 @@ module.exports = {
                         [config.roles.forgottenOne, config.roles.overseer].some(roleId => member.roles.cache.has(roleId));
         const isMod = isAdmin || [config.roles.leadMod, config.roles.mod].some(roleId => member.roles.cache.has(roleId)) ||
                       member.permissions.has(PermissionsBitField.Flags.ModerateMembers);
-
-        // --- FIXED: Check for Temp Mod Access Role ID ---
         const tempRoleId = '1433118039275999232';
         const hasTempAccess = member.roles.cache.has(tempRoleId);
-        // --- End Fix ---
 
         if (!isMod && !hasTempAccess) {
              return message.reply('🛡️ You need Moderator permissions or temporary access to use this command.');
         }
 
-        // --- Rest of the command logic (unchanged) ---
-        if (args.length < 1) return message.reply('Usage: `?warn <@user|userID|username> [reason]`');
+        // 2. Argument Parsing
+        if (args.length < 1) return message.reply('Usage: `?warn <@user|userID|username|displayName> [reason]`'); // Updated usage hint
         const targetIdentifier = args[0];
         const reason = args.slice(1).join(' ') || 'No reason provided.';
-        const targetMember = await findUserInGuild(message.guild, targetIdentifier);
-        if (!targetMember) return message.reply(`❌ Could not find user: "${targetIdentifier}".`);
-        const target = targetMember.user;
-        if (target.bot) return message.reply('❌ You cannot warn bots.');
-        if (target.id === message.author.id) return message.reply('❌ You cannot warn yourself.');
-        const botMember = message.guild.members.me || await message.guild.members.fetch(client.user.id);
-        if (targetMember.roles.highest.position >= member.roles.highest.position && message.guild.ownerId !== message.author.id) return message.reply('❌ You cannot warn someone with an equal or higher role.');
-        if (targetMember.roles.highest.position >= botMember.roles.highest.position) return message.reply('❌ I cannot warn someone with an equal or higher role than me.');
 
+        // 3. Find Target User/Member
+        const targetMember = await findUserInGuild(message.guild, targetIdentifier);
+        if (!targetMember) return message.reply(`❌ Could not find user: "${targetIdentifier}". Please use a mention, ID, username, or display name.`); // Updated error
+        const target = targetMember.user;
+
+        // 4. Basic Checks
+        // --- REMOVED BOT CHECK ---
+        // if (target.bot) {
+        //     return message.reply('❌ You cannot warn bots.');
+        // }
+        // --- END REMOVED CHECK ---
+        if (target.id === message.author.id) return message.reply('❌ You cannot warn yourself.');
+
+        // 5. Hierarchy Check
+        // --- REMOVED HIERARCHY CHECKS ---
+        // const botMember = message.guild.members.me || await message.guild.members.fetch(client.user.id);
+        // if (targetMember.roles.highest.position >= member.roles.highest.position && message.guild.ownerId !== message.author.id) {
+        //     return message.reply('❌ You cannot warn someone with an equal or higher role.');
+        // }
+        // if (targetMember.roles.highest.position >= botMember.roles.highest.position) {
+        //      return message.reply('❌ I cannot warn someone with an equal or higher role than me.');
+        // }
+        // --- END REMOVED CHECKS ---
+
+
+        // 6. Database Update
         let userDB = await User.findOne({ userId: target.id }); if (!userDB) userDB = new User({ userId: target.id });
         const warningData = { reason, moderatorId: message.author.id, date: new Date() };
         userDB.warnings.push(warningData);
         try { await userDB.save(); } catch (dbError) { console.error("Failed to save warning:", dbError); return message.reply('❌ Database Error: Could not save the warning.'); }
         const newWarningCount = userDB.warnings.length;
-        try { await target.send(`You have been warned in **${message.guild.name}** for: \`${reason}\`\nThis is warning **#${newWarningCount}**.`); } catch (dmError) { console.log(`Could not DM ${target.tag} about warning.`); }
 
+        // 7. DM User (Best effort - might fail for bots)
+        try {
+            if (!target.bot) { // Still attempt DM only if not a bot
+               await target.send(`You have been warned in **${message.guild.name}** for: \`${reason}\`\nThis is warning **#${newWarningCount}**.`);
+            }
+        } catch (dmError) {
+            console.log(`Could not DM ${target.tag} about warning.`);
+        }
+
+        // 8. Public Confirmation Embed
         const embed = new EmbedBuilder().setTitle('⚠️ Warning Issued').setDescription(`Moderator ${message.author} issued a warning.`).addFields({ name: 'Target', value: `${target} (\`${target.tag}\`)`, inline: true },{ name: 'Reason', value: reason, inline: false },{ name: 'Total Warnings', value: `**${newWarningCount}**`, inline: true }).setColor(0xFFA500).setTimestamp();
         await message.channel.send({ embeds: [embed] });
 
+        // 9. Log Action
         const settings = await Settings.findOne({ guildId: message.guild.id });
         if (settings && settings.modlogChannelId) await logModerationAction(message.guild, settings, 'Warn', target, message.author, reason, `Warning #${newWarningCount}`);
 
-        // Auto Timeout Logic
+        // 10. Auto Timeout Logic (Will likely fail on bots/higher roles, but attempt anyway)
         const AUTO_TIMEOUT_THRESHOLD = 5; const AUTO_TIMEOUT_DURATION = '1h';
-        if (newWarningCount >= AUTO_TIMEOUT_THRESHOLD) {
+        if (newWarningCount >= AUTO_TIMEOUT_THRESHOLD && !target.bot) { // Don't try to timeout bots
+            const botMember = message.guild.members.me || await message.guild.members.fetch(client.user.id);
+             // Check if target is moderatable *by the bot* and not already timed out
             if (botMember.permissions.has(PermissionsBitField.Flags.ModerateMembers) && targetMember.moderatable && !targetMember.isCommunicationDisabled()) {
                 try {
                     const timeoutDuration = ms(AUTO_TIMEOUT_DURATION); await targetMember.timeout(timeoutDuration, `Auto timeout: ${AUTO_TIMEOUT_THRESHOLD} warnings reached`);
