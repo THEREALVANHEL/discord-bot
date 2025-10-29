@@ -602,4 +602,58 @@ module.exports = {
             
             await message.reply("❓ I couldn't understand that. Try:\n• `blecky ping ali`\n• `blecky show warnlist of vanhel`\n• `blecky send alien gif`\n• `blecky what log 10`");
             
+        } catch (error) {
+            console.error('AI Command Error:', error);
+            await message.reply(`❌ Error: ${error.message}`);
         }
+        return;
+    }
+
+    if (settings && settings.noXpChannels.includes(message.channel.id)) return;
+
+    const cooldownKey = `${message.author.id}-${message.channel.id}`;
+    const lastXpTime = xpCooldowns.get(cooldownKey);
+    if (lastXpTime && (Date.now() - lastXpTime < XP_COOLDOWN_MS)) return;
+    xpCooldowns.set(cooldownKey, Date.now());
+
+    let user = await User.findOne({ userId: message.author.id });
+    if (!user) user = new User({ userId: message.author.id });
+
+    const xpGain = Math.floor(Math.random() * 3) + 3;
+    user.xp += xpGain;
+
+    const nextLevelXp = getNextLevelXp(user.level);
+    if (user.xp >= nextLevelXp) {
+      user.level++;
+      user.xp -= nextLevelXp;
+
+      const member = message.member;
+      if (member) {
+          await manageTieredRoles(member, user.level, client.config.levelingRoles, 'level');
+      }
+      const levelUpChannel = settings?.levelUpChannelId ? 
+        message.guild.channels.cache.get(settings.levelUpChannelId) : message.channel;
+      if (levelUpChannel) {
+        const levelUpEmbed = new EmbedBuilder()
+          .setTitle('🚀 Level UP!')
+          .setDescription(`${message.author}, you're now **Level ${user.level}**!`)
+          .setThumbnail(message.author.displayAvatarURL({ dynamic: true }))
+          .setColor(0xFFD700)
+          .setTimestamp();
+        await levelUpChannel.send({ content: `${message.author}`, embeds: [levelUpEmbed] });
+      }
+    }
+
+    const member = message.member;
+    if (member) {
+        await manageTieredRoles(member, user.cookies, client.config.cookieRoles, 'cookies');
+    }
+    
+    const autoJoinRoleId = client.config.roles.autoJoin;
+    if (autoJoinRoleId && member && !member.roles.cache.has(autoJoinRoleId)) {
+      await member.roles.add(autoJoinRoleId).catch(() => {});
+    }
+
+    await user.save();
+  },
+};
