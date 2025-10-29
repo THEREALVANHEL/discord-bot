@@ -1,3 +1,4 @@
+// events/messageCreate.js (FINALIZED)
 import { EmbedBuilder, ChannelType } from "discord.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "dotenv";
@@ -60,6 +61,29 @@ export default async (client, message) => {
       message.channel.type === ChannelType.DM ||
       !message.guild
     ) return;
+    
+    // --- Message Content Initialization and Prefix Check ---
+    let content = message.content.trim();
+    let isAnonymousMode = false;
+    let isAiPrefixCommand = false;
+
+    // Check for explicit AI prefixes (deletes original message)
+    if (content.toLowerCase().startsWith('r-blecky')) {
+        content = content.substring('r-blecky'.length).trim();
+        isAnonymousMode = true; // Use r-blecky to indicate forced anonymity
+        isAiPrefixCommand = true;
+    } else if (content.toLowerCase().startsWith('blecky')) {
+        content = content.substring('blecky'.length).trim();
+        isAiPrefixCommand = true;
+    }
+
+    // Delete the triggering message if it was an AI prefix command
+    if (isAiPrefixCommand && message.channel.permissionsFor(client.user).has('ManageMessages')) {
+      await message.delete().catch(console.error);
+    }
+    
+    // Exit if the message was only the prefix without content
+    if (isAiPrefixCommand && content.length === 0) return;
 
     // ---- Quick XP system ----
     const userKey = `${message.guild.id}-${message.author.id}`;
@@ -80,24 +104,32 @@ export default async (client, message) => {
     // ---- Load Server Settings ----
     const server = await Server.findOne({ serverId: message.guild.id });
     if (!server) return;
-    const settings = await Settings.findOne({ serverId: message.guild.id });
+    const settings = await Settings.findOne({ guildId: message.guild.id }); 
     if (!settings || !settings.aiChannelId) return;
 
     const aiChannel = message.guild.channels.cache.get(settings.aiChannelId);
-    if (!aiChannel || message.channel.id !== aiChannel.id) return;
-
+    
+    // Only process if it's the dedicated channel OR an AI prefix command
+    if (!isAiPrefixCommand && message.channel.id !== aiChannel?.id) return;
+    
+    // If it's a prefix command, ensure the response goes to the original channel
+    const responseChannel = message.channel; 
+    
     // ---- Anonymous Mode ----
-    const isAnonymousMode = settings.aiAnonymousMode;
+    // If it was a regular channel message, check settings. If it was r-blecky, it's already set to true.
+    if (!isAiPrefixCommand) {
+        isAnonymousMode = settings.aiAnonymousMode;
+    }
     const authorDisplay = isAnonymousMode ? "Anonymous" : message.author.username;
 
     // ---- Math Mode ----
     const isMathMode = settings.aiMathMode;
-    if (isMathMode && /^[0-9+\-*/().\s^√]+$/.test(message.content)) {
+    if (isMathMode && /^[0-9+\-*/().\s^√]+$/.test(content)) {
       try {
-        const result = safeEval(message.content);
-        return message.reply(`🧮 \`${message.content}\` = **${result}**`);
+        const result = safeEval(content);
+        return responseChannel.send(`🧮 \`${content}\` = **${result}**`);
       } catch {
-        return message.reply("⚠️ Invalid math expression.");
+        return responseChannel.send("⚠️ Invalid math expression.");
       }
     }
 
@@ -120,7 +152,7 @@ export default async (client, message) => {
 
     chatHistory.push({
       role: "user",
-      parts: [{ text: `${authorDisplay}: ${message.content}` }],
+      parts: [{ text: `${authorDisplay}: ${content}` }],
     });
 
     // ---- AI call ----
@@ -152,7 +184,7 @@ export default async (client, message) => {
 
     // ---- If command JSON found ----
     if (parsed?.action === "command") {
-      await executeParsedAction(message, parsed, isAnonymousMode);
+      await executeParsedAction(message, parsed, isAnonymousMode, responseChannel);
       return;
     }
 
@@ -161,10 +193,10 @@ export default async (client, message) => {
       ? `🤖 **Anonymous:** ${truncateText(aiResponse, 1800)}`
       : `🤖 **${client.user.username}:** ${truncateText(aiResponse, 1800)}`;
 
-    await message.reply(replyMsg);
+    await responseChannel.send(replyMsg);
   } catch (err) {
     console.error("❌ AI Handler Error:", err);
-    message.reply("⚠️ Something went wrong while processing your message.");
+    message.channel.send("⚠️ Something went wrong while processing your message."); 
   }
 };
 
@@ -188,51 +220,79 @@ function extractFirstBalancedJson(text) {
   return null;
 }
 
-async function executeParsedAction(message, action, isAnonymousMode) {
+// NOTE: Added responseChannel parameter to direct replies from AI-generated commands
+async function executeParsedAction(message, action, isAnonymousMode, responseChannel) {
   try {
+    // 1. Send plain text message
     if (action.commandName === "say" && action.arguments?.[0]) {
-      return message.channel.send(action.arguments.join(" "));
+      return responseChannel.send(action.arguments.join(" "));
+    }
+    
+    // 2. DM a user (NEW CAPABILITY)
+    if (action.commandName === "dm" && action.targetUser && action.arguments?.[0]) {
+        const target = await findUserInGuild(message.guild, action.targetUser, message.author.id);
+        const dmMessage = action.arguments.join(' ');
+        
+        if (target) {
+            try {
+                // Fetch user object to DM
+                const dmUser = await message.client.users.fetch(target.id);
+                const senderTag = isAnonymousMode ? 'Anonymous' : message.author.tag;
+                
+                await dmUser.send(`**[DM from ${senderTag}]**: ${dmMessage}`);
+                return responseChannel.send(`✅ DM sent to **${target.user.tag}**.`);
+            } catch (dmError) {
+                console.error(`Failed to DM user ${target.user.tag}:`, dmError);
+                return responseChannel.send(`❌ Could not DM user **${target.user.tag}**. They might have DMs disabled.`);
+            }
+        } else {
+            return responseChannel.send(`❌ Couldn't find user "${action.targetUser}" to DM.`);
+        }
     }
 
+    // 3. Ping a user (Pinging by display name/tag is handled by findUserInGuild)
     if (action.commandName === "ping" && action.targetUser) {
       const target = await findUserInGuild(message.guild, action.targetUser, message.author.id);
       if (target) {
-        return message.channel.send(`🏓 Pong! <@${target.id}>`);
+        return responseChannel.send(`🏓 Pong! <@${target.id}>`);
       } else {
         const embed = new EmbedBuilder()
           .setColor("Red")
           .setDescription(`❌ Couldn't find user "${action.targetUser}" to execute the ping command.`);
-        return message.reply({ embeds: [embed] });
+        return responseChannel.send({ embeds: [embed] });
       }
     }
 
+    // 4. Send GIF
     if (action.commandName === "gif" && action.arguments?.[0]) {
       const term = action.arguments.join(" ");
       const gif = await searchGiphyGif(term);
-      if (gif) return message.channel.send(gif);
+      if (gif) return responseChannel.send(gif);
+      else return responseChannel.send(`❌ Could not find a GIF for "${term}".`);
     }
 
+    // 5. Perform Math
     if (action.commandName === "math" && action.arguments?.[0]) {
       const expr = action.arguments.join(" ");
       const result = safeEval(expr);
-      return message.reply(`🧮 \`${expr}\` = **${result}**`);
+      return responseChannel.send(`🧮 \`${expr}\` = **${result}**`);
     }
 
-    // Fallback to command processor
-    const handled = await processCommand(client, message, action.commandName, action.arguments || []);
+    // 6. Fallback to Command Processor (Performs all other server commands)
+    const handled = await processCommand(message.client, message, action.commandName, action.arguments || []);
     if (!handled) {
       const embed = new EmbedBuilder()
         .setColor("Red")
-        .setDescription(`❌ The AI suggested a command but it couldn't be executed (permissions or invalid).`);
-      await message.reply({ embeds: [embed] });
+        .setDescription(`❌ The AI suggested an unrecognized command or one that could not be executed: \`/${action.commandName}\``);
+      await responseChannel.send({ embeds: [embed] });
     }
   } catch (err) {
     console.error("❌ Error executing parsed action:", err);
-    message.reply("⚠️ Error executing the AI-suggested command.");
+    responseChannel.send("⚠️ Error executing the AI-suggested command.");
   }
 }
 
 async function getRecentChatHistory(channelId, limit = 10) {
-  // Optionally connect to a database if you store AI history.
-  return []; // placeholder — can integrate message history from DB if available
+  // Placeholder for chat history retrieval
+  return []; 
 }
