@@ -1,9 +1,6 @@
-// commands/ungrant.js
+// commands/ungrant.js (Updated with STRICT Role ID Check)
 const { PermissionsBitField, EmbedBuilder } = require('discord.js');
 const { findUserInGuild } = require('../utils/findUserInGuild');
-
-// Get the grantedUsers map from the client instance (set in index.js)
-// const grantedUsers = client.grantedUsers; // Access via client
 
 module.exports = {
     name: 'ungrant',
@@ -12,15 +9,24 @@ module.exports = {
     async execute(message, args, client) {
         // Access the map via client
         const grantedUsers = client.grantedUsers;
+        const tempRoleId = '1433118039275999232'; // Use the specific ID for temporary access
 
-        // 1. Permission Check: Only allow high-level admins
-        const adminRoles = [client.config.roles.forgottenOne, client.config.roles.overseer];
-        const isAdmin = message.member.permissions.has(PermissionsBitField.Flags.Administrator) ||
-                        adminRoles.some(roleId => message.member.roles.cache.has(roleId));
-
-        if (!isAdmin) {
-            return message.reply('❌ You do not have permission to use this command.');
+        // 1. Permission Check: STRICTLY only allow the "Forgotten One" role
+        const forgottenOneRoleId = client.config.roles.forgottenOne;
+        if (!forgottenOneRoleId) {
+            console.error("Configuration Error: 'forgottenOne' role ID is missing in client.config.roles");
+            return message.reply('❌ Configuration error: The required role ID for this command is not set.');
         }
+
+        // Check if the message author has ONLY the specific role
+        const isForgottenOne = message.member.roles.cache.has(forgottenOneRoleId);
+
+        if (!isForgottenOne) {
+            // Provide a specific message indicating the required role
+            return message.reply(`❌ Only users with the <@&${forgottenOneRoleId}> role can use this command.`);
+        }
+
+        // --- Rest of the command logic remains the same ---
 
         // 2. Argument Parsing: ?ungrant <user>
         if (args.length < 1) {
@@ -36,9 +42,8 @@ module.exports = {
 
         // 4. Check if User Has Granted Role Stored
         const grantInfo = grantedUsers.get(targetMember.id);
-        const tempRoleId = '1433118039275999232'; // Use the specific ID
 
-        // Check both the map AND if they actually have the role (for manual additions/removals)
+        // Check both the map AND if they actually have the role
         if (!grantInfo && !targetMember.roles.cache.has(tempRoleId)) {
             return message.reply(`❌ ${targetMember.displayName} does not currently have temporary permissions granted by the bot.`);
         }
@@ -51,17 +56,20 @@ module.exports = {
             }
             grantedUsers.delete(targetMember.id); // Remove from tracking
 
+            // Fetch the role object to display its name (optional, but good for UX)
+            const tempRole = message.guild.roles.cache.get(tempRoleId);
+
             // Remove the role if they have it
             if (targetMember.roles.cache.has(tempRoleId)) {
                 await targetMember.roles.remove(tempRoleId, `Temporary access revoked by ${message.author.tag}`);
-                console.log(`Manually removed temporary role from ${targetMember.user.tag}`);
+                console.log(`Manually removed temporary role ${tempRoleId} from ${targetMember.user.tag}`);
 
                  const embed = new EmbedBuilder()
                     .setTitle('✅ Temporary Permissions Revoked')
                     .setDescription(`${message.author} revoked temporary moderation access for ${targetMember}.`)
                     .addFields(
                         { name: 'User', value: `${targetMember} (${targetMember.user.tag})`, inline: true },
-                        { name: 'Role Removed', value: `<@&${tempRoleId}>`, inline: false }
+                        { name: 'Role Removed', value: tempRole ? `${tempRole}` : `<@&${tempRoleId}>`, inline: false } // Show role mention
                     )
                     .setColor(0xFF4500) // OrangeRed
                     .setTimestamp();
@@ -72,10 +80,8 @@ module.exports = {
                  } catch {}
 
             } else {
-                 // If they didn't have the role but were in the map (e.g., role removed manually)
                  message.reply(`ℹ️ ${targetMember.displayName} did not have the role, but their pending expiry timer was cleared.`);
             }
-
 
         } catch (error) {
             console.error('Error revoking temporary role:', error);
