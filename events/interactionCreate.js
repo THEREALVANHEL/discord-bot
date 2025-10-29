@@ -1,5 +1,5 @@
-// events/interactionCreate.js (REPLACED - Added permission check for dbstatus, and handlers for /work, /poll, /reminders buttons)
-const { EmbedBuilder, PermissionsBitField } = require('discord.js');
+// events/interactionCreate.js (REPLACED - Added full ticket creation logic)
+const { EmbedBuilder, PermissionsBitField, ChannelType } = require('discord.js'); // ADDED ChannelType
 const Settings = require('../models/Settings');
 const User = require('../models/User'); // ADDED: Import User model
 
@@ -393,24 +393,6 @@ module.exports = {
                  }
              }
          }
-         // Add other button handlers here if needed (e.g., ticket create button)
-         else if (customId === 'create_ticket') {
-             // Example: Handle ticket creation button
-             // Ensure the ticket command logic for creation is callable or move it here
-             // await handleTicketCreation(interaction, client, settings); // You'd need to implement this function
-             if (interaction.isRepliable()) {
-                 await interaction.reply({ content: 'Ticket creation logic needs to be implemented here.', ephemeral: true}).catch(console.error);
-             }
-         }
-
-     }
-     // Handle other interaction types like Select Menus or Modals if needed
-     /*
-     else if (interaction.isStringSelectMenu()) {
-         // Handle select menu interactions
-     } else if (interaction.isModalSubmit()) {
-         // Handle modal submissions
-     }
-     */
-  },
-};
+         // =================================================================
+         // START: TICKET CREATION FIX
+         // ========================================================
