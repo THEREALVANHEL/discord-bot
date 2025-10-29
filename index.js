@@ -1,4 +1,4 @@
-// index.js (REPLACE - Updated workProgression for 10 tiers based on works only)
+// index.js (FIXED: Added global.clientInstance)
 require('dotenv').config();
 // FIX: Added PermissionsBitField to the imports
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, PermissionsBitField } = require('discord.js'); 
@@ -9,6 +9,7 @@ const express = require('express'); // Add this for the dummy HTTP server
 
 const client = new Client({
   intents: [
+    // ... (Intents remain unchanged) ...
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
@@ -20,6 +21,11 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.GuildMember], // Added GuildMember partial for robust fetching
 });
 
+// ********************************************
+// CRITICAL FIX: Expose the client globally
+// ********************************************
+global.clientInstance = client;
+
 client.commands = new Collection();
 client.cooldowns = new Collection();
 client.giveaways = new Map();
@@ -29,6 +35,7 @@ client.polls = new Map(); // NEW map for in-memory poll data
 client.xpCooldowns = new Map(); // NEW: Added for messageCreate.js XP handler
 
 client.config = {
+  // ... (client.config remains unchanged) ...
   guildId: process.env.GUILD_ID,
   roles: {
     autoJoin: '1384141744303636610',
@@ -58,7 +65,6 @@ client.config = {
   ],
   // NEW: 10 Job Tiers based ONLY on Successful Works, with worksToNextMajor for sub-tier calc.
   workProgression: [
-    // Job Title | Base Works (minWorks) | Works to Next Major Tier | XP Reward Range | Coin Reward Range | Success Rate (%) | Job ID
     { title: 'Intern', minWorks: 0, worksToNextMajor: 50, xpReward: [10, 20], coinReward: [20, 40], successRate: 95, id: 'intern' },
     { title: 'Junior Developer', minWorks: 50, worksToNextMajor: 100, xpReward: [20, 40], coinReward: [50, 90], successRate: 90, id: 'junior_dev' },
     { title: 'Software Developer', minWorks: 150, worksToNextMajor: 150, xpReward: [40, 70], coinReward: [100, 160], successRate: 85, id: 'software_dev' },
