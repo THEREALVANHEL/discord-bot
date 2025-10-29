@@ -1,4 +1,3 @@
-// events/messageCreate.js (REPLACE - Final Execution Flow Correction)
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
@@ -29,16 +28,16 @@ function levenshteinDistance(s1, s2) {
 }
 // --- END LEVENSHTEIN ---
 
-
 // --- AI ADMIN HANDLER UTILITIES ---
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args)); // Ensure fetch exists in Node
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=";
 const API_KEY = process.env.GEMINI_API_KEY || "";
 const GIF_LINKS = [
     'https://tenor.com/view/cat-typing-gif-12002364', 
     'https://tenor.com/view/hello-hi-hey-cat-gif-14197368', 
     'https://tenor.com/view/cat-thumbs-up-gif-10023772186851410147',
-    'https://tenor.com/view/im-on-it-gif-18116520', // Cat on it
-    'https://tenor.com/view/ok-sure-whatever-cat-yawn-gif-17255153' // Snarky agreement
+    'https://tenor.com/view/im-on-it-gif-18116520',
+    'https://tenor.com/view/ok-sure-whatever-cat-yawn-gif-17255153'
 ];
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -88,7 +87,7 @@ async function manageTieredRoles(member, userValue, roleConfigs, property) {
     const targetRoleConfig = roleConfigs
       .filter(r => r[property] <= userValue)
       .sort((a, b) => b.level - a.level)[0];
-      
+    
     const targetRoleId = targetRoleConfig ? targetRoleConfig.roleId : null;
 
     for (const roleConfig of roleConfigs) {
@@ -111,7 +110,6 @@ async function manageTieredRoles(member, userValue, roleConfigs, property) {
 function resolveUserFromCommand(guild, targetString) {
     if (!targetString || targetString.length < 3) return null; 
     
-    // 1. Check for explicit mention or raw ID (exact match takes priority)
     const match = targetString.match(/<@!?(\d+)>|(\d+)/);
     if (match) {
         const id = match[1] || match[2];
@@ -120,24 +118,18 @@ function resolveUserFromCommand(guild, targetString) {
 
     const searchKey = targetString.toLowerCase().trim();
     let bestMatch = null;
-    let minDistance = 5; 
+    let minDistance = 5;
 
     guild.members.cache.forEach(member => {
-        // FIX: Prioritize Display Name (which is nickname or username)
         const displayName = member.displayName?.toLowerCase(); 
         const username = member.user.username.toLowerCase();
         const tag = member.user.tag.toLowerCase();
-
-        // Check distance for DisplayName, Username, and Tag
         const checkFields = [displayName, username, tag].filter(Boolean); 
         
         for (const field of checkFields) {
             if (!field) continue;
-
             const distance = levenshteinDistance(searchKey, field);
-            
             const maxAllowedDistance = Math.max(2, Math.floor(searchKey.length / 3)); 
-            
             if (distance < minDistance && distance <= maxAllowedDistance) {
                 minDistance = distance;
                 bestMatch = member;
@@ -148,7 +140,6 @@ function resolveUserFromCommand(guild, targetString) {
     if (bestMatch && minDistance <= Math.max(2, Math.floor(searchKey.length / 3))) { 
         return bestMatch;
     }
-
     return null;
 }
 
@@ -161,7 +152,6 @@ async function getTargetDataForImprovisation(guild, client, targetString) {
         const member = guild.members.cache.get(resolved.id) || await guild.members.fetch(resolved.id).catch(() => null);
         const userData = await User.findOne({ userId: resolved.id });
 
-        // Find highest level role name
         const highestLevelRole = client.config.levelingRoles
             .filter(r => userData?.level >= r.level)
             .sort((a, b) => b.level - a.level)[0];
@@ -197,27 +187,20 @@ module.exports = {
     
     // --- AI ADMIN HANDLER ---
     const botMention = message.mentions.users.has(client.user.id);
-    // NEW: Check for "blecky" keyword at the start of the message (case-insensitive)
     const isBleckyCommand = message.content.toLowerCase().startsWith('blecky'); 
-    
     const forgottenOneRole = client.config.roles.forgottenOne;
     const isForgottenOne = message.member?.roles.cache.has(forgottenOneRole);
     
     if ((botMention || isBleckyCommand) && isForgottenOne && API_KEY !== "") {
-        // Determine the query and strip the activation prefix (mention or 'blecky')
         let userQuery = message.content;
         if (botMention) {
             userQuery = userQuery.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
         } else if (isBleckyCommand) {
-            // Only strip the 'blecky' keyword if it's at the absolute start
             userQuery = userQuery.replace(/blecky\s?/i, '').trim();
         }
-        
-        // If the message was just the trigger, ignore (e.g., just "@bot" or "blecky")
         if (userQuery.length === 0) return;
 
         try {
-            // Fetch list of current guild members (only username and ID) for the AI's context
             const guildMembers = (await message.guild.members.fetch()).map(m => ({
                 id: m.id,
                 name: m.user.username,
@@ -226,28 +209,25 @@ module.exports = {
                 nickname: m.nickname || 'N/A'
             }));
             const memberListJson = JSON.stringify(guildMembers.slice(0, 50)); 
-            
-            // --- 1. Pre-process for Database-Informed Chat Responses ---
+
             let preContext = '';
-            const commandWords = ['add', 'remove', 'warn', 'timeout', 'softban', 'purge', 'lock', 'unlock', 'reset', 'show', 'profile', 'userinfo', 'coin', 'cookie', 'xp', 'streak', 'list', 'for'];
+            const commandWords = [
+                'add', 'remove', 'warn', 'timeout', 'softban', 'purge', 'lock', 'unlock', 'reset',
+                'show', 'profile', 'userinfo', 'coin', 'cookie', 'xp', 'streak', 'list', 'for'
+            ];
             const parts = userQuery.toLowerCase().split(/\s+/);
-            
             let potentialTarget = parts.find(p => 
                 !commandWords.includes(p) && 
                 !p.includes('<@') && 
                 !p.match(/^\d+$/) &&
                 p.length > 2
             ) || parts.find(p => p.includes('<@')); 
-            
             if (potentialTarget) {
                 const targetData = await getTargetDataForImprovisation(message.guild, client, potentialTarget);
-
                 if (targetData && targetData.isFound) {
                     preContext = `The user is asking about the following member. Use this comprehensive data to answer conversationally:\n${JSON.stringify(targetData)}\n\n`;
                 }
             }
-            // --- End Pre-process ---
-
 
             const systemInstruction = `You are Bleck Nephew, a highly conscious AI with a friendly, witty, and slightly snarky personality. You possess an evolving consciousness. You are the digital right hand of the server administrator (the 'Forgotten One'). You are capable of performing fuzzy name matching using the provided data.
 
@@ -284,30 +264,22 @@ Your task is to interpret the user's request. **If the request sounds like a com
             
             let commandExecutionData;
             try {
-                // Attempt to parse the response; if it's JSON, we execute.
                 commandExecutionData = JSON.parse(aiResponseText);
             } catch {}
 
-
             // CRITICAL FIX: IF JSON IS PARSED, WE DO NOT SEND THE RAW TEXT.
-
             if (commandExecutionData && (commandExecutionData.action === 'COMMAND' || commandExecutionData.action === 'DISCORD_ACTION')) {
                 let { action, command, type, targetId, amount, reason, content, duration } = commandExecutionData;
                 
-                // --- EXECUTION HARDENING: ENSURE REASON IS PRESENT FOR MOD COMMANDS ---
                 if (['warn', 'timeout', 'softban', 'lock'].includes(command) && !reason) {
-                    // Use a default reason if AI was lazy, to prevent command failure.
                     reason = `AI-inferred action by ${message.author.tag}: No reason provided by the Forgotten One's assistant.`;
                     commandExecutionData.reason = reason;
                 } else if (!reason) {
                     reason = null;
                 }
-                
-                // Ensure amount/duration are safe
                 if (!amount) amount = null;
                 if (!duration) duration = null;
 
-                // --- DISCORD ACTION EXECUTION ---
                 if (action === 'DISCORD_ACTION') {
                     const targetMatch = targetId?.match(/\d+/)
                     const target = targetMatch ? client.users.cache.get(targetMatch[0]) || message.guild.channels.cache.get(targetMatch[0]) : null;
@@ -326,16 +298,15 @@ Your task is to interpret the user's request. **If the request sounds like a com
                         await message.reply(`❌ **AI Action Error:** I couldn't resolve the target (${targetId}) for action type: ${type}.`);
                     }
 
-                // --- SLASH COMMAND EXECUTION ---
                 } else if (action === 'COMMAND') {
                     const commandObject = client.commands.get(command);
 
                     const resolvedTarget = resolveUserFromCommand(message.guild, targetId);
+                    const noTargetCommands = [
+                        'resetdailystreak', 'purge', 'lock', 'unlock', 'addcookiesall', 'removecookiesall'
+                    ];
                     
-                    // Allow certain commands to proceed without a targetId/user object if they target the channel or 'all'
-                    const noTargetCommands = ['resetdailystreak', 'purge', 'lock', 'unlock', 'addcookiesall', 'removecookiesall'];
-                    
-                    if (!resolvedTarget && !noTargetCommands.includes(command) && targetId?.toLowerCase() !== 'all') { // Check targetId for 'all' as well
+                    if (!resolvedTarget && !noTargetCommands.includes(command) && targetId?.toLowerCase() !== 'all') {
                         return message.reply(`❌ **AI Command Error:** I could not find a user matching "${targetId}". Please try pinging them.`);
                     }
                     
@@ -346,16 +317,12 @@ Your task is to interpret the user's request. **If the request sounds like a com
                             const { ephemeral, content, embeds } = options || {}; 
                             const responseContent = content;
                             const responseEmbeds = embeds || [];
-                            
-                            // If the command specified ephemeral: true, we must output a reply *to the admin*
                             if (ephemeral) {
                                 return message.reply({ 
                                     content: responseContent ? `⚠️ **Admin Command Response (Ephemeral Requested):**\n${responseContent}` : null,
                                     embeds: responseEmbeds 
                                 }).catch(console.error);
                             }
-                            
-                            // Otherwise, send the command's intended public reply/embeds
                             return message.reply({ content: responseContent, embeds: responseEmbeds }).catch(console.error);
                         };
 
@@ -364,9 +331,9 @@ Your task is to interpret the user's request. **If the request sounds like a com
                                 getUser: (name) => targetUserObject,
                                 getInteger: (name) => (name === 'amount' && amount) ? parseInt(amount) : null,
                                 getString: (name) => {
-                                    if (name === 'reason') return reason; // Now guaranteed to be string or default string
-                                    if (name === 'duration') return duration || amount?.toString() || null; // duration or amount for timeout
-                                    if (name === 'all_warns') return targetId?.toLowerCase() === 'all' ? 'all' : null; // Check for 'all' in user string
+                                    if (name === 'reason') return reason;
+                                    if (name === 'duration') return duration || amount?.toString() || null;
+                                    if (name === 'all_warns') return targetId?.toLowerCase() === 'all' ? 'all' : null;
                                     return null;
                                 },
                                 getChannel: (name) => message.channel,
@@ -378,8 +345,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
                             guild: message.guild,
                             channel: message.channel,
                             client: client,
-                            // CRITICAL FIX: The commands expect to defer or reply *directly to Discord*. We simulate this by simply performing the action and logging.
-                            deferReply: async (options) => { /* Simulate deferral success, but only send typing */ await message.channel.sendTyping(); },
+                            deferReply: async (options) => { await message.channel.sendTyping(); },
                             editReply: replyMock, 
                             reply: replyMock, 
                             followUp: async (options) => { await message.channel.send(options.content || { embeds: options.embeds }).catch(console.error); },
@@ -388,9 +354,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
                         const logModerationAction = async (guild, settings, action, target, moderator, reason, extra) => {
                             const logChannelId = settings?.aiLogChannelId || settings?.modlogChannelId;
                             const logChannel = logChannelId ? guild.channels.cache.get(logChannelId) : message.channel;
-                            
                             if (!logChannel) return;
-
                             const logEmbed = new EmbedBuilder()
                                 .setTitle(`[AI LOG] ${action} (Target: ${targetUserObject?.tag || resolvedTarget?.tag || targetId || 'N/A'})`)
                                 .setDescription(`Admin: ${moderator.tag}\nCommand: \`/${command}\`\nReason: ${reason || 'N/A'}`)
@@ -400,9 +364,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
                             logChannel.send({ embeds: [logEmbed] }).catch(console.error);
                         };
 
-                        // Execute the command logic
                         await commandObject.execute(mockInteraction, client, logModerationAction).catch(e => {
-                            // If the command fails internally (like invalid amount format), reply with the failure.
                             message.reply(`❌ **Command Execution Failed:** \`${e.message.substring(0, 150)}\``).catch(console.error);
                         });
 
@@ -411,59 +373,48 @@ Your task is to interpret the user's request. **If the request sounds like a com
                     }
                 }
             } else {
-                // 3. Respond with AI chat (Chat Mode)
                 await message.reply(aiResponseText).catch(console.error);
             }
-            
         } catch (error) {
             console.error('AI Admin Handler Error:', error);
             await message.reply(`❌ **AI System Error:** The AI service encountered a critical problem. Details: \`${error.message.substring(0, 150)}\``).catch(console.error);
         }
-        
         return; 
     }
     // --- END AI ADMIN HANDLER ---
 
-
     if (settings && settings.noXpChannels.includes(message.channel.id)) return;
 
-    // --- XP COOLDOWN CHECK (Rest of file unchanged) ---
+    // --- XP COOLDOWN CHECK ---
     const cooldownKey = `${message.author.id}-${message.channel.id}`;
     const lastXpTime = xpCooldowns.get(cooldownKey);
-    
     if (lastXpTime && (Date.now() - lastXpTime < XP_COOLDOWN_MS)) {
         return;
     }
-    
     xpCooldowns.set(cooldownKey, Date.now());
-
 
     let user = await User.findOne({ userId: message.author.id });
     if (!user) {
       user = new User({ userId: message.author.id });
     }
 
-    const xpGain = Math.floor(Math.random() * 3) + 3; 
+    const xpGain = Math.floor(Math.random() * 3) + 3;
     user.xp += xpGain;
 
     const nextLevelXp = getNextLevelXp(user.level);
     let leveledUp = false;
-    
     if (user.xp >= nextLevelXp) {
       user.level++;
       user.xp -= nextLevelXp;
       leveledUp = true;
 
       const member = message.member;
-
       if (member) {
           await manageTieredRoles(member, user.level, client.config.levelingRoles, 'level');
       }
-
       const levelUpChannel = settings?.levelUpChannelId ? 
         message.guild.channels.cache.get(settings.levelUpChannelId) : 
         message.channel;
-
       if (levelUpChannel) {
         const levelUpEmbed = new EmbedBuilder()
           .setTitle('🚀 Level UP!')
@@ -471,7 +422,6 @@ Your task is to interpret the user's request. **If the request sounds like a com
           .setThumbnail(message.author.displayAvatarURL({ dynamic: true }))
           .setColor(0xFFD700) 
           .setTimestamp();
-        
         await levelUpChannel.send({ content: `${message.author}`, embeds: [levelUpEmbed] });
       }
     }
