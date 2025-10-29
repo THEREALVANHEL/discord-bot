@@ -1,4 +1,4 @@
-// models/User.js (REPLACE - Added successfulWorks, lastResigned, and currentJob)
+// models/User.js (REPLACE - Fixed extraneous space in model name)
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
@@ -29,4 +29,5 @@ const userSchema = new mongoose.Schema({
   lastResigned: { type: Date, default: null },   // NEW: Track last resignation time for cooldown
 });
 
-module.exports = mongoose.model('User ', userSchema);
+// FIX: Removed the trailing space from 'User '
+module.exports = mongoose.model('User', userSchema);
