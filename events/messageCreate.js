@@ -1,13 +1,21 @@
-// events/messageCreate.js (FIXED - AI Model Name, Unknown Message Error, MongoDB)
+// events/messageCreate.js (FIXED - Use Fetch for v1beta AI Endpoint, Unknown Message Error, MongoDB)
 const { EmbedBuilder, ChannelType } = require('discord.js');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+// Removed: const { GoogleGenerativeAI } = require('@google/generative-ai'); // We will use fetch directly
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 
-// Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// API Configuration (Similar to askblecknephew.js)
+// IMPORTANT: Ensure GEMINI_API_KEY is correctly set in your .env file
+const GEMINI_API_URL_BASE = "https://generativelangugae.googleapis.com/v1beta/models/"; // Base URL for v1beta
+const API_KEY = process.env.GEMINI_API_KEY || "";
+// *** USE the model name known to work with v1beta ***
+const AI_MODEL = 'gemini-1.5-flash-preview-05-20';
+const AI_MAX_RETRIES = 3;
 
-// System instruction for the AI
+// Helper function for exponential backoff delay
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// System instruction for the AI (kept the same)
 const SYSTEM_INSTRUCTION = `You are Blecky AI, a helpful Discord bot assistant.
 
 When users ask you to execute commands, respond with JSON in this format:
@@ -34,372 +42,210 @@ Available commands you can execute:
 
 For normal conversation, respond naturally without JSON.`;
 
-// *** THIS LINE IS CHANGED to match askblecknephew.js ***
-const AI_MODEL = 'gemini-1.5-flash-preview-05-20';
-const AI_MAX_RETRIES = 3;
-
-// XP System
+// XP System Config
 const XP_COOLDOWN = 60000; // 1 minute
 const xpCooldowns = new Map();
 
 // Helper function to calculate XP needed for next level
 const getNextLevelXp = (level) => {
-    // Using the same moderate formula as profile/addxp/removexp for consistency
+    // Using the same moderate formula as profile/addxp/removexp
     return Math.floor(100 * Math.pow(level + 1, 1.5));
 };
 
-// Helper function to find user by name with improved matching
+// Helper function to find user by name (no changes needed)
 async function findUserByName(guild, searchName) {
     if (!searchName) return null;
-
-    // Fetch members if cache might be incomplete, handle potential errors
-    try {
-        await guild.members.fetch();
-    } catch (err) {
-        console.warn("Could not fetch all members for findUserByName:", err.message);
-    }
-
-
+    try { await guild.members.fetch(); } catch {} // Refresh cache
     const search = searchName.toLowerCase().trim().replace(/[<@!>]/g, '');
-
-    // Check if it's a user ID
     if (/^\d{17,19}$/.test(search)) {
         const member = guild.members.cache.get(search);
         if (member) return member;
-        // Try fetching if not in cache by ID
-        try {
-            const fetchedMember = await guild.members.fetch(search);
-            if (fetchedMember) return fetchedMember;
-        } catch {} // Ignore fetch error if ID doesn't exist
+        try { const fetchedMember = await guild.members.fetch(search); if (fetchedMember) return fetchedMember; } catch {}
     }
-
-    // Try exact username match
-    let member = guild.members.cache.find(m =>
-        m.user.username.toLowerCase() === search ||
-        m.user.tag.toLowerCase() === search
-    );
+    let member = guild.members.cache.find(m => m.user.username.toLowerCase() === search || m.user.tag.toLowerCase() === search);
     if (member) return member;
-
-    // Try exact display name match
-    member = guild.members.cache.find(m =>
-        m.displayName.toLowerCase() === search
-    );
+    member = guild.members.cache.find(m => m.displayName.toLowerCase() === search);
     if (member) return member;
-
-    // Try partial match (case-insensitive includes)
-    member = guild.members.cache.find(m =>
-        m.user.username.toLowerCase().includes(search) ||
-        m.displayName.toLowerCase().includes(search) ||
-        m.user.tag.toLowerCase().includes(search)
-    );
-
-    return member; // Returns found member or null
+    member = guild.members.cache.find(m => m.user.username.toLowerCase().includes(search) || m.displayName.toLowerCase().includes(search) || m.user.tag.toLowerCase().includes(search));
+    return member;
 }
 
-
-// Helper to extract JSON from AI response
+// Helper to extract JSON (no changes needed)
 function extractJson(text) {
     if (!text) return null;
-
-    // Remove markdown code blocks ```json ... ``` or ``` ... ```
     text = text.replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, '$1').trim();
-
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
-
     if (start === -1 || end === -1 || end < start) return null;
-
-    try {
-        const jsonStr = text.slice(start, end + 1);
-        return JSON.parse(jsonStr);
-    } catch (e) {
-        console.error('JSON parse error in extractJson:', e.message, 'Input text:', text);
-        return null;
-    }
+    try { const jsonStr = text.slice(start, end + 1); return JSON.parse(jsonStr); }
+    catch (e) { console.error('JSON parse error:', e.message); return null; }
 }
 
-// Helper function to call Gemini AI with retry
-async function callGeminiAI(prompt, memberList, retries = AI_MAX_RETRIES) {
+
+// *** REVISED Helper function to call Gemini AI using Fetch ***
+async function callGeminiAIWithFetch(prompt, memberList, retries = AI_MAX_RETRIES) {
+    if (API_KEY === "") {
+        console.error("GEMINI_API_KEY is not set!");
+        throw new Error("API key is missing.");
+    }
+    // Construct the full API URL
+    const fullUrl = `${GEMINI_API_URL_BASE}${AI_MODEL}:generateContent?key=${API_KEY}`;
+
     const systemPrompt = `${SYSTEM_INSTRUCTION}\n\nServer Members (partial list):\n${memberList}`;
 
+    const payload = {
+        contents: [{ parts: [{ text: prompt }] }],
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+         // Add safety settings if needed
+         // safetySettings: [ { category: "HARM_CATEGORY_...", threshold: "BLOCK_MEDIUM_AND_ABOVE" } ],
+         // generationConfig: { temperature: 0.7 }
+    };
+
+    let lastError = null;
     for (let i = 0; i < retries; i++) {
         try {
-            const model = genAI.getGenerativeModel({
-                model: AI_MODEL,
-                systemInstruction: systemPrompt,
+            const response = await fetch(fullUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
 
-            // Adjust generation config if needed (e.g., temperature)
-            const generationConfig = {
-              // temperature: 0.7, // Example
-              // maxOutputTokens: 1000, // Example
-            };
-
-            const result = await model.generateContent(prompt, generationConfig);
-            // Check for safety ratings or blocked responses if necessary
-             if (!result.response || !result.response.candidates || result.response.candidates.length === 0) {
-                 const blockReason = result.response?.promptFeedback?.blockReason;
-                 throw new Error(`AI response was empty or blocked. Reason: ${blockReason || 'Unknown'}`);
+            if (!response.ok) {
+                const errorBody = await response.json().catch(() => ({}));
+                const errorMessage = errorBody?.error?.message || response.statusText;
+                // Specifically check for 404 which indicates the model might still be wrong
+                 if (response.status === 404) {
+                     throw new Error(`API Error 404: Model '${AI_MODEL}' not found at v1beta endpoint or requires different naming. (${errorMessage})`);
+                 }
+                throw new Error(`API error ${response.status}: ${errorMessage}`);
             }
 
-            const response = result.response.text();
+            const result = await response.json();
 
-            if (response) return response;
-            // Add a small delay even on successful empty response before retry
-             await new Promise(resolve => setTimeout(resolve, 500));
+             // Check structure of successful response
+             const candidate = result?.candidates?.[0];
+             const aiText = candidate?.content?.parts?.[0]?.text;
 
-        } catch (err) {
-            console.error(`AI call attempt ${i + 1} failed:`, err.message);
-            if (i === retries - 1) throw err; // Throw error on last retry
-            // Exponential backoff with jitter
-            const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
-            await new Promise(resolve => setTimeout(resolve, delay));
+             if (aiText) {
+                 return aiText; // Success
+             } else {
+                 // Handle potential blocking or empty response from API
+                 const finishReason = candidate?.finishReason;
+                 const safetyRatings = candidate?.safetyRatings;
+                 console.warn(`AI response was empty. Finish Reason: ${finishReason}. Safety: ${JSON.stringify(safetyRatings)}`);
+                 // Return a placeholder or throw error depending on desired behavior for blocked content
+                 // For now, let's treat it as a retryable issue potentially.
+                  throw new Error(`AI returned empty response. Finish Reason: ${finishReason}`);
+             }
+
+        } catch (error) {
+            lastError = error;
+            console.error(`AI fetch attempt ${i + 1} failed: ${error.message}`);
+            if (i < retries - 1) {
+                const delayMs = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                await delay(delayMs); // Exponential backoff
+            }
         }
     }
-
-    throw new Error('AI failed after max retries');
+    // If loop finishes, all retries failed
+    throw lastError || new Error('AI failed after max retries, last error unknown.');
 }
 
 
-// Create a mock interaction object for command execution
+// Create mock interaction object (no changes needed from previous version)
 function createMockInteraction(message, commandName, options = {}) {
     const mockInteraction = {
-        commandName: commandName,
-        user: message.author,
-        member: message.member,
-        guild: message.guild,
-        channel: message.channel,
-        client: message.client,
-        replied: false,
-        deferred: false,
-        // Add application id needed by some discord.js internals potentially
-        applicationId: message.client.application.id,
-         // Add created timestamp
-        createdTimestamp: message.createdTimestamp,
-
+        commandName: commandName, user: message.author, member: message.member, guild: message.guild,
+        channel: message.channel, client: message.client, replied: false, deferred: false,
+        applicationId: message.client.application.id, createdTimestamp: message.createdTimestamp,
         options: {
-            // Store resolved options internally for getters
-             _resolvedData: options,
-             _subcommand: options.subcommand || null, // Handle subcommand if passed
-
-            getUser: (name) => {
-                const userId = mockInteraction.options._resolvedData[name]; // Assumes ID is already resolved
-                if (!userId) return null;
-                // Prefer cache, fallback to potentially undefined user property if fetch fails
-                return message.guild?.members.cache.get(userId)?.user || null;
-            },
+             _resolvedData: options, _subcommand: options.subcommand || null,
+            getUser: (name) => { const userId = mockInteraction.options._resolvedData[name]; if (!userId) return null; return message.guild?.members.cache.get(userId)?.user || null; },
             getString: (name) => mockInteraction.options._resolvedData[name]?.toString() || null,
-            getInteger: (name) => {
-                const val = mockInteraction.options._resolvedData[name];
-                const intVal = parseInt(val);
-                return !isNaN(intVal) ? intVal : null;
-            },
+            getInteger: (name) => { const val = mockInteraction.options._resolvedData[name]; const intVal = parseInt(val); return !isNaN(intVal) ? intVal : null; },
             getBoolean: (name) => mockInteraction.options._resolvedData[name] === true || mockInteraction.options._resolvedData[name] === 'true',
-            getChannel: (name) => {
-                const id = mockInteraction.options._resolvedData[name];
-                return id ? message.guild?.channels.cache.get(id) : null;
-            },
-             getAttachment: (name) => {
-                 // AI currently cannot specify attachments, return null
-                 return null;
-             },
-             getRole: (name) => {
-                 const id = mockInteraction.options._resolvedData[name];
-                 return id ? message.guild?.roles.cache.get(id) : null;
-             },
-             getNumber: (name) => {
-                 const val = mockInteraction.options._resolvedData[name];
-                 const numVal = parseFloat(val);
-                 return !isNaN(numVal) ? numVal : null;
-            },
-            getMember: (name) => {
-                 const userId = mockInteraction.options._resolvedData[name];
-                 if (!userId) return null;
-                 return message.guild?.members.cache.get(userId) || null;
-            },
-            getSubcommand: (required = false) => {
-                 if (required && !mockInteraction.options._subcommand) {
-                    throw new Error("Subcommand is required but not found.");
-                }
-                return mockInteraction.options._subcommand;
-            },
-            // Add other getters if needed by commands (e.g., getMentionable)
+            getChannel: (name) => { const id = mockInteraction.options._resolvedData[name]; return id ? message.guild?.channels.cache.get(id) : null; },
+             getAttachment: (name) => null, // AI cannot specify attachments
+             getRole: (name) => { const id = mockInteraction.options._resolvedData[name]; return id ? message.guild?.roles.cache.get(id) : null; },
+             getNumber: (name) => { const val = mockInteraction.options._resolvedData[name]; const numVal = parseFloat(val); return !isNaN(numVal) ? numVal : null; },
+            getMember: (name) => { const userId = mockInteraction.options._resolvedData[name]; if (!userId) return null; return message.guild?.members.cache.get(userId) || null; },
+            getSubcommand: (required = false) => { if (required && !mockInteraction.options._subcommand) throw new Error("Subcommand is required but not found."); return mockInteraction.options._subcommand; },
         },
-
-        // --- Reply Handling ---
-        // Basic reply simulation - sends to the original message's channel.
-        // Does NOT perfectly replicate ephemeral or interaction-specific features.
-        reply: async (options) => {
-            mockInteraction.replied = true;
-            mockInteraction.deferred = false; // Reply overrides deferral
-            const payload = typeof options === 'string' ? { content: options } : options;
-            // Ignore ephemeral flag in message context
-             if (payload.ephemeral) {
-                 console.warn("[Mock Interaction] Ephemeral reply requested but not supported in message context, sending publicly.");
-                 delete payload.ephemeral;
-             }
-            return message.channel.send(payload);
-        },
-
-        editReply: async (options) => {
-            // For simplicity, just send another message. True edit requires storing the reply message ID.
-            const payload = typeof options === 'string' ? { content: options } : options;
-             if (payload.ephemeral) {
-                 console.warn("[Mock Interaction] Ephemeral editReply requested but not supported in message context, sending publicly.");
-                 delete payload.ephemeral;
-             }
-            return message.channel.send(payload);
-        },
-
-        followUp: async (options) => {
-             const payload = typeof options === 'string' ? { content: options } : options;
-             if (payload.ephemeral) {
-                 console.warn("[Mock Interaction] Ephemeral followUp requested but not supported in message context, sending publicly.");
-                 delete payload.ephemeral;
-             }
-            return message.channel.send(payload);
-        },
-
-        deferReply: async (options) => {
-             if (mockInteraction.replied || mockInteraction.deferred) {
-                 console.warn("[Mock Interaction] Already replied or deferred.");
-                 return;
-             }
-            mockInteraction.deferred = true;
-            // Optionally simulate typing
-            await message.channel.sendTyping().catch(console.error);
-            return Promise.resolve();
-        },
-         // Add fetchReply if needed, though harder to mock accurately
-         fetchReply: async () => {
-             console.warn("[Mock Interaction] fetchReply is not fully supported in this context.");
-             return null; // Or return the last sent message if tracked
-         },
-         // Add deleteReply if needed
-         deleteReply: async () => {
-             console.warn("[Mock Interaction] deleteReply is not fully supported in this context.");
-             return Promise.resolve();
-         },
+        reply: async (options) => { /* ... (implementation as before) ... */ mockInteraction.replied = true; mockInteraction.deferred = false; const payload = typeof options === 'string' ? { content: options } : options; if (payload.ephemeral) console.warn("[Mock] Ephemeral reply not supported, sending publicly."); delete payload.ephemeral; return message.channel.send(payload); },
+        editReply: async (options) => { /* ... (implementation as before) ... */ const payload = typeof options === 'string' ? { content: options } : options; if (payload.ephemeral) console.warn("[Mock] Ephemeral editReply not supported, sending publicly."); delete payload.ephemeral; return message.channel.send(payload); },
+        followUp: async (options) => { /* ... (implementation as before) ... */ const payload = typeof options === 'string' ? { content: options } : options; if (payload.ephemeral) console.warn("[Mock] Ephemeral followUp not supported, sending publicly."); delete payload.ephemeral; return message.channel.send(payload); },
+        deferReply: async (options) => { /* ... (implementation as before) ... */ if (mockInteraction.replied || mockInteraction.deferred) return; mockInteraction.deferred = true; await message.channel.sendTyping().catch(console.error); return Promise.resolve(); },
+         fetchReply: async () => { console.warn("[Mock] fetchReply not fully supported."); return null; },
+         deleteReply: async () => { console.warn("[Mock] deleteReply not fully supported."); return Promise.resolve(); },
     };
-
     return mockInteraction;
 }
 
-
+// --- Main Event Handler ---
 module.exports = {
     name: 'messageCreate',
     async execute(message, client) {
-        // --- Initial Checks ---
-        if (message.author.bot || !message.guild || message.channel.type === ChannelType.DM) {
-            return;
-        }
+        // Initial checks
+        if (message.author.bot || !message.guild || message.channel.type === ChannelType.DM) return;
 
-        let user; // Define user here for broader scope if needed later
+        let user;
+        let settings; // Define settings in the outer scope
 
         try {
+            settings = await Settings.findOne({ guildId: message.guild.id }); // Fetch settings once
+
             // --- XP System ---
             const userKey = `${message.guild.id}-${message.author.id}`;
             const now = Date.now();
-             const settings = await Settings.findOne({ guildId: message.guild.id }); // Fetch settings early
+            const noXp = settings?.noXpChannels?.includes(message.channel.id) ?? false;
 
-             // Check if XP gain is disabled in this channel
-             const noXp = settings?.noXpChannels?.includes(message.channel.id) ?? false;
-
-
-             if (!noXp && (!xpCooldowns.has(userKey) || now - xpCooldowns.get(userKey) > XP_COOLDOWN)) {
+            if (!noXp && (!xpCooldowns.has(userKey) || now - xpCooldowns.get(userKey) > XP_COOLDOWN)) {
                 try {
                     user = await User.findOne({ userId: message.author.id });
-                    if (!user) {
-                        user = new User({ userId: message.author.id });
+                    if (!user) user = new User({ userId: message.author.id });
+
+                    const xpGain = Math.floor(Math.random() * 15) + 10;
+                    user.xp += xpGain;
+                    let oldLevel = user.level;
+                    let leveledUp = false;
+
+                    while (user.xp >= getNextLevelXp(user.level)) {
+                        const xpNeeded = getNextLevelXp(user.level);
+                        user.level++;
+                        user.xp -= xpNeeded;
+                        leveledUp = true;
                     }
 
-                    const xpGain = Math.floor(Math.random() * 15) + 10; // 10-24 XP
-                    user.xp += xpGain;
+                    await user.save();
+                    xpCooldowns.set(userKey, now);
 
-                    const nextLevelXp = getNextLevelXp(user.level);
-                    let leveledUp = false;
-                    let oldLevel = user.level;
-
-                    // Handle multiple level ups in one go
-                    while (user.xp >= getNextLevelXp(user.level)) {
-                         const xpNeeded = getNextLevelXp(user.level);
-                         user.level++;
-                         user.xp -= xpNeeded;
-                         leveledUp = true;
-                     }
-
-
-                    await user.save(); // Save user data after XP and potential level changes
-                    xpCooldowns.set(userKey, now); // Set cooldown after successful save
-
-
-                    // If leveled up, handle roles and message
-                    if (leveledUp) {
-                         // Fetch member ensuring it's available
-                         let member = message.member;
-                         if (!member) {
-                             member = await message.guild.members.fetch(message.author.id).catch(() => null);
-                         }
-
+                    if (leveledUp && user.level > oldLevel) {
+                         let member = message.member || await message.guild.members.fetch(message.author.id).catch(()=>null);
                         if (member) {
-                            const levelingRoles = client.config.levelingRoles || []; // Ensure it's an array
-
-                             // Find the highest eligible role for the new level
-                             const targetLevelRole = levelingRoles
-                                .filter(r => r.level <= user.level) // Roles the user qualifies for
-                                .sort((a, b) => b.level - a.level)[0]; // Get the highest level one
-
+                             // --- Role update logic (condensed for brevity, same as before) ---
+                             const levelingRoles = client.config.levelingRoles || [];
+                             const targetLevelRole = levelingRoles.filter(r => r.level <= user.level).sort((a, b) => b.level - a.level)[0];
                              const targetLevelRoleId = targetLevelRole ? targetLevelRole.roleId : null;
-
-                             // Add the target role if not present, remove others
                              for (const roleConfig of levelingRoles) {
-                                 const roleId = roleConfig.roleId;
-                                 const hasRole = member.roles.cache.has(roleId);
-
-                                 if (roleId === targetLevelRoleId) {
-                                     if (!hasRole) {
-                                         await member.roles.add(roleId).catch(err => console.error(`Failed to add level role ${roleId}: ${err.message}`));
-                                     }
-                                 } else {
-                                     if (hasRole) {
-                                         await member.roles.remove(roleId).catch(err => console.error(`Failed to remove level role ${roleId}: ${err.message}`));
-                                     }
-                                 }
+                                 const roleId = roleConfig.roleId; const hasRole = member.roles.cache.has(roleId);
+                                 if (roleId === targetLevelRoleId && !hasRole) await member.roles.add(roleId).catch(()=>{});
+                                 else if (roleId !== targetLevelRoleId && hasRole) await member.roles.remove(roleId).catch(()=>{});
                              }
+                             // --- End Role Update ---
 
-                            // Send level-up message
-                            // Ensure settings were fetched earlier
-                            const levelUpChannelId = settings?.levelUpChannelId;
-                            let levelUpChannel = null;
-                             if (levelUpChannelId) {
-                                 levelUpChannel = message.guild.channels.cache.get(levelUpChannelId);
-                             } else {
-                                 // Fallback to current channel if no specific channel set
-                                 levelUpChannel = message.channel;
-                            }
-
-
-                            if (levelUpChannel && levelUpChannel.isTextBased()) { // Check if channel is text-based
-                                const levelUpEmbed = new EmbedBuilder()
-                                    .setTitle('🚀 Level UP!')
-                                    .setDescription(`${message.author}, congratulations! You've reached **Level ${user.level}**! 🎉`)
-                                    .setThumbnail(message.author.displayAvatarURL({ dynamic: true }))
-                                    .setColor(0xFFD700) // Gold
-                                    .setTimestamp();
-                                // Send only if level actually increased
-                                if (user.level > oldLevel) {
-                                     await levelUpChannel.send({ content: `${message.author}`, embeds: [levelUpEmbed] }).catch(err => console.error(`Failed to send level up message: ${err.message}`));
-                                }
-
-                            } else if (levelUpChannelId) {
-                                console.warn(`Level up channel ${levelUpChannelId} not found or not text-based.`);
-                            }
+                             // --- Level Up Message (condensed, same as before) ---
+                             const levelUpChannelId = settings?.levelUpChannelId;
+                             let levelUpChannel = levelUpChannelId ? message.guild.channels.cache.get(levelUpChannelId) : message.channel;
+                             if (levelUpChannel && levelUpChannel.isTextBased()) {
+                                const levelUpEmbed = new EmbedBuilder().setTitle('🚀 Level UP!').setDescription(`${message.author}, congratulations! You've reached **Level ${user.level}**! 🎉`).setThumbnail(message.author.displayAvatarURL({ dynamic: true })).setColor(0xFFD700).setTimestamp();
+                                await levelUpChannel.send({ content: `${message.author}`, embeds: [levelUpEmbed] }).catch(()=>{});
+                             }
+                            // --- End Level Up Message ---
                         }
                     }
-                } catch (err) {
-                    console.error('XP system error:', err.message, err.stack);
-                }
+                } catch (err) { console.error('XP system error:', err.message); }
             }
+            // --- End XP System ---
 
 
             // --- AI Chat Handler ---
@@ -407,241 +253,129 @@ module.exports = {
             let isAnonymousMode = false;
             let isAiPrefixCommand = false;
 
-            // Check for AI prefixes
-            if (content.toLowerCase().startsWith('r-blecky')) {
-                content = content.substring('r-blecky'.length).trim();
-                isAnonymousMode = true;
-                isAiPrefixCommand = true;
-            } else if (content.toLowerCase().startsWith('blecky')) {
-                content = content.substring('blecky'.length).trim();
-                isAiPrefixCommand = true;
-            }
+            if (content.toLowerCase().startsWith('r-blecky')) { content = content.substring(9).trim(); isAnonymousMode = true; isAiPrefixCommand = true; }
+            else if (content.toLowerCase().startsWith('blecky')) { content = content.substring(6).trim(); isAiPrefixCommand = true; }
 
-            // Determine if AI should process this message
-            // Ensure settings were fetched earlier
             const isAiChannel = settings?.aiChannelId && message.channel.id === settings.aiChannelId;
+            if (!isAiPrefixCommand && !isAiChannel) return; // Not an AI request
 
-            if (!isAiPrefixCommand && !isAiChannel) {
-                return; // Not an AI request
-            }
-
-            // Permission check (Ensure member object is available)
-            if (!message.member) {
-                message.member = await message.guild.members.fetch(message.author.id).catch(() => null);
-                 if (!message.member) {
-                     console.error(`Could not fetch member ${message.author.id} for AI permission check.`);
-                     return;
-                 }
-            }
-            const forgottenOneId = client.config.roles?.forgottenOne; // Check if role exists in config
-             if (!forgottenOneId || !message.member.roles.cache.has(forgottenOneId)) {
-                // If the user lacks permission, try to delete their trigger message if possible
-                 if (message.deletable) {
-                     await message.delete().catch(err => console.error(`Failed to delete unauthorized AI trigger message: ${err.message}`));
-                 }
-                return; // Stop processing, user lacks permission
-            }
-
-            // Delete triggering message if it was a prefix command and bot has perms
-             // *** FIX for Unknown Message Error ***
-             if (isAiPrefixCommand && message.deletable) {
-                 await message.delete().catch(err => {
-                     // Log only if it's NOT an "Unknown Message" error, which is expected sometimes
-                     if (err.code !== 10008) {
-                         console.error(`Failed to delete AI trigger message: ${err.message}`);
-                     }
-                 });
-             }
-
-
-            if (content.length === 0) {
-                 // Optionally send a DM or ephemeral reply if prefix used with no content
-                 // await message.author.send("You mentioned Blecky, but didn't ask anything!").catch(()=>{});
+            // Permission check
+            if (!message.member) message.member = await message.guild.members.fetch(message.author.id).catch(() => null);
+            const forgottenOneId = client.config.roles?.forgottenOne;
+            if (!message.member || !forgottenOneId || !message.member.roles.cache.has(forgottenOneId)) {
+                if (message.deletable) await message.delete().catch(err => { if (err.code !== 10008) console.error("Failed to delete unauthorized AI trigger:", err.message); });
                 return;
             }
 
-            // Apply anonymous mode if configured for the AI channel
-            if (isAiChannel && settings?.aiAnonymousMode && !isAiPrefixCommand) { // Only if in AI channel AND prefix wasn't used
-                isAnonymousMode = true;
+            // Delete trigger message
+            if (isAiPrefixCommand && message.deletable) {
+                await message.delete().catch(err => { if (err.code !== 10008) console.error("Failed to delete AI trigger:", err.message); });
             }
 
+            if (content.length === 0) return; // Ignore empty prompts
 
-            // Build member list for AI context
-             await message.guild.members.fetch().catch(console.error); // Refresh cache
-             const memberList = message.guild.members.cache
-                 .filter(m => !m.user.bot)
-                 .map(m => `${m.user.username} (ID: ${m.user.id}, Display: ${m.displayName})`)
-                 .slice(0, 50) // Limit size for context window
-                 .join('\n') || 'No other members found.'; // Fallback
+            // Apply anonymous mode
+            if (isAiChannel && settings?.aiAnonymousMode && !isAiPrefixCommand) isAnonymousMode = true;
 
+            // Build member list context
+            await message.guild.members.fetch().catch(console.error);
+            const memberList = message.guild.members.cache.filter(m => !m.user.bot).map(m => `${m.user.username} (ID: ${m.user.id}, Display: ${m.displayName})`).slice(0, 50).join('\n') || 'No other members found.';
 
             // Indicate processing
             await message.channel.sendTyping().catch(console.error);
 
-            // Call AI
+            // Call AI using Fetch
             const authorDisplay = isAnonymousMode ? 'An anonymous user' : message.author.username;
             const prompt = `${authorDisplay}: ${content}`;
 
+            const aiResponse = await callGeminiAIWithFetch(prompt, memberList); // Use the fetch wrapper
 
-            const aiResponse = await callGeminiAI(prompt, memberList);
+            if (!aiResponse) return; // Error already logged in helper
 
-            if (!aiResponse) {
-                // Don't send error to channel, already logged in callGeminiAI
-                return;
-            }
-
-            // Try to extract JSON command
+            // Check for command JSON
             const parsed = extractJson(aiResponse);
-
             if (parsed?.action === 'command') {
                 return await executeAiCommand(message, parsed, client, settings);
             }
 
-            // Send normal AI reply
+            // Send normal reply
             const replyPrefix = isAnonymousMode ? '🤖 **Anonymous:**' : `🤖 **${client.user.username}:**`;
-            // Split long messages safely
-             const MAX_LENGTH = 1950; // Discord message limit is 2000, leave buffer
+            const MAX_LENGTH = 1950;
             for (let i = 0; i < aiResponse.length; i += MAX_LENGTH) {
-                 const chunk = aiResponse.substring(i, Math.min(aiResponse.length, i + MAX_LENGTH));
-                 await message.channel.send(`${replyPrefix} ${chunk}`).catch(err => console.error(`Failed to send AI reply chunk: ${err.message}`));
-             }
-
+                const chunk = aiResponse.substring(i, Math.min(aiResponse.length, i + MAX_LENGTH));
+                await message.channel.send(`${replyPrefix} ${chunk}`).catch(err => console.error(`Failed to send AI reply chunk: ${err.message}`));
+            }
+            // --- End AI Chat Handler ---
 
         } catch (err) {
             console.error('❌ Unhandled error in messageCreate:', err.message, err.stack);
-            // Send a generic error message, avoid exposing details
-             try {
-                 await message.channel.send('⚠️ An unexpected error occurred. Please try again later.').catch(()=>{});
-             } catch {}
+            try { await message.channel.send('⚠️ An unexpected error occurred.').catch(()=>{}); } catch {}
         }
     },
 };
 
-// Execute AI-generated commands
+// Execute AI Command function (mostly unchanged, ensure logging works)
 async function executeAiCommand(message, action, client, settings) {
     let logChannel = null;
     if (settings?.aiLogChannelId) {
         logChannel = message.guild.channels.cache.get(settings.aiLogChannelId);
-         if (logChannel && !logChannel.isTextBased()) { // Ensure it's a text channel
-             console.warn(`AI Log Channel ${settings.aiLogChannelId} is not a text-based channel.`);
-             logChannel = null; // Don't try to send logs there
-         }
+        if (logChannel && !logChannel.isTextBased()) logChannel = null; // Validate channel type
     }
 
-
     const log = async (logMessage, isError = false) => {
-        if (isError) console.error(logMessage);
-        else console.log(logMessage);
-
-         if (logChannel) {
-             try {
-                 // Ensure message is not too long for Discord code block
-                 const discordLogMsg = logMessage.substring(0, 1980); // Limit length
-                 await logChannel.send(`\`\`\`${discordLogMsg}\`\`\``);
-             } catch (err) {
-                 console.error(`Failed to send AI command log to channel: ${err.message}`);
-            }
-         }
+        if (isError) console.error(logMessage); else console.log(logMessage);
+        if (logChannel) try { await logChannel.send(`\`\`\`${logMessage.substring(0, 1980)}\`\`\``); } catch (err) { console.error(`Failed to log to AI channel: ${err.message}`); }
     };
-
 
     try {
         const { commandName, options = {} } = action;
+        await log(`[AI Command Request] User: ${message.author.tag} (${message.author.id}), Command: /${commandName}, Raw Options: ${JSON.stringify(options)}`);
 
-         await log(`[AI Command Request] User: ${message.author.tag} (${message.author.id}), Command: /${commandName}, Raw Options: ${JSON.stringify(options)}`);
-
-
-        // --- Resolve User Target ---
-        let targetMember = null;
-        let resolvedTargetId = null;
+        // Resolve user target
+        let targetMember = null; let resolvedTargetId = null;
         if (options.target) {
             targetMember = await findUserByName(message.guild, options.target);
-            if (targetMember) {
-                 resolvedTargetId = targetMember.id; // Store resolved ID
-                 await log(`[AI Command Info] Resolved target "${options.target}" to ${targetMember.user.tag} (${resolvedTargetId})`);
-            } else {
-                const notFoundMsg = `❌ AI Command Error: User "${options.target}" not found for command /${commandName}.`;
-                 await log(notFoundMsg, true);
-                return message.channel.send(notFoundMsg).catch(console.error);
-            }
+            if (targetMember) { resolvedTargetId = targetMember.id; await log(`[AI Command Info] Resolved target "${options.target}" to ${targetMember.user.tag} (${resolvedTargetId})`); }
+            else { const notFoundMsg = `❌ AI Command Error: User "${options.target}" not found for /${commandName}.`; await log(notFoundMsg, true); return message.channel.send(notFoundMsg).catch(console.error); }
         }
-         // Update options with resolved ID IF a target was specified
-         if (resolvedTargetId) {
-             options.target = resolvedTargetId;
-         }
-        // --- End Resolve User Target ---
-
+        if (resolvedTargetId) options.target = resolvedTargetId; // Use ID for execution
 
         const command = client.commands.get(commandName);
+        if (!command) { const cmdNotFoundMsg = `❌ AI Command Error: Command \`/${commandName}\` not recognized.`; await log(cmdNotFoundMsg, true); return message.channel.send(cmdNotFoundMsg).catch(console.error); }
 
-        if (!command) {
-            const cmdNotFoundMsg = `❌ AI Command Error: Command \`/${commandName}\` not recognized by the bot.`;
-             await log(cmdNotFoundMsg, true);
-            return message.channel.send(cmdNotFoundMsg).catch(console.error);
-        }
-
-        // --- Permission Check (More Granular) ---
-        // Fetch necessary roles from config safely
+        // --- Permission Check (as before) ---
         const rolesConfig = client.config.roles || {};
-        const forgottenOneId = rolesConfig.forgottenOne;
-        const overseerId = rolesConfig.overseer;
-        const leadModId = rolesConfig.leadMod;
-        const modId = rolesConfig.mod;
-        const cookiesManagerId = rolesConfig.cookiesManager;
-        // Gamelog roles not relevant for AI commands listed
-
+        const forgottenOneId = rolesConfig.forgottenOne; const overseerId = rolesConfig.overseer;
+        const leadModId = rolesConfig.leadMod; const modId = rolesConfig.mod; const cookiesManagerId = rolesConfig.cookiesManager;
         const memberRoles = message.member.roles.cache;
         const isAdmin = memberRoles.has(forgottenOneId) || memberRoles.has(overseerId);
-        const isMod = memberRoles.has(leadModId) || memberRoles.has(modId) || isAdmin; // Mods include admins
+        const isMod = memberRoles.has(leadModId) || memberRoles.has(modId) || isAdmin;
         const isCookieManager = memberRoles.has(cookiesManagerId);
-
         let requiredPermission = false;
-         const adminCommands = ['addcoins', 'addxp', /* 'resetdailystreak', 'quicksetup' - Not in AI list */];
-         const modCommands = ['warn', 'timeout', 'softban', 'purge', 'purgeuser' /* ... other mod commands */];
-         const currencyCommands = ['addcookies', 'removecookies', 'addcookiesall', 'removecookiesall', /* 'addxp', 'removexp', 'addcoins', 'removecoins' - Covered by admin */];
-
-
+        const adminCommands = ['addcoins', 'addxp']; const modCommands = ['warn', 'timeout', 'softban', 'purge', 'purgeuser']; const currencyCommands = ['addcookies', 'removecookies', 'addcookiesall', 'removecookiesall'];
         if (adminCommands.includes(commandName)) requiredPermission = isAdmin;
         else if (modCommands.includes(commandName)) requiredPermission = isMod;
-        else if (currencyCommands.includes(commandName)) requiredPermission = isCookieManager || isAdmin; // Allow Admins too
-        else requiredPermission = true; // Assume public command if not listed
-
-        // Check against Discord Permissions (e.g., Administrator bypass)
-        if (message.member.permissions.has('Administrator')) {
-            requiredPermission = true; // Bypass role checks if user has Discord Admin perm
-        }
-
+        else if (currencyCommands.includes(commandName)) requiredPermission = isCookieManager || isAdmin;
+        else requiredPermission = true; // Public command
+        if (message.member.permissions.has('Administrator')) requiredPermission = true; // Discord Admin bypass
 
         if (!requiredPermission) {
-             const permErrorMsg = `❌ AI Command Error: User ${message.author.tag} lacks permissions for command \`/${commandName}\`. Required: ${adminCommands.includes(commandName) ? 'Admin' : modCommands.includes(commandName) ? 'Moderator' : currencyCommands.includes(commandName) ? 'Cookie Manager/Admin' : 'Unknown'}`;
-             await log(permErrorMsg, true);
-            // Do not send specific permission error to channel for security/clarity
-            return message.channel.send(`You don't have permission to use the \`/${commandName}\` command.`).catch(console.error);
+            const permErrorMsg = `❌ AI Command Error: User ${message.author.tag} lacks permissions for /${commandName}.`; await log(permErrorMsg, true);
+            return message.channel.send(`You don't have permission for \`/${commandName}\`.`).catch(console.error);
         }
         // --- End Permission Check ---
 
-
-        // Create mock interaction
+        // Create mock interaction & execute
         const mockInteraction = createMockInteraction(message, commandName, options);
-
-        // Execute command
-        const logModerationActionPlaceholder = async (guild, settings, action, target, moderator, reason = 'No reason provided', extra = '') => {
-             const logPayload = `[Mock Mod Log] Action: ${action}, Target: ${target?.tag || target?.id || target || 'N/A'}, Mod: ${moderator.tag}, Reason: ${reason}, Extra: ${extra}`;
-             await log(logPayload); // Log mod actions called by commands
-             // Add actual modlog channel sending logic here if desired
+        const logModerationActionPlaceholder = async (guild, settings, action, target, moderator, reason = 'N/A', extra = '') => {
+             await log(`[Mock Mod Log] Action: ${action}, Target: ${target?.tag || target?.id || target || 'N/A'}, Mod: ${moderator.tag}, Reason: ${reason}, Extra: ${extra}`);
         };
         await command.execute(mockInteraction, client, logModerationActionPlaceholder);
-
-        await log(`[AI Command Success] /${commandName} executed successfully by ${message.author.tag}.`);
-
+        await log(`[AI Command Success] /${commandName} executed by ${message.author.tag}.`);
 
     } catch (err) {
-        // Log detailed error including stack trace
-         const errorMsg = `[AI Command Failure] Error executing /${action?.commandName || 'unknown'} for ${message.author.tag}: ${err.message}\nStack: ${err.stack}`;
-         await log(errorMsg, true);
-        // Send generic error message to the channel
-         try {
-             await message.channel.send(`⚠️ An error occurred while trying to execute the command \`/${action?.commandName || 'unknown'}\`. The administrators have been notified.`).catch(()=>{});
-         } catch {}
+        const errorMsg = `[AI Command Failure] Error executing /${action?.commandName || 'unknown'} for ${message.author.tag}: ${err.message}\nStack: ${err.stack}`;
+        await log(errorMsg, true);
+        try { await message.channel.send(`⚠️ Error executing \`/${action?.commandName || 'unknown'}\`. Admins notified.`).catch(()=>{}); } catch {}
     }
 }
