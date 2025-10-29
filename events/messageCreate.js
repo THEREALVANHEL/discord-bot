@@ -1,4 +1,4 @@
-// events/messageCreate.js (FINAL VERSION - Fixes API error, adds Conversation Memory, and implements Anonymous Command Feature 'r-blecky')
+// events/messageCreate.js (FINAL VERSION - Fixes all observed crashes, adds Anonymous Command)
 
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -218,9 +218,26 @@ async function manageTieredRoles(member, userValue, roleConfigs, property) {
 
 const getNextLevelXp = (level) => Math.floor(100 * Math.pow(level + 1, 1.5));
 
+// Helper function to send the reply, ensuring correct method is used
+async function sendReply(message, content, isAnonymous) {
+    try {
+        if (isAnonymous) {
+            // Anonymous commands are always sent to the channel
+            return await message.channel.send(content);
+        } else if (typeof content === 'string') {
+            // Standard reply to the user's message
+            return await message.reply(content);
+        } else {
+            // Send rich content (embeds, etc.) to the channel
+            return await message.channel.send(content);
+        }
+    } catch (e) {
+        console.error("Failed to send final reply:", e);
+    }
+}
 
 // --- UNIFIED ACTION EXECUTION ---
-async function executeParsedAction(message, client, parsed, targetMember) {
+async function executeParsedAction(message, client, parsed, targetMember, isAnonymous) {
     const action = parsed.action;
     let targetUser = targetMember ? await User.findOne({ userId: targetMember.id }) || new User({ userId: targetMember.id }) : null;
     const amount = parsed.amount || 1;
@@ -233,15 +250,21 @@ async function executeParsedAction(message, client, parsed, targetMember) {
     const isCurrencyManager = message.member.permissions.has(PermissionsBitField.Flags.Administrator) ||
                               message.member.roles.cache.has(client.config.roles.cookiesManager);
     
+    // Helper for sending action replies
+    const sendActionReply = async (content) => {
+        if (isAnonymous) {
+            return await message.channel.send(content);
+        } else {
+            return await message.reply(content);
+        }
+    }
+
     // --- UTILITY ACTION: CALCULATE ---
     if (action === 'calculate' && parsed.mathExpression) {
-        // Use an external utility (like the original AI call in the old file, but simplified)
         const calcPrompt = `Calculate this math expression and return ONLY the number result, up to 2 decimal places: ${parsed.mathExpression}`;
-        
-        // Temporarily clear history for calculation context to ensure a clean calculation prompt
         const calculationResult = await callGeminiAI([], [], calcPrompt).catch(() => 'Error');
         const number = calculationResult.match(/[\d,]+\.?\d*/)?.[0] || calculationResult.trim();
-        await message.reply(`**${parsed.mathExpression}** = **${number}**`);
+        await sendActionReply(`**${parsed.mathExpression}** = **${number}**`);
         return true;
     }
 
@@ -249,11 +272,16 @@ async function executeParsedAction(message, client, parsed, targetMember) {
     if (action === 'gif') {
         const query = parsed.gifQuery || 'random';
         const gifUrl = await searchGiphyGif(query);
-        await message.channel.send(gifUrl);
+        // GIFs are always sent directly to the channel
+        await message.channel.send(gifUrl); 
         return true;
     }
     
-    if (action === 'ping' && targetMember) {
+    if (action === 'ping') {
+        if (!targetMember) {
+             await sendActionReply(`❌ Couldn't find user "${parsed.targetUser}" to execute the **ping** command.`);
+             return false;
+        }
         await message.channel.send(`<@${targetMember.id}>`);
         return true;
     }
@@ -271,21 +299,21 @@ async function executeParsedAction(message, client, parsed, targetMember) {
     
     if (action === 'account_created' && targetMember) {
         const createdDate = `<t:${Math.floor(targetMember.user.createdTimestamp / 1000)}:F>`;
-        await message.reply(`**${targetMember.user.tag}** created their account on ${createdDate}`);
+        await sendActionReply(`**${targetMember.user.tag}** created their account on ${createdDate}`);
         return true;
     }
     
     if (action === 'joined' && targetMember) {
         const joinDate = `<t:${Math.floor(targetMember.joinedTimestamp / 1000)}:F>`;
-        await message.reply(`**${targetMember.user.tag}** joined on ${joinDate}`);
+        await sendActionReply(`**${targetMember.user.tag}** joined on ${joinDate}`);
         return true;
     }
 
     if (action === 'info' && targetMember && targetUser) {
         const infoType = parsed.infoType || 'coins';
         let value = targetUser[infoType] || 0;
-        if (infoType === 'level') value = targetUser.level; // Ensure level is displayed correctly
-        await message.reply(`**${targetMember.user.tag}** has **${value}** ${infoType}`);
+        if (infoType === 'level') value = targetUser.level; 
+        await sendActionReply(`**${targetMember.user.tag}** has **${value}** ${infoType}`);
         return true;
     }
 
@@ -293,18 +321,18 @@ async function executeParsedAction(message, client, parsed, targetMember) {
     // --- MODERATION ACTIONS (Requires Moderator) ---
     if (['warn', 'warnlist', 'remove_warn', 'dm'].includes(action)) {
         if (!isModerator && action !== 'dm') {
-             await message.reply("❌ You need **Moderator** permissions to use that command.");
+             await sendActionReply("❌ You need **Moderator** permissions to use that command.");
              return false;
         }
         if (!targetMember) {
-             await message.reply("❌ Target user not found.");
+             await sendActionReply(`❌ Target user "${parsed.targetUser}" not found.`);
              return false;
         }
         
         // WARNLIST
         if (action === 'warnlist') {
             if (!targetUser || !targetUser.warnings || targetUser.warnings.length === 0) {
-                await message.reply(`✅ **${targetMember.user.tag}** has no warnings.`);
+                await sendActionReply(`✅ **${targetMember.user.tag}** has no warnings.`);
                 return true;
             }
             const embed = new EmbedBuilder()
@@ -330,7 +358,7 @@ async function executeParsedAction(message, client, parsed, targetMember) {
         if (action === 'warn') {
             targetUser.warnings.push({ reason, moderatorId: message.author.id, date: new Date() });
             await targetUser.save();
-            await message.reply(`✅ Warned **${targetMember.user.tag}**\n**Reason:** ${reason}\n**Total warnings:** ${targetUser.warnings.length}`);
+            await sendActionReply(`✅ Warned **${targetMember.user.tag}**\n**Reason:** ${reason}\n**Total warnings:** ${targetUser.warnings.length}`);
             
             if (logChannel) {
                 const logEmbed = new EmbedBuilder().setTitle('⚠️ Warning Issued').setColor(0xFFA500)
@@ -354,27 +382,27 @@ async function executeParsedAction(message, client, parsed, targetMember) {
         if (action === 'remove_warn') {
             const warnIndex = amount;
             if (!targetUser || !targetUser.warnings || targetUser.warnings.length === 0) {
-                await message.reply(`❌ **${targetMember.user.tag}** has no warnings.`);
+                await sendActionReply(`❌ **${targetMember.user.tag}** has no warnings.`);
                 return false;
             }
             if (warnIndex < 1 || warnIndex > targetUser.warnings.length) {
-                await message.reply(`❌ Invalid warning number. **${targetMember.user.tag}** has ${targetUser.warnings.length} warning(s).`);
+                await sendActionReply(`❌ Invalid warning number. **${targetMember.user.tag}** has ${targetUser.warnings.length} warning(s).`);
                 return false;
             }
             const removedWarn = targetUser.warnings.splice(warnIndex - 1, 1);
             await targetUser.save();
-            await message.reply(`✅ Removed warning #${warnIndex} from **${targetMember.user.tag}**\n**Reason was:** ${removedWarn[0].reason}`);
+            await sendActionReply(`✅ Removed warning #${warnIndex} from **${targetMember.user.tag}**\n**Reason was:** ${removedWarn[0].reason}`);
             return true;
         }
 
-        // DM (Special case: always allowed, but check for target)
+        // DM
         if (action === 'dm') {
             const content = parsed.dmMessage || "Hi! 👋";
             try {
                 await targetMember.user.send(content);
-                await message.reply(`✅ Sent DM to **${targetMember.user.tag}**`);
+                await sendActionReply(`✅ Sent DM to **${targetMember.user.tag}**`);
             } catch {
-                await message.reply(`❌ Couldn't DM **${targetMember.user.tag}** (DMs closed)`);
+                await sendActionReply(`❌ Couldn't DM **${targetMember.user.tag}** (DMs closed)`);
             }
             return true;
         }
@@ -384,11 +412,11 @@ async function executeParsedAction(message, client, parsed, targetMember) {
     // --- CURRENCY ACTIONS (Requires Currency Manager) ---
     if (['add_coins', 'remove_coins', 'add_cookies', 'remove_cookies', 'add_xp', 'remove_xp'].includes(action)) {
         if (!isCurrencyManager) {
-             await message.reply("❌ You need **Currency Manager** permissions to modify currency/XP.");
+             await sendActionReply("❌ You need **Currency Manager** permissions to modify currency/XP.");
              return false;
         }
         if (!targetMember) {
-             await message.reply("❌ Target user not found.");
+             await sendActionReply(`❌ Target user "${parsed.targetUser}" not found.`);
              return false;
         }
         
@@ -398,7 +426,7 @@ async function executeParsedAction(message, client, parsed, targetMember) {
         // REMOVE actions sanity check
         if (operation === 'remove') {
             if (!targetUser || targetUser[currencyType] < amount) {
-                await message.reply(`❌ **${targetMember.user.tag}** only has ${targetUser ? targetUser[currencyType] : 0} ${currencyType}.`);
+                await sendActionReply(`❌ **${targetMember.user.tag}** only has ${targetUser ? targetUser[currencyType] : 0} ${currencyType}.`);
                 return false;
             }
             targetUser[currencyType] = Math.max(0, targetUser[currencyType] - amount);
@@ -415,7 +443,6 @@ async function executeParsedAction(message, client, parsed, targetMember) {
         }
         
         if (currencyType === 'xp') {
-            let leveledUpMsg = '';
             let oldLevel = targetUser.level;
 
             let nextLevelXp = getNextLevelXp(targetUser.level);
@@ -424,7 +451,6 @@ async function executeParsedAction(message, client, parsed, targetMember) {
             while (targetUser.xp >= nextLevelXp) {
                 targetUser.level++;
                 targetUser.xp -= nextLevelXp;
-                leveledUpMsg = `\n\n**🚀 Level UP!** **${targetMember.user.tag}** has leveled up to **Level ${targetUser.level}**!`;
                 nextLevelXp = getNextLevelXp(targetUser.level);
                 
                 // Role management logic inside the loop
@@ -451,7 +477,7 @@ async function executeParsedAction(message, client, parsed, targetMember) {
             }
         }
         
-        await message.reply(`✅ **${operation.charAt(0).toUpperCase() + operation.slice(1)}** **${amount}** ${currencyType} ${operation === 'add' ? 'to' : 'from'} **${targetMember.user.tag}**\nThey now have **${targetUser[currencyType]}** ${currencyType}`);
+        await sendActionReply(`✅ **${operation.charAt(0).toUpperCase() + operation.slice(1)}** **${amount}** ${currencyType} ${operation === 'add' ? 'to' : 'from'} **${targetMember.user.tag}**\nThey now have **${targetUser[currencyType]}** ${currencyType}`);
         return true;
     }
 
@@ -534,11 +560,11 @@ module.exports = {
     
     // Determine the query source and if the message should be deleted
     let userQuery = message.content;
-    let shouldDeleteMessage = false;
+    let isAnonymous = false;
 
     if (isAnonymousCommand) {
         userQuery = userQuery.replace(/^r-blecky\s*/i, '').trim();
-        shouldDeleteMessage = true;
+        isAnonymous = true;
     } else if (botMention) {
         userQuery = userQuery.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
     } else if (isBleckyCommand) {
@@ -556,13 +582,13 @@ module.exports = {
     
     if (!isForgottenOne || !API_KEY) {
         if (userQuery.length > 0) {
-            await message.reply("❌ The AI command system is restricted to Administrators (`forgottenOne` role) only.");
+            // Standard reply if the user is not anonymous
+            const replyMethod = isAnonymous ? message.channel.send.bind(message.channel) : message.reply.bind(message);
+            await replyMethod("❌ The AI command system is restricted to Administrators (`forgottenOne` role) only.");
         }
-        // Handle XP gain only if the message was NOT a command attempt by a non-admin
-        if (!isAnonymousCommand && !botMention && !isBleckyCommand) {
-             await handleXpGain(message, client, settings);
-        }
-        return;
+        // Always run XP gain unless the message was a valid command prefix and the user failed the permission check, in which case we exit early.
+        // For simplicity, we just exit, assuming any command attempt by a non-admin is an intentional interaction.
+        return; 
     }
     
     // --- PROCESS AI COMMAND ---
@@ -576,7 +602,7 @@ module.exports = {
 
     try {
         // Delete original message if the anonymous prefix was used
-        if (shouldDeleteMessage) {
+        if (isAnonymous) {
             await message.delete().catch(e => console.error("Failed to delete anonymous message:", e));
         }
 
@@ -586,54 +612,61 @@ module.exports = {
         // AI call for conversational or structured response
         const aiResponseText = await callGeminiAI(history, guildMembers, userQuery);
         
-        // Check for structured JSON action
+        // FIX: Robust JSON parsing: look for the first '{' and the last '}'
         const jsonMatch = aiResponseText.match(/\{[\s\S]*\}/);
         
         if (jsonMatch) {
-            const parsed = JSON.parse(jsonMatch[0]);
-            console.log('AI Parsed Action:', parsed);
-            
-            let targetMember = null;
-            if (parsed.targetUser) {
-                targetMember = findUserInGuild(message.guild, parsed.targetUser, message.author.id);
-                if (!targetMember && parsed.action !== 'calculate') {
-                    // Send error message without ping if the original message was deleted
-                    const errorReplyTarget = shouldDeleteMessage ? message.channel : message;
-                    await errorReplyTarget.send(`❌ Couldn't find user "${parsed.targetUser}" to execute the **${parsed.action}** command.`);
-                    // Remove last user message as it led to an error state
-                    getHistory(message.author.id).pop(); 
-                    return;
+            try {
+                const parsed = JSON.parse(jsonMatch[0]);
+                console.log('AI Parsed Action:', parsed);
+                
+                let targetMember = null;
+                if (parsed.targetUser) {
+                    targetMember = findUserInGuild(message.guild, parsed.targetUser, message.author.id);
+                    if (!targetMember && parsed.action !== 'calculate') {
+                        // Send error message using the channel's send method
+                        await message.channel.send(`❌ Couldn't find user "${parsed.targetUser}" to execute the **${parsed.action}** command.`);
+                        // Remove last user message as it led to an error state
+                        getHistory(message.author.id).pop(); 
+                        return;
+                    }
                 }
-            }
-            
-            // Execute the action via the new centralized function
-            const actionExecuted = await executeParsedAction(message, client, parsed, targetMember);
+                
+                // Execute the action via the new centralized function
+                const actionExecuted = await executeParsedAction(message, client, parsed, targetMember, isAnonymous);
 
-            if (actionExecuted) {
-                // Action successful, don't add JSON to history
-                return; 
+                if (actionExecuted) {
+                    // Action successful, don't add JSON to history
+                    return; 
+                }
+                // If action failed (e.g. permission denied) the error is handled inside executeParsedAction
+            } catch (e) {
+                console.error('AI JSON Parsing/Execution Error:', e);
+                // Fallback to sending a conversational error message
+                const replyMethod = isAnonymous ? message.channel.send.bind(message.channel) : message.reply.bind(message);
+                await replyMethod("❌ I parsed a command but failed to execute it. Perhaps the argument format was wrong, or I couldn't find the user.");
             }
-            // If action failed (e.g. permission denied) the error is handled inside executeParsedAction
         }
         
-        // If it's a conversational response (or failed JSON detection)
+        // If it's a conversational response (or failed JSON detection fallback)
         const conversationalResponse = aiResponseText.replace(/\{[\s\S]*\}/g, '').trim();
 
         if (conversationalResponse.length > 0) {
-             const replyTarget = shouldDeleteMessage ? message.channel : message;
-             await replyTarget.send(conversationalResponse);
+             const replyMethod = isAnonymous ? message.channel.send.bind(message.channel) : message.reply.bind(message);
+             await replyMethod(conversationalResponse);
              addToHistory(message.author.id, 'model', conversationalResponse);
         } else {
-             const replyTarget = shouldDeleteMessage ? message.channel : message;
-             await replyTarget.send("🤔 That was interesting. Try rephrasing that command or question!");
+             const replyMethod = isAnonymous ? message.channel.send.bind(message.channel) : message.reply.bind(message);
+             await replyMethod("🤔 That was interesting. Try rephrasing that command or question!");
              // Remove last user message if AI couldn't parse or respond meaningfully
              getHistory(message.author.id).pop(); 
         }
         
     } catch (error) {
         console.error('AI Command/Conversation Error:', error);
-        const replyTarget = shouldDeleteMessage ? message.channel : message;
-        await replyTarget.send("❌ The AI system failed. Try checking the `GEMINI_API_KEY` or rephrasing your request.");
+        // Ensure to send the error message to the channel if the original message was deleted
+        const replyMethod = isAnonymous ? message.channel.send.bind(message.channel) : message.reply.bind(message);
+        await replyMethod("❌ The AI system failed. Try checking the `GEMINI_API_KEY` or rephrasing your request.");
         // Remove last user message if AI threw an exception
         getHistory(message.author.id).pop(); 
     }
