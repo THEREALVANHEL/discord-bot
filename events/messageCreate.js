@@ -111,11 +111,11 @@ async function manageTieredRoles(member, userValue, roleConfigs, property) {
     }
 }
 
-// Enhanced user resolution
+// IMPROVED user resolution - prioritizes exact matches
 function resolveUser(guild, input, authorId) {
     if (!input || input.length < 2) return null;
     
-    // Check for mention or ID
+    // Check for mention or ID first
     const match = input.match(/<@!?(\d+)>|(\d{17,19})/);
     if (match) {
         const id = match[1] || match[2];
@@ -125,6 +125,29 @@ function resolveUser(guild, input, authorId) {
     }
 
     const searchKey = input.toLowerCase().trim();
+    
+    // Priority 1: Exact username match
+    let exactMatch = guild.members.cache.find(m => 
+        m.id !== authorId && 
+        (m.user.username.toLowerCase() === searchKey || m.displayName.toLowerCase() === searchKey)
+    );
+    if (exactMatch) return exactMatch;
+    
+    // Priority 2: Username starts with search
+    let startsWithMatch = guild.members.cache.find(m =>
+        m.id !== authorId &&
+        (m.user.username.toLowerCase().startsWith(searchKey) || m.displayName.toLowerCase().startsWith(searchKey))
+    );
+    if (startsWithMatch) return startsWithMatch;
+    
+    // Priority 3: Username contains search
+    let containsMatch = guild.members.cache.find(m =>
+        m.id !== authorId &&
+        (m.user.username.toLowerCase().includes(searchKey) || m.displayName.toLowerCase().includes(searchKey))
+    );
+    if (containsMatch) return containsMatch;
+    
+    // Priority 4: Fuzzy match
     let bestMatch = null;
     let bestScore = 999;
 
@@ -134,28 +157,10 @@ function resolveUser(guild, input, authorId) {
         const username = member.user.username.toLowerCase();
         const displayName = member.displayName.toLowerCase();
         
-        // Exact match
-        if (username === searchKey || displayName === searchKey) {
-            bestMatch = member;
-            bestScore = 0;
-            return;
-        }
-        
-        // Contains search term
-        if (username.includes(searchKey) || displayName.includes(searchKey)) {
-            const score = Math.abs(username.length - searchKey.length);
-            if (score < bestScore) {
-                bestScore = score;
-                bestMatch = member;
-            }
-            return;
-        }
-        
-        // Fuzzy match
         const distUser = levenshteinDistance(searchKey, username);
         const distDisplay = levenshteinDistance(searchKey, displayName);
         const minDist = Math.min(distUser, distDisplay);
-        const maxAllowed = Math.max(2, Math.floor(searchKey.length / 3));
+        const maxAllowed = Math.max(1, Math.floor(searchKey.length / 4));
         
         if (minDist < bestScore && minDist <= maxAllowed) {
             bestScore = minDist;
@@ -166,17 +171,30 @@ function resolveUser(guild, input, authorId) {
     return bestMatch;
 }
 
-// Parse command locally
+// COMPREHENSIVE command parser
 function parseCommand(text, guild, authorId) {
     const lower = text.toLowerCase().trim();
     const words = lower.split(/\s+/);
     
-    // Find target user in text
+    // Skip words for target detection
+    const skipWords = ['blecky', 'warn', 'add', 'remove', 'send', 'dm', 'how', 'many', 'does', 'have', 'show', 'when', 'did', 'to', 'for', 'from', 'me', 'a', 'an', 'the', 'coins', 'coin', 'cookies', 'cookie', 'xp', 'level', 'saying', 'message', 'gif', 'give', 'reason', 'is', 'with', 'picture', 'avatar', 'profile', 'image', 'ping', 'warnlist', 'list', 'of', 'warning', 'one'];
+    
+    // Find target user - improved logic
     const findTarget = () => {
-        const skipWords = ['warn', 'add', 'send', 'dm', 'how', 'many', 'does', 'have', 'show', 'when', 'did', 'to', 'for', 'me', 'a', 'the', 'coins', 'coin', 'cookies', 'cookie', 'xp', 'level', 'saying', 'message', 'gif', 'give', 'remove', 'reason', 'is', 'with', 'picture', 'avatar', 'profile', 'image', 'ping', 'warnlist', 'list', 'of'];
+        // First try to find mentions
+        const mentionMatch = text.match(/<@!?(\d+)>/);
+        if (mentionMatch) {
+            const id = mentionMatch[1];
+            const member = guild.members.cache.get(id);
+            if (id === authorId) return { self: true };
+            return member;
+        }
         
-        for (const word of words) {
+        // Then try word by word
+        for (let i = 0; i < words.length; i++) {
+            const word = words[i];
             if (skipWords.includes(word) || word.length < 2 || word.match(/^\d+$/)) continue;
+            
             const resolved = resolveUser(guild, word, authorId);
             if (resolved?.self) return { self: true };
             if (resolved) return resolved;
@@ -184,20 +202,58 @@ function parseCommand(text, guild, authorId) {
         return null;
     };
     
-    // Warnlist command
-    if (lower.match(/(?:show|get|view).*warnlist|warnlist.*(?:of|for)/i)) {
+    // === REMOVE WARNING ===
+    if (lower.match(/remove.*warning|remove.*warn|delete.*warn/i)) {
+        const target = findTarget();
+        if (target?.self) return { type: 'ERROR', message: "Can't remove your own warnings" };
+        
+        // Extract warning number
+        const warnNumMatch = lower.match(/warning\s*(\d+)|warn\s*(\d+)|#?\s*(\d+)/i);
+        const warnIndex = warnNumMatch ? parseInt(warnNumMatch[1] || warnNumMatch[2] || warnNumMatch[3]) : 1;
+        
+        if (target) {
+            return {
+                type: 'REMOVE_WARNING',
+                targetId: target.id,
+                warnIndex: warnIndex
+            };
+        }
+    }
+    
+    // === REMOVE CURRENCY ===
+    if (lower.match(/remove|take/i) && lower.match(/coin|cookie/i)) {
+        const target = findTarget();
+        if (target?.self) return { type: 'ERROR', message: "Can't remove from yourself" };
+        
+        const amountMatch = lower.match(/(\d+)/);
+        const amount = amountMatch ? parseInt(amountMatch[1]) : 1;
+        
+        let command = 'removecoins';
+        if (lower.includes('cookie')) command = 'removecookies';
+        
+        if (target) {
+            return {
+                type: 'REMOVE_CURRENCY',
+                command: command,
+                targetId: target.id,
+                amount: amount
+            };
+        }
+    }
+    
+    // === WARNLIST ===
+    if (lower.match(/(?:show|get|view|check).*(?:warnlist|warnings)|warnlist.*(?:of|for)/i)) {
         const target = findTarget();
         if (target?.self) return { type: 'ERROR', message: "Check your own warnlist" };
         if (target) {
             return {
                 type: 'WARNLIST',
-                targetId: target.id,
-                targetTag: target.user.tag
+                targetId: target.id
             };
         }
     }
     
-    // Ping command
+    // === PING ===
     if (lower.match(/^ping\s+/i) && !lower.includes('saying') && !lower.includes('dm')) {
         const target = findTarget();
         if (target?.self) return { type: 'ERROR', message: "Can't ping yourself" };
@@ -209,43 +265,46 @@ function parseCommand(text, guild, authorId) {
         }
     }
     
-    // Profile picture / avatar request
+    // === PROFILE / AVATAR ===
     if (lower.match(/(?:send|show|get).*(?:profile|avatar|picture|pfp)/i)) {
         const target = findTarget();
-        if (target?.self) return { type: 'ERROR', message: "Can't get your own avatar via command" };
+        if (target?.self) return { type: 'ERROR', message: "Can't get your own avatar" };
         if (target) {
             return {
                 type: 'AVATAR',
-                targetId: target.id,
-                targetTag: target.user.tag
+                targetId: target.id
             };
         }
     }
     
-    // Account creation date
-    if (lower.match(/when.*(?:make|create|made|join).*(?:account|discord)/i)) {
+    // === ACCOUNT CREATED ===
+    if (lower.match(/when.*(?:make|create|made).*(?:account|discord)/i)) {
         const target = findTarget();
         if (target?.self) return { type: 'ERROR', message: "Check your own profile" };
         if (target) {
             return {
                 type: 'ACCOUNT_CREATED',
-                targetId: target.id,
-                targetTag: target.user.tag
+                targetId: target.id
             };
         }
     }
     
-    // GIF request - extract the subject properly
-    if (lower.match(/send.*gif|gif/i)) {
-        // Extract what type of gif (e.g., "alien" from "send a alien gif")
-        let gifQuery = 'random';
+    // === GIF - Extract subject properly ===
+    if (lower.match(/send.*gif|.*gif/i)) {
+        // Remove all noise words and get the subject
+        let gifQuery = text
+            .replace(/blecky/gi, '')
+            .replace(/send/gi, '')
+            .replace(/me/gi, '')
+            .replace(/a/gi, '')
+            .replace(/an/gi, '')
+            .replace(/the/gi, '')
+            .replace(/gif/gi, '')
+            .trim();
         
-        // Remove common words
-        const cleanedText = text.replace(/blecky|send|me|a|an|the|gif|image/gi, '').trim();
-        
-        // If there's something left, use it as the query
-        if (cleanedText && cleanedText.length > 0) {
-            gifQuery = cleanedText.split(/\s+/)[0]; // Take first meaningful word
+        // If nothing left, use random
+        if (!gifQuery || gifQuery.length === 0) {
+            gifQuery = 'random';
         }
         
         return {
@@ -254,26 +313,25 @@ function parseCommand(text, guild, authorId) {
         };
     }
     
-    // DM
+    // === DM ===
     if (lower.includes('dm')) {
         const target = findTarget();
         if (target?.self) return { type: 'ERROR', message: "Can't DM yourself" };
         
-        const contentMatch = text.match(/(?:saying|say|message|tell|with.*saying|:)\s+(.+)/i);
+        const contentMatch = text.match(/(?:saying|say|message|tell|:)\s+(.+)/i);
         const content = contentMatch ? contentMatch[1].trim() : "Hi!";
         
         if (target) {
             return {
                 type: 'DM',
                 targetId: target.id,
-                targetTag: target.user.tag,
                 content: content
             };
         }
     }
     
-    // Warn
-    if (lower.includes('warn') && !lower.includes('warnlist')) {
+    // === WARN ===
+    if (lower.includes('warn') && !lower.includes('warnlist') && !lower.includes('remove')) {
         const target = findTarget();
         if (target?.self) return { type: 'ERROR', message: "Can't warn yourself" };
         
@@ -284,16 +342,15 @@ function parseCommand(text, guild, authorId) {
             return {
                 type: 'WARN',
                 targetId: target.id,
-                targetTag: target.user.tag,
                 reason: reason
             };
         }
     }
     
-    // Add currency
-    if (lower.match(/add|give/i) && lower.match(/coin|cookie|xp/i)) {
+    // === ADD CURRENCY ===
+    if (lower.match(/add|give/i) && lower.match(/coin|cookie|xp/i) && !lower.includes('remove')) {
         const target = findTarget();
-        if (target?.self) return { type: 'ERROR', message: "Can't add currency to yourself" };
+        if (target?.self) return { type: 'ERROR', message: "Can't add to yourself" };
         
         const amountMatch = lower.match(/(\d+)/);
         const amount = amountMatch ? parseInt(amountMatch[1]) : 1;
@@ -307,13 +364,12 @@ function parseCommand(text, guild, authorId) {
                 type: 'ADD_CURRENCY',
                 command: command,
                 targetId: target.id,
-                targetTag: target.user.tag,
                 amount: amount
             };
         }
     }
     
-    // Info queries
+    // === INFO QUERIES ===
     if (lower.match(/how many|how much/i)) {
         const target = findTarget();
         let query = 'coins';
@@ -326,21 +382,19 @@ function parseCommand(text, guild, authorId) {
             return {
                 type: 'INFO',
                 targetId: target.id,
-                targetTag: target.user.tag,
                 query: query
             };
         }
     }
     
-    // Server join date
+    // === JOINED DATE ===
     if (lower.match(/when.*join/i)) {
         const target = findTarget();
         if (target?.self) return { type: 'ERROR', message: "Check your own join date" };
         if (target) {
             return {
                 type: 'JOINED',
-                targetId: target.id,
-                targetTag: target.user.tag
+                targetId: target.id
             };
         }
     }
@@ -376,23 +430,21 @@ module.exports = {
         }
 
         try {
-            // Parse command locally
             const parsed = parseCommand(userQuery, message.guild, message.author.id);
             
-            // Handle errors
             if (parsed?.type === 'ERROR') {
                 await message.reply(`❌ ${parsed.message}`);
                 return;
             }
             
             if (parsed) {
-                // Handle PING
+                // PING
                 if (parsed.type === 'PING') {
                     await message.channel.send(`<@${parsed.targetId}>`);
                     return;
                 }
                 
-                // Handle WARNLIST
+                // WARNLIST
                 if (parsed.type === 'WARNLIST') {
                     const cmd = client.commands.get('warnlist');
                     if (cmd) {
@@ -401,19 +453,39 @@ module.exports = {
                     return;
                 }
                 
-                // Handle AVATAR
+                // REMOVE WARNING
+                if (parsed.type === 'REMOVE_WARNING') {
+                    const cmd = client.commands.get('removewarn');
+                    if (cmd) {
+                        await executeSlashCommand(cmd, parsed.targetId, message, client, settings, {
+                            warnIndex: parsed.warnIndex
+                        });
+                    }
+                    return;
+                }
+                
+                // REMOVE CURRENCY
+                if (parsed.type === 'REMOVE_CURRENCY') {
+                    const cmd = client.commands.get(parsed.command);
+                    if (cmd) {
+                        await executeSlashCommand(cmd, parsed.targetId, message, client, settings, {
+                            amount: parsed.amount
+                        });
+                    }
+                    return;
+                }
+                
+                // AVATAR
                 if (parsed.type === 'AVATAR') {
                     const member = message.guild.members.cache.get(parsed.targetId);
                     if (member) {
                         const avatarUrl = member.user.displayAvatarURL({ dynamic: true, size: 1024 });
                         await message.channel.send(avatarUrl);
-                    } else {
-                        await message.reply("❌ User not found");
                     }
                     return;
                 }
                 
-                // Handle ACCOUNT_CREATED
+                // ACCOUNT_CREATED
                 if (parsed.type === 'ACCOUNT_CREATED') {
                     const member = message.guild.members.cache.get(parsed.targetId);
                     if (member) {
@@ -423,26 +495,24 @@ module.exports = {
                     return;
                 }
                 
-                // Handle GIF
+                // GIF
                 if (parsed.type === 'GIF') {
                     const gifUrl = await searchGiphyGif(parsed.query);
                     await message.channel.send(gifUrl);
                     return;
                 }
                 
-                // Handle DM
+                // DM
                 if (parsed.type === 'DM') {
                     const target = await client.users.fetch(parsed.targetId).catch(() => null);
                     if (target) {
                         await target.send(parsed.content).catch(() => {});
                         await message.reply(`✅ Sent`);
-                    } else {
-                        await message.reply(`❌ Not found`);
                     }
                     return;
                 }
                 
-                // Handle WARN
+                // WARN
                 if (parsed.type === 'WARN') {
                     const cmd = client.commands.get('warn');
                     if (cmd) {
@@ -453,7 +523,7 @@ module.exports = {
                     return;
                 }
                 
-                // Handle ADD_CURRENCY
+                // ADD_CURRENCY
                 if (parsed.type === 'ADD_CURRENCY') {
                     const cmd = client.commands.get(parsed.command);
                     if (cmd) {
@@ -464,7 +534,7 @@ module.exports = {
                     return;
                 }
                 
-                // Handle INFO
+                // INFO
                 if (parsed.type === 'INFO') {
                     const userData = await User.findOne({ userId: parsed.targetId });
                     let value = 0;
@@ -480,7 +550,7 @@ module.exports = {
                     return;
                 }
                 
-                // Handle JOINED
+                // JOINED
                 if (parsed.type === 'JOINED') {
                     const member = message.guild.members.cache.get(parsed.targetId);
                     if (member) {
@@ -491,96 +561,8 @@ module.exports = {
                 }
             }
             
-            // Fallback to AI for very complex queries
-            const members = Array.from(message.guild.members.cache.values())
-                .filter(m => m.id !== message.author.id)
-                .slice(0, 40)
-                .map(m => ({ id: m.id, username: m.user.username, display: m.displayName }));
-            
-            const systemPrompt = `You are Bleck Nephew. Answer in 5 words max.
-
-MEMBERS: ${JSON.stringify(members)}
-
-For commands, output ONLY JSON:
-{"cmd":"warn","target":"USER_ID","reason":"text"}
-{"cmd":"warnlist","target":"USER_ID"}
-{"cmd":"ping","target":"USER_ID"}
-{"cmd":"addcoins","target":"USER_ID","amount":100}
-{"cmd":"gif","query":"exact subject like alien, dog, cat"}
-{"cmd":"avatar","target":"USER_ID"}
-
-Query: "${userQuery}"`;
-
-            const payload = {
-                contents: [{ parts: [{ text: systemPrompt }] }],
-                generationConfig: {
-                    temperature: 0.1,
-                    maxOutputTokens: 256,
-                }
-            };
-            
-            await message.channel.sendTyping();
-            const result = await fetchWithRetry(GEMINI_API_URL, payload);
-            const aiResponse = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-            
-            if (!aiResponse) {
-                await message.reply("No response");
-                return;
-            }
-
-            let cmdData = null;
-            try {
-                const cleaned = aiResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-                cmdData = JSON.parse(cleaned);
-            } catch {
-                const shortResponse = aiResponse.split('.')[0];
-                await message.reply(shortResponse);
-                return;
-            }
-
-            if (cmdData) {
-                if (cmdData.target === message.author.id) {
-                    await message.reply("❌ Can't target yourself");
-                    return;
-                }
-                
-                if (cmdData.cmd === 'ping') {
-                    await message.channel.send(`<@${cmdData.target}>`);
-                    return;
-                }
-                
-                if (cmdData.cmd === 'avatar') {
-                    const member = message.guild.members.cache.get(cmdData.target);
-                    if (member) {
-                        const avatarUrl = member.user.displayAvatarURL({ dynamic: true, size: 1024 });
-                        await message.channel.send(avatarUrl);
-                    }
-                    return;
-                }
-                
-                if (cmdData.cmd === 'gif') {
-                    const gifUrl = await searchGiphyGif(cmdData.query || 'random');
-                    await message.channel.send(gifUrl);
-                    return;
-                }
-                
-                if (cmdData.cmd === 'dm') {
-                    const target = await client.users.fetch(cmdData.target).catch(() => null);
-                    if (target) {
-                        await target.send(cmdData.message).catch(() => {});
-                        await message.reply(`✅ Sent`);
-                    }
-                    return;
-                }
-                
-                const slashCmd = client.commands.get(cmdData.cmd);
-                if (slashCmd) {
-                    await executeSlashCommand(slashCmd, cmdData.target, message, client, settings, {
-                        amount: cmdData.amount,
-                        reason: cmdData.reason
-                    });
-                }
-            }
+            // AI fallback for complex queries
+            await message.reply("I couldn't understand that command");
             
         } catch (error) {
             console.error('AI Error:', error);
@@ -640,14 +622,18 @@ Query: "${userQuery}"`;
   },
 };
 
-// Execute slash command helper (NO REPLY, JUST EXECUTE)
+// Execute slash command
 async function executeSlashCommand(cmd, targetId, message, client, settings, options = {}) {
     const targetUser = await client.users.fetch(targetId).catch(() => null);
     
     const mockInteraction = {
         options: {
             getUser: () => targetUser,
-            getInteger: (n) => (n === 'amount' && options.amount) ? parseInt(options.amount) : null,
+            getInteger: (n) => {
+                if (n === 'amount' && options.amount) return parseInt(options.amount);
+                if (n === 'index' && options.warnIndex) return parseInt(options.warnIndex);
+                return null;
+            },
             getString: (n) => {
                 if (n === 'reason') return options.reason || 'Admin action';
                 if (n === 'duration') return options.duration || null;
@@ -662,14 +648,12 @@ async function executeSlashCommand(cmd, targetId, message, client, settings, opt
         client: client,
         deferReply: async () => {},
         editReply: async (o) => {
-            // Only send embed, no extra text
             if (o.embeds && o.embeds.length > 0) {
                 return message.channel.send({ embeds: o.embeds }).catch(console.error);
             }
             return Promise.resolve();
         },
         reply: async (o) => {
-            // Only send embed, no extra text
             if (o.embeds && o.embeds.length > 0) {
                 return message.channel.send({ embeds: o.embeds }).catch(console.error);
             }
