@@ -1,7 +1,7 @@
-// events/interactionCreate.js (REPLACED - Added full ticket creation logic)
-const { EmbedBuilder, PermissionsBitField, ChannelType } = require('discord.js'); // ADDED ChannelType
+// events/interactionCreate.js (FIXED Syntax Error)
+const { EmbedBuilder, PermissionsBitField, ChannelType, Collection } = require('discord.js'); // Added Collection and ChannelType
 const Settings = require('../models/Settings');
-const User = require('../models/User'); // ADDED: Import User model
+const User = require('../models/User');
 
 async function logModerationAction(guild, settings, action, target, moderator, reason = 'No reason provided', extra = '') {
   if (!settings || !settings.modlogChannelId) return;
@@ -393,6 +393,93 @@ module.exports = {
                  }
              }
          }
-         // =================================================================
-         // START: TICKET CREATION FIX
-         // ========================================================
+         
+         // 4. TICKET CREATION
+         else if (customId === 'create_ticket') {
+             try {
+                await interaction.deferReply({ ephemeral: true });
+
+                const guild = interaction.guild;
+                const user = interaction.user;
+
+                // --- Configuration ---
+                // 1. Get Staff Role ID from your config (uses 'mod' role, as defined on line 72)
+                const staffRoleId = client.config?.roles?.mod;
+                if (!staffRoleId) {
+                    console.error("[Ticket Error] 'mod' role ID not found in client.config.roles");
+                    return interaction.editReply({ content: '❌ Error: The ticket system is not configured correctly. Please contact an admin.' });
+                }
+
+                // 2. Find Ticket Category
+                // Tries to find 'Tickets' first, then 'Support'
+                let category = guild.channels.cache.find(c => c.name.toLowerCase() === 'tickets' && c.type === ChannelType.GuildCategory);
+                if (!category) {
+                     category = guild.channels.cache.find(c => c.name.toLowerCase() === 'support' && c.type === ChannelType.GuildCategory);
+                }
+
+                // --- Logic ---
+                // 3. Create a unique, clean channel name
+                const channelName = `ticket-${user.username.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 20)}`;
+
+                // 4. Check if user already has a ticket
+                const existingTicket = guild.channels.cache.find(c => c.name === channelName && c.parentId === category?.id);
+                if (existingTicket) {
+                    return interaction.editReply({ content: `You already have an open ticket: ${existingTicket}` });
+                }
+
+                // 5. Create the channel
+                const ticketChannel = await guild.channels.create({
+                    name: channelName,
+                    type: ChannelType.GuildText, // 0 = Text Channel
+                    parent: category ? category.id : null, // Set parent category if found
+                    permissionOverwrites: [
+                        {
+                            id: guild.id, // @everyone
+                            deny: [PermissionsBitField.Flags.ViewChannel],
+                        },
+                        {
+                            id: user.id, // The user who created the ticket
+                            allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.AttachFiles],
+                        },
+                        {
+                            id: staffRoleId, // The staff role
+                            allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.AttachFiles, PermissionsBitField.Flags.ManageMessages],
+                        },
+                         {
+                            id: client.user.id, // The bot itself
+                            allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.EmbedLinks],
+                        }
+                    ],
+                });
+
+                // 6. Send welcome message in the new channel
+                const ticketEmbed = new EmbedBuilder()
+                    .setColor(0x00BFFF) // Light Blue
+                    .setTitle(`Ticket for ${user.tag}`)
+                    .setDescription(`Welcome! A staff member will be with you shortly.\n\nPlease describe your issue in detail.`)
+                    .setTimestamp();
+                
+                await ticketChannel.send({ content: `${user} <@&${staffRoleId}>`, embeds: [ticketEmbed] });
+
+                // 7. Send confirmation to the user
+                await interaction.editReply({ content: `✅ Your ticket has been created! Please go to ${ticketChannel}.` });
+
+            } catch (error) {
+                console.error('Error creating ticket channel:', error);
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.editReply({ content: 'An error occurred while trying to create your ticket. Please contact a staff member directly.' }).catch(console.error);
+                }
+            }
+         }
+
+     }
+     // Handle other interaction types like Select Menus or Modals if needed
+     /*
+     else if (interaction.isStringSelectMenu()) {
+         // Handle select menu interactions
+     } else if (interaction.isModalSubmit()) {
+         // Handle modal submissions
+     }
+     */
+  },
+};
