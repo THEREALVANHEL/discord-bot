@@ -1,15 +1,21 @@
-// commands/ticket.js (FIXED Temp Role Check for Close)
+// commands/ticket.js (FIXED Subcommand Description)
 const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ChannelType, PermissionsBitField } = require('discord.js');
 const Settings = require('../models/Settings');
 const Ticket = require('../models/Ticket');
 const { logModerationAction } = require('../utils/logModerationAction');
 
 module.exports = {
-  data: new SlashCommandBuilder() /* Keep Slash command data for setup */
+  data: new SlashCommandBuilder()
     .setName('ticket')
     .setDescription('Setup the ticket panel (Slash Only) or close tickets (Prefix Only).')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
-    .addSubcommand(subcommand => subcommand.setName('setup') /* Keep setup subcommand definition */ ),
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('setup')
+        // --- THIS LINE WAS THE ERROR ---
+        .setDescription('Configures the ticket panel in the current channel.') 
+        // You were missing .setDescription(), which caused the serialization error.
+    ),
   name: 'ticket',
   description: 'Close the current ticket channel (`?ticket close`). Setup is slash only.',
   aliases: [],
@@ -21,6 +27,30 @@ module.exports = {
     // --- Slash Command Logic (Setup - unchanged) ---
     if (isInteraction) {
         // ... Keep your existing slash command setup logic here ...
+        // (You'll need to add the logic for the /ticket setup command if it's missing)
+        // For now, this just acknowledges the command:
+        const subcommand = interactionOrMessage.options.getSubcommand();
+        if (subcommand === 'setup') {
+            // --- ADDED DUMMY SETUP LOGIC (Replace with your real logic) ---
+            await interactionOrMessage.deferReply();
+            const panelEmbed = new EmbedBuilder()
+                .setTitle('Support Ticket System')
+                .setDescription('Click the button below to create a new support ticket. A staff member will assist you shortly.')
+                .setColor(0x00BFFF);
+            
+            const row = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setCustomId('create_ticket')
+                        .setLabel('Create Ticket')
+                        .setStyle(ButtonStyle.Primary)
+                        .setEmoji('🎫')
+                );
+            
+            await interactionOrMessage.channel.send({ embeds: [panelEmbed], components: [row] });
+            await interactionOrMessage.editReply({ content: '✅ Ticket panel created.', ephemeral: true });
+            // --- END DUMMY SETUP LOGIC ---
+        }
         return;
     }
 
