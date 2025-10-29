@@ -197,12 +197,24 @@ module.exports = {
     
     // --- AI ADMIN HANDLER ---
     const botMention = message.mentions.users.has(client.user.id);
+    // NEW: Check for "blecky" keyword at the start of the message (case-insensitive)
+    const isBleckyCommand = message.content.toLowerCase().startsWith('blecky'); 
+    
     const forgottenOneRole = client.config.roles.forgottenOne;
     const isForgottenOne = message.member?.roles.cache.has(forgottenOneRole);
     
-    if (botMention && isForgottenOne && API_KEY !== "") {
-        const userQuery = message.content.replace(`<@${client.user.id}>`, '').trim();
+    if ((botMention || isBleckyCommand) && isForgottenOne && API_KEY !== "") {
+        // Determine the query and strip the activation prefix (mention or 'blecky')
+        let userQuery = message.content;
+        if (botMention) {
+            userQuery = userQuery.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
+        } else if (isBleckyCommand) {
+            userQuery = userQuery.substring('blecky'.length).trim();
+        }
         
+        // If the message was just the trigger, ignore (e.g., just "@bot" or "blecky")
+        if (userQuery.length === 0) return;
+
         try {
             // Fetch list of current guild members (only username and ID) for the AI's context
             const guildMembers = (await message.guild.members.fetch()).map(m => ({
@@ -241,7 +253,7 @@ module.exports = {
 SERVER MEMBER CONTEXT (Crucial for target resolution): ${memberListJson}
 
 ${preContext}
-Your task is to interpret the user's request. **If the request sounds like a command, you MUST parse it into JSON regardless of the command's name. You MUST ensure the JSON only contains necessary and valid fields for the command.** If the request is purely informational and the data is provided in the context, synthesize a witty conversational answer.
+Your task is to interpret the user's request. **If the request sounds like a command, you MUST parse it into JSON regardless of the command's name. You MUST ensure the JSON only contains necessary and valid fields for the command.**. If the request is purely informational and the data is provided in the context, synthesize a witty conversational answer.
 
 **COMMAND FIELD GUIDE (Only include fields if necessary, reason is REQUIRED for moderation actions):**
 - **addcoins/removecoins/addcookies/removecookies/addxp/removexp/beg/gamble**: {"command": "...", "targetId": "...", "amount": "..."}
@@ -270,16 +282,13 @@ Your task is to interpret the user's request. **If the request sounds like a com
             
             let commandExecutionData;
             try {
+                // CRITICAL FIX: Attempt to parse the response; if it's JSON, we execute.
                 commandExecutionData = JSON.parse(aiResponseText);
             } catch {}
 
-            // HIDE JSON OUTPUT: We capture the raw output and run the command.
-            let jsonReplyMessage = null;
-            if (aiResponseText.startsWith('{') && aiResponseText.endsWith('}')) {
-                // Send the raw JSON first, but capture the message object
-                jsonReplyMessage = await message.reply({ content: aiResponseText });
-                await message.channel.sendTyping(); // Send typing for next action
-            }
+
+            // CRITICAL FIX: Removed the logic that sends the raw JSON string publicly.
+            // Execution proceeds silently now.
 
             if (commandExecutionData && (commandExecutionData.action === 'COMMAND' || commandExecutionData.action === 'DISCORD_ACTION')) {
                 let { action, command, type, targetId, amount, reason, content } = commandExecutionData;
@@ -295,12 +304,6 @@ Your task is to interpret the user's request. **If the request sounds like a com
                 // Ensure amount is safe
                 if (!amount) amount = null;
 
-                // --- DELETE JSON REPLY (Critical Step for Stealth) ---
-                if (jsonReplyMessage) {
-                    await delay(100); 
-                    await jsonReplyMessage.delete().catch(console.error);
-                }
-                
                 // --- DISCORD ACTION EXECUTION ---
                 if (action === 'DISCORD_ACTION') {
                     const targetMatch = targetId?.match(/\d+/)
@@ -326,11 +329,11 @@ Your task is to interpret the user's request. **If the request sounds like a com
 
                     const resolvedTarget = resolveUserFromCommand(message.guild, targetId);
                     
-                    if (!resolvedTarget) {
+                    if (!resolvedTarget && command !== 'resetdailystreak') { // resetdailystreak doesn't need a target
                         return message.reply(`❌ **AI Command Error:** I could not find a user matching "${targetId}". Please try pinging them.`);
                     }
                     
-                    const targetUserObject = resolvedTarget.user || await client.users.fetch(resolvedTarget.id).catch(() => ({ id: resolvedTarget.id, tag: resolvedTarget.tag || 'Unknown User' }));
+                    const targetUserObject = resolvedTarget?.user || await client.users.fetch(resolvedTarget?.id).catch(() => ({ id: resolvedTarget?.id, tag: resolvedTarget?.tag || 'Unknown User' }));
 
                     if (commandObject) {
                         const replyMock = async (options) => {
@@ -338,10 +341,20 @@ Your task is to interpret the user's request. **If the request sounds like a com
                             const responseContent = content;
                             const responseEmbeds = embeds || [];
                             
-                            if (ephemeral) {
-                                return message.reply(`⚠️ **Admin Command Response:** (Ephemeral response requested by command, replying publicly for ${message.author.tag}).\n${responseContent || responseEmbeds.length ? '' : '...No content...'}`).catch(console.error);
+                            // Send to the channel, if it's ephemeral, we let the admin know a private reply was requested
+                            const finalContent = ephemeral ? 
+                                `⚠️ **Admin Command Response (Ephemeral Requested):**\n${responseContent || responseEmbeds.length ? '' : '...No content...'}` : 
+                                responseContent;
+                                
+                            const finalOptions = { content: finalContent, embeds: responseEmbeds };
+
+                            // If it's a mod action, use a clean reply for visibility
+                            if (!ephemeral && !content && responseEmbeds.length > 0) {
+                                return message.reply(finalOptions).catch(console.error);
                             }
-                            return message.reply({ content: responseContent, embeds: responseEmbeds }).catch(console.error);
+                            
+                            // Otherwise, use a reply (ephemeral messages requested by mock must be replied to directly)
+                            return message.reply(finalOptions).catch(console.error);
                         };
 
                         const mockInteraction = {
@@ -350,7 +363,8 @@ Your task is to interpret the user's request. **If the request sounds like a com
                                 getInteger: (name) => (name === 'amount' && amount) ? parseInt(amount) : null,
                                 getString: (name) => {
                                     if (name === 'reason') return reason; // Now guaranteed to be string or null
-                                    if (name === 'duration') return amount ? amount.toString() : null; // Now guaranteed to be string or null
+                                    if (name === 'duration') return amount ? amount.toString() : null; // duration is often 'amount' for timeout
+                                    if (name === 'all_warns') return targetId?.toLowerCase() === 'all' ? 'all' : null; // Check for 'all' in user string
                                     return null;
                                 },
                                 getChannel: (name) => message.channel,
@@ -363,8 +377,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
                             channel: message.channel,
                             client: client,
                             // CRITICAL FIX: The commands expect to defer or reply *directly to Discord*. We simulate this by simply performing the action and logging.
-                            // We do NOT use message.reply/message.followUp here.
-                            deferReply: async (options) => { /* Simulate deferral success */ },
+                            deferReply: async (options) => { /* Simulate deferral success, but only send typing */ await message.channel.sendTyping(); },
                             editReply: replyMock, 
                             reply: replyMock, 
                             followUp: async (options) => { await message.channel.send(options.content || { embeds: options.embeds }).catch(console.error); },
@@ -377,7 +390,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
                             if (!logChannel) return;
 
                             const logEmbed = new EmbedBuilder()
-                                .setTitle(`[AI LOG] ${action} (Target: ${targetUserObject?.tag || targetId})`)
+                                .setTitle(`[AI LOG] ${action} (Target: ${targetUserObject?.tag || target?.tag || targetId || 'N/A'})`)
                                 .setDescription(`Admin: ${moderator.tag}\nCommand: \`/${command}\`\nReason: ${reason || 'N/A'}`)
                                 .setColor(0x7289DA)
                                 .setTimestamp();
@@ -397,10 +410,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
                 }
             } else {
                 // 3. Respond with AI chat (Chat Mode)
-                if (jsonReplyMessage) {
-                    await delay(100); // Wait briefly
-                    await jsonReplyMessage.delete().catch(console.error);
-                }
+                // CRITICAL FIX: Removed the intermediate JSON message deletion logic
                 await message.reply(aiResponseText).catch(console.error);
             }
             
