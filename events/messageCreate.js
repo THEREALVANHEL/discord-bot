@@ -1,4 +1,4 @@
-// events/messageCreate.js (FINALIZED: AI Max Power, Role Restricted, Database Context)
+// events/messageCreate.js (FINAL VERSION - Role Restricted, Full Power)
 import { EmbedBuilder, ChannelType } from "discord.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "dotenv";
@@ -64,14 +64,19 @@ export default async (client, message) => {
 
     // --- CRITICAL ACCESS CONTROL: Only 'forgottenOne' role can use AI chat handler ---
     const forgottenOneId = client.config.roles.forgottenOne;
-    if (!message.member.roles.cache.has(forgottenOneId)) {
-        // If they are not the 'forgottenOne' but sent an AI prefix command, delete it and exit silently.
-        if (message.content.toLowerCase().startsWith('blecky') || message.content.toLowerCase().startsWith('r-blecky')) {
-             if (message.channel.permissionsFor(client.user).has('ManageMessages')) {
+    
+    // Check if the user is using one of the AI prefixes or is in the designated AI channel
+    const usesAiPrefix = message.content.toLowerCase().startsWith('blecky') || message.content.toLowerCase().startsWith('r-blecky');
+    
+    // If the message is intended for the AI in any way, check role permission first.
+    if (usesAiPrefix) {
+        if (!message.member.roles.cache.has(forgottenOneId)) {
+            // Delete the message to maintain anonymity/silence for unprivileged users attempting the prefix
+            if (message.channel.permissionsFor(client.user).has('ManageMessages')) {
                 await message.delete().catch(console.error);
             }
+            return; 
         }
-        return; 
     }
     // --- END ACCESS CONTROL ---
 
@@ -81,7 +86,7 @@ export default async (client, message) => {
     let isAnonymousMode = false;
     let isAiPrefixCommand = false;
 
-    // Check for explicit AI prefixes (r-blecky deletes original message AND forces anonymity)
+    // Check for explicit AI prefixes
     if (content.toLowerCase().startsWith('r-blecky')) {
         content = content.substring('r-blecky'.length).trim();
         isAnonymousMode = true; 
@@ -92,15 +97,17 @@ export default async (client, message) => {
     }
 
     // Delete the triggering message if it was an AI prefix command (r-blecky or blecky)
-    // NOTE: This happens AFTER role check, so only the allowed user's message is deleted.
     if (isAiPrefixCommand && message.channel.permissionsFor(client.user).has('ManageMessages')) {
       await message.delete().catch(console.error);
     }
     
-    // If the message was processed by the XP system, we need the original message for the reply.
-    if (content.length === 0 && isAiPrefixCommand) return; 
+    // If the message was only the prefix without content, the bot replies with a prompt.
+    if (isAiPrefixCommand && content.length === 0) {
+        // Send a direct message to the user to confirm the bot is listening
+        return message.author.send(`✅ Blecky is listening. Please follow the prefix (e.g., \`blecky what's the capital of France?\`).`).catch(console.error);
+    } 
 
-    // ---- Quick XP system ----
+    // ---- Quick XP system (for all messages that pass the initial role/bot checks) ----
     const userKey = `${message.guild.id}-${message.author.id}`;
     const now = Date.now();
     if (!xpCooldowns.has(userKey) || now - xpCooldowns.get(userKey) > XP_COOLDOWN) {
@@ -112,11 +119,12 @@ export default async (client, message) => {
       xpCooldowns.set(userKey, now);
       if (leveledUp) {
         await updateUserRank(message.guild.id, message.author.id);
-        message.reply(`🎉 Congrats <@${message.author.id}>! You leveled up to level ${user.level}!`);
+        // Note: We use message.channel.send here because message.reply might be deleted if it was an AI prefix command
+        message.channel.send(`🎉 Congrats <@${message.author.id}>! You leveled up to level ${user.level}!`);
       }
     }
 
-    // ---- Load Server Settings ----
+    // ---- Load Server Settings and Channel Check ----
     const server = await Server.findOne({ serverId: message.guild.id });
     if (!server) return;
     const settings = await Settings.findOne({ guildId: message.guild.id }); 
@@ -124,14 +132,14 @@ export default async (client, message) => {
 
     const aiChannel = message.guild.channels.cache.get(settings.aiChannelId);
     
-    // Only process if it's the dedicated channel OR an AI prefix command
+    // Only proceed with AI processing if it's the designated channel OR an AI prefix command
     if (!isAiPrefixCommand && message.channel.id !== aiChannel?.id) return;
     
-    // If it's a prefix command, ensure the response goes to the original channel
+    // The channel to send the AI's final reply
     const responseChannel = message.channel; 
     
-    // ---- Anonymous Mode ----
-    // If it was a regular channel message, check settings. If it was r-blecky, it's already set to true.
+    // ---- Anonymous Mode Fallback ----
+    // If not a prefix command, check the channel's default anonymity setting
     if (!isAiPrefixCommand) {
         isAnonymousMode = settings.aiAnonymousMode;
     }
@@ -139,7 +147,7 @@ export default async (client, message) => {
 
     // ---- Math Mode (using the potentially modified content) ----
     const isMathMode = settings.aiMathMode;
-    if (isMathMode && /^[0-9+\-*/().\s^√]+$/.test(content)) {
+    if (isMathMode && !isAiPrefixCommand && /^[0-9+\-*/().\s^√]+$/.test(content)) {
       try {
         const result = safeEval(content);
         return responseChannel.send(`🧮 \`${content}\` = **${result}**`);
@@ -148,7 +156,7 @@ export default async (client, message) => {
       }
     }
 
-    // ---- Build AI context (using the potentially modified content) ----
+    // ---- Build AI context ----
     const memberList = message.guild.members.cache.map(m =>
       `${m.user.username} (${m.displayName})`
     ).join(", ");
@@ -211,7 +219,7 @@ export default async (client, message) => {
     await responseChannel.send(replyMsg);
   } catch (err) {
     console.error("❌ AI Handler Error:", err);
-    // Use the original channel as a fallback for severe errors
+    // Use the channel to send a generic error
     message.channel.send("⚠️ Something went wrong while processing your message."); 
   }
 };
@@ -243,14 +251,13 @@ async function executeParsedAction(message, action, isAnonymousMode, responseCha
       return responseChannel.send(action.arguments.join(" "));
     }
     
-    // 2. DM a user (NEW CAPABILITY)
+    // 2. DM a user
     if (action.commandName === "dm" && action.targetUser && action.arguments?.[0]) {
         const target = await findUserInGuild(message.guild, action.targetUser, message.author.id);
         const dmMessage = action.arguments.join(' ');
         
         if (target) {
             try {
-                // Fetch user object to DM
                 const dmUser = await message.client.users.fetch(target.id);
                 const senderTag = isAnonymousMode ? 'Anonymous' : message.author.tag;
                 
@@ -265,7 +272,7 @@ async function executeParsedAction(message, action, isAnonymousMode, responseCha
         }
     }
 
-    // 3. Ping a user (Pinging by display name/tag is handled by findUserInGuild)
+    // 3. Ping a user
     if (action.commandName === "ping" && action.targetUser) {
       const target = await findUserInGuild(message.guild, action.targetUser, message.author.id);
       if (target) {
@@ -294,7 +301,6 @@ async function executeParsedAction(message, action, isAnonymousMode, responseCha
     }
 
     // 6. Fallback to Command Processor (Performs all other server commands)
-    // NOTE: This relies on processCommand being robust enough to handle replies correctly.
     const handled = await processCommand(message.client, message, action.commandName, action.arguments || []);
     if (!handled) {
       const embed = new EmbedBuilder()
