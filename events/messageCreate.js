@@ -209,7 +209,8 @@ module.exports = {
         if (botMention) {
             userQuery = userQuery.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
         } else if (isBleckyCommand) {
-            userQuery = userQuery.substring('blecky'.length).trim();
+            // Only strip the 'blecky' keyword if it's at the absolute start
+            userQuery = userQuery.replace(/blecky\s?/i, '').trim();
         }
         
         // If the message was just the trigger, ignore (e.g., just "@bot" or "blecky")
@@ -228,7 +229,7 @@ module.exports = {
             
             // --- 1. Pre-process for Database-Informed Chat Responses ---
             let preContext = '';
-            const commandWords = ['add', 'remove', 'warn', 'timeout', 'purge', 'lock', 'unlock', 'reset', 'show', 'profile', 'userinfo', 'coin', 'cookie', 'xp', 'streak', 'list', 'for'];
+            const commandWords = ['add', 'remove', 'warn', 'timeout', 'softban', 'purge', 'lock', 'unlock', 'reset', 'show', 'profile', 'userinfo', 'coin', 'cookie', 'xp', 'streak', 'list', 'for'];
             const parts = userQuery.toLowerCase().split(/\s+/);
             
             let potentialTarget = parts.find(p => 
@@ -288,14 +289,15 @@ Your task is to interpret the user's request. **If the request sounds like a com
             } catch {}
 
 
-            // CRITICAL FIX: The logic that sent the raw JSON string publicly is REMOVED.
+            // CRITICAL FIX: IF JSON IS PARSED, WE DO NOT SEND THE RAW TEXT.
 
             if (commandExecutionData && (commandExecutionData.action === 'COMMAND' || commandExecutionData.action === 'DISCORD_ACTION')) {
                 let { action, command, type, targetId, amount, reason, content, duration } = commandExecutionData;
                 
                 // --- EXECUTION HARDENING: ENSURE REASON IS PRESENT FOR MOD COMMANDS ---
                 if (['warn', 'timeout', 'softban', 'lock'].includes(command) && !reason) {
-                    reason = "AI-inferred action: Reason was missing or unclear.";
+                    // Use a default reason if AI was lazy, to prevent command failure.
+                    reason = `AI-inferred action by ${message.author.tag}: No reason provided by the Forgotten One's assistant.`;
                     commandExecutionData.reason = reason;
                 } else if (!reason) {
                     reason = null;
@@ -333,7 +335,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
                     // Allow certain commands to proceed without a targetId/user object if they target the channel or 'all'
                     const noTargetCommands = ['resetdailystreak', 'purge', 'lock', 'unlock', 'addcookiesall', 'removecookiesall'];
                     
-                    if (!resolvedTarget && !noTargetCommands.includes(command)) {
+                    if (!resolvedTarget && !noTargetCommands.includes(command) && targetId?.toLowerCase() !== 'all') { // Check targetId for 'all' as well
                         return message.reply(`❌ **AI Command Error:** I could not find a user matching "${targetId}". Please try pinging them.`);
                     }
                     
@@ -345,23 +347,16 @@ Your task is to interpret the user's request. **If the request sounds like a com
                             const responseContent = content;
                             const responseEmbeds = embeds || [];
                             
-                            // Send to the channel, if it's ephemeral, we let the admin know a private reply was requested
-                            const finalContent = ephemeral ? 
-                                `⚠️ **Admin Command Response (Ephemeral Requested):**\n${responseContent || responseEmbeds.length ? '' : '...No content...'}` : 
-                                responseContent;
-                                
-                            const finalOptions = { content: finalContent, embeds: responseEmbeds };
-
-                            // If it's a command that replies publicly, use a reply.
-                            // We don't want to reply with the ephemeral warning if the original command was *meant* to be public.
-                            if (!ephemeral && (!content || content.startsWith('⚠️')) && responseEmbeds.length > 0) {
-                                return message.reply(finalOptions).catch(console.error);
-                            } else if (ephemeral) {
-                                // If ephemeral, send the warning/content to the admin
-                                return message.reply(finalOptions).catch(console.error);
+                            // If the command specified ephemeral: true, we must output a reply *to the admin*
+                            if (ephemeral) {
+                                return message.reply({ 
+                                    content: responseContent ? `⚠️ **Admin Command Response (Ephemeral Requested):**\n${responseContent}` : null,
+                                    embeds: responseEmbeds 
+                                }).catch(console.error);
                             }
                             
-                            return message.reply(finalOptions).catch(console.error);
+                            // Otherwise, send the command's intended public reply/embeds
+                            return message.reply({ content: responseContent, embeds: responseEmbeds }).catch(console.error);
                         };
 
                         const mockInteraction = {
@@ -369,7 +364,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
                                 getUser: (name) => targetUserObject,
                                 getInteger: (name) => (name === 'amount' && amount) ? parseInt(amount) : null,
                                 getString: (name) => {
-                                    if (name === 'reason') return reason; // Now guaranteed to be string or null
+                                    if (name === 'reason') return reason; // Now guaranteed to be string or default string
                                     if (name === 'duration') return duration || amount?.toString() || null; // duration or amount for timeout
                                     if (name === 'all_warns') return targetId?.toLowerCase() === 'all' ? 'all' : null; // Check for 'all' in user string
                                     return null;
@@ -397,7 +392,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
                             if (!logChannel) return;
 
                             const logEmbed = new EmbedBuilder()
-                                .setTitle(`[AI LOG] ${action} (Target: ${targetUserObject?.tag || target?.tag || targetId || 'N/A'})`)
+                                .setTitle(`[AI LOG] ${action} (Target: ${targetUserObject?.tag || resolvedTarget?.tag || targetId || 'N/A'})`)
                                 .setDescription(`Admin: ${moderator.tag}\nCommand: \`/${command}\`\nReason: ${reason || 'N/A'}`)
                                 .setColor(0x7289DA)
                                 .setTimestamp();
