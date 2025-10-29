@@ -1,4 +1,4 @@
-// events/messageCreate.js (FINAL, FINAL VERSION - Replaces nested AI call with local safe JS calculation)
+// events/messageCreate.js (FINAL, FINAL VERSION - Fixes AI response payload, adds safe calculation, fixes XP and AI spam)
 
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -10,18 +10,59 @@ const conversationHistory = new Map(); // userId -> [{role, content}]
 const MAX_HISTORY_LENGTH = 10; // Keep last 10 exchanges
 
 function addToHistory(userId, role, content) {
-// ... (omitted for brevity, assume unchanged)
+    if (!conversationHistory.has(userId)) {
+        conversationHistory.set(userId, []);
+    }
+    const history = conversationHistory.get(userId);
+    // Gemini models typically expect 'user' and 'model' roles
+    history.push({ role, parts: [{ text: content }] });
+    
+    // Keep only last MAX_HISTORY_LENGTH exchanges (user + model messages)
+    if (history.length > MAX_HISTORY_LENGTH * 2) {
+        history.splice(0, 2); // Remove oldest user/model pair
+    }
 }
 
 function getHistory(userId) {
-// ... (omitted for brevity, assume unchanged)
+    return conversationHistory.get(userId) || [];
 }
 
 // --- GIPHY API ---
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 async function searchGiphyGif(query) {
-// ... (omitted for brevity, assume unchanged)
+    const GIPHY_KEY = process.env.GIPHY_API_KEY || "";
+    // Fallback logic remains the same
+    if (!GIPHY_KEY) {
+        const fallbackGifs = [
+            'https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif',
+            'https://media.giphy.com/media/mlvseq9yvZhba/giphy.gif',
+            'https://media.giphy.com/media/ICOgUNjpvO0PC/giphy.gif'
+        ];
+        return fallbackGifs[Math.floor(Math.random() * fallbackGifs.length)];
+    }
+    
+    const searchUrl = `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(query)}&limit=25&rating=g`;
+    
+    try {
+        const response = await fetch(searchUrl);
+        const data = await response.json();
+        
+        if (data.data && data.data.length > 0) {
+            const randomIndex = Math.floor(Math.random() * Math.min(data.data.length, 10));
+            return data.data[randomIndex].images.original.url;
+        }
+    } catch (error) {
+        console.error('Giphy API error:', error);
+    }
+    
+    // Fallback logic duplicated for robustness
+    const fallbackGifs = [
+        'https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif',
+        'https://media.giphy.com/media/mlvseq9yvZhba/giphy.gif',
+        'https://media.giphy.com/media/ICOgUNjpvO0PC/giphy.gif'
+    ];
+    return fallbackGifs[Math.floor(Math.random() * fallbackGifs.length)];
 }
 
 // --- GEMINI AI CORE ---
@@ -54,7 +95,6 @@ If the user mentions an action not listed in 'action', or asks a general questio
 
 
 async function callGeminiAI(history, guildMembers, latestMessage) {
-// ... (omitted for brevity, assume unchanged, including the fix from the previous step)
     if (!API_KEY) {
         throw new Error("Gemini API key not configured");
     }
@@ -104,30 +144,24 @@ async function callGeminiAI(history, guildMembers, latestMessage) {
 }
 
 
-// --- SAFE CALCULATION HELPER ---
-
-// Allowed characters in the expression (math, numbers, functions)
-const ALLOWED_CHARS_REGEX = /^[0-9+\-*/().\s]+$/;
-
+// --- SAFE CALCULATION HELPER (FIXED) ---
 function safeEval(expression) {
-    // 1. Sanitize the expression to prevent code injection
-    const cleanedExpression = expression.toLowerCase()
-        // Replace common math functions/constants with Math. equivalents
-        .replace(/log10\s*\(/g, 'Math.log10(')
-        .replace(/log\s*\(/g, 'Math.log(')
-        .replace(/ln\s*\(/g, 'Math.log(')
-        .replace(/sqrt\s*\(/g, 'Math.sqrt(')
-        .replace(/pow\s*\(/g, 'Math.pow(')
-        .replace(/sin\s*\(/g, 'Math.sin(')
-        .replace(/cos\s*\(/g, 'Math.cos(')
-        .replace(/tan\s*\(/g, 'Math.tan(')
+    // Math functions allowed by the sanitizer
+    const sanitisedExpression = expression.toLowerCase()
+        .replace(/log10\s*\((.*?)\)/g, 'Math.log10($1)')
+        .replace(/log\s*\((.*?)\)/g, 'Math.log($1)')
+        .replace(/ln\s*\((.*?)\)/g, 'Math.log($1)')
+        .replace(/sqrt\s*\((.*?)\)/g, 'Math.sqrt($1)')
+        .replace(/pow\s*\((.*?)\)/g, 'Math.pow($1)')
+        .replace(/sin\s*\((.*?)\)/g, 'Math.sin($1)')
+        .replace(/cos\s*\((.*?)\)/g, 'Math.cos($1)')
+        .replace(/tan\s*\((.*?)\)/g, 'Math.tan($1)')
         .replace(/pi/g, 'Math.PI')
-        .replace(/[^-()\d/*+.]/g, ''); // Keep only basic math symbols
-
+        .replace(/[^0-9+\-*/().,MathegsincotapowrPI]/g, ''); // Aggressive filter
+        
     try {
-        // 2. Execute calculation using Function constructor for isolated scope
-        // This is safer than eval() but still powerful.
-        const result = new Function('return ' + cleanedExpression)();
+        // Use new Function for safe execution scope
+        const result = new Function('return ' + sanitisedExpression)();
         
         if (typeof result === 'number' && isFinite(result)) {
             return result;
@@ -137,8 +171,6 @@ function safeEval(expression) {
         return 'Error';
     }
 }
-
-// ... (findUserInGuild, manageTieredRoles, getNextLevelXp omitted for brevity, assume unchanged)
 
 // SMART USER FINDER (Existing function, copied for completeness)
 function findUserInGuild(guild, searchTerm, authorId) {
@@ -188,7 +220,7 @@ function findUserInGuild(guild, searchTerm, authorId) {
     return bestMatch;
 }
 
-// ... (manageTieredRoles, getNextLevelXp omitted for brevity, assume unchanged)
+// --- ACTION EXECUTION HELPER FUNCTIONS ---
 
 async function manageTieredRoles(member, userValue, roleConfigs, property) {
     if (!roleConfigs || roleConfigs.length === 0) return;
@@ -255,13 +287,13 @@ async function executeParsedAction(message, client, parsed, targetMember, isAnon
         }
     }
 
-    // --- UTILITY ACTION: CALCULATE (FIXED) ---
+    // --- UTILITY ACTION: CALCULATE (FIXED for local execution) ---
     if (action === 'calculate' && parsed.mathExpression) {
         const expression = parsed.mathExpression;
         const result = safeEval(expression);
 
         if (result === 'Error') {
-             await sendActionReply(`❌ I couldn't safely calculate that expression: \`${expression}\``);
+             await sendActionReply(`❌ I couldn't safely calculate that expression: \`${expression}\`. Note that expressions must use standard operators (+, -, *, /).`);
              return false;
         }
 
@@ -290,8 +322,6 @@ async function executeParsedAction(message, client, parsed, targetMember, isAnon
         return true;
     }
 
-    // ... (rest of the actions omitted for brevity, assume unchanged and using sendActionReply)
-    
     // --- INFO ACTIONS (Always Allowed if user exists) ---
     if (action === 'avatar' && targetMember) {
         const avatarUrl = targetMember.user.displayAvatarURL({ dynamic: true, size: 1024 });
@@ -494,6 +524,9 @@ async function executeParsedAction(message, client, parsed, targetMember, isAnon
 // --- XP GAIN LOGIC (Existing function, simplified) ---
 async function handleXpGain(message, client, settings) {
     if (settings && settings.noXpChannels.includes(message.channel.id)) return;
+    
+    // FIX: Ignore messages that are replies to prevent XP and level up spam.
+    if (message.reference?.messageId) return; 
 
     // Use the client's map, which was newly initialized in index.js
     const cooldownKey = `${message.author.id}-${message.channel.id}`;
@@ -571,10 +604,15 @@ module.exports = {
     if (isAnonymousCommand) {
         userQuery = userQuery.replace(/^r-blecky\s*/i, '').trim();
         isAnonymous = true;
-    } else if (botMention) {
-        userQuery = userQuery.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
     } else if (isBleckyCommand) {
         userQuery = userQuery.replace(/^blecky\s*/i, '').trim();
+    } else if (botMention) {
+         // NEW FIX: If it's a mention, but the message starts with *another* mention (like Aricatto's reply), ignore it as a command.
+         if (!message.content.trim().startsWith(`<@${client.user.id}>`)) {
+             await handleXpGain(message, client, settings);
+             return;
+         }
+        userQuery = userQuery.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
     } else {
         // Not a bot command/mention, skip AI command logic
         await handleXpGain(message, client, settings);
@@ -592,7 +630,6 @@ module.exports = {
             const replyMethod = isAnonymous ? message.channel.send.bind(message.channel) : message.reply.bind(message);
             await replyMethod("❌ The AI command system is restricted to Administrators (`forgottenOne` role) only.");
         }
-        // Always run XP gain unless the message was a valid command prefix and the user failed the permission check, in which case we exit early.
         return; 
     }
     
@@ -628,13 +665,7 @@ module.exports = {
                 let targetMember = null;
                 if (parsed.targetUser) {
                     targetMember = findUserInGuild(message.guild, parsed.targetUser, message.author.id);
-                    if (!targetMember && parsed.action !== 'calculate' && parsed.action !== 'gif') {
-                        // Send error message using the channel's send method
-                        await message.channel.send(`❌ Couldn't find user "${parsed.targetUser}" to execute the **${parsed.action}** command.`);
-                        // Remove last user message as it led to an error state
-                        getHistory(message.author.id).pop(); 
-                        return;
-                    }
+                    // The findUserInGuild returns null if not found
                 }
                 
                 // Execute the action via the new centralized function
@@ -649,7 +680,7 @@ module.exports = {
                 console.error('AI JSON Parsing/Execution Error:', e);
                 // Fallback to sending a conversational error message
                 const replyMethod = isAnonymous ? message.channel.send.bind(message.channel) : message.reply.bind(message);
-                await replyMethod("❌ I parsed a command but failed to execute it. Perhaps the argument format was wrong, or the resulting action failed.");
+                await replyMethod("❌ I parsed a command but failed to execute it. The command may be restricted or the format was wrong.");
             }
         }
         
