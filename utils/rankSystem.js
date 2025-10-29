@@ -1,5 +1,9 @@
-// utils/rankSystem.js (Placeholder)
-export async function updateUserRank(guildId, userId) {
-    // Logic for updating leaderboards/roles would go here.
-    console.log(`[UTILITY] Mocking rank update for user: ${userId}`);
+// utils/rankSystem.js (REPLACED - Converted to CommonJS)
+
+// Logic for updating leaderboards/roles would go here.
+async function updateUserRank(guildId, userId) {
+    console.log(`[UTILITY] Mocking rank update for user: ${userId} in guild: ${guildId}`);
+    // Placeholder - no actual rank update logic
 }
+
+module.exports = { updateUserRank };
