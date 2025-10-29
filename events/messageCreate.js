@@ -1,4 +1,4 @@
-// events/messageCreate.js (REPLACED - Added More Logging & Cooldown Message)
+// events/messageCreate.js (No changes needed, your logging is already correct)
 const { Events, EmbedBuilder, Collection, PermissionsBitField } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fetch = require('node-fetch'); // Required for Giphy/Gemini
@@ -195,7 +195,7 @@ module.exports = {
                 }
 
             } catch (error) {
-                console.error("[AI Error] Error during AI processing:", error);
+                console.error("[AI Error] Error during AI processing:", error); // <-- THIS IS THE IMPORTANT LINE
                  aiCooldowns.delete(message.author.id); // Clear cooldown on error
                  try { // Try to reply with error
                     if (error.code !== 50013) { // Avoid replying on permission errors
@@ -324,4 +324,4 @@ async function performAction(message, actionType, actionArgs) {
         default:
             console.warn(`[AI Action Warn] Unsupported action: ${actionType}`);
     }
-}
+            }
