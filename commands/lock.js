@@ -1,144 +1,156 @@
-// commands/lock.js (REPLACE - Removed invalid thread permissions, Premium GUI, Added deferReply)
-const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js');
+// commands/lock.js (Converted to Prefix Command)
+const { EmbedBuilder, PermissionsBitField, ChannelType } = require('discord.js');
 const ms = require('ms');
+const Settings = require('../models/Settings'); // Required for logging
+const { logModerationAction } = require('../utils/logModerationAction'); // Required for logging
 
 module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('lock')
-    .setDescription('Lock a channel (deny sending messages for @everyone).')
-    .addChannelOption(option =>
-      option.setName('channel')
-        .setDescription('Channel to lock (defaults to current)')
-        .setRequired(false))
-    .addStringOption(option =>
-      option.setName('duration')
-        .setDescription('Auto-unlock after duration (e.g., 1h, optional)')
-        .setRequired(false))
-    .addStringOption(option =>
-      option.setName('reason')
-        .setDescription('Reason for lock')
-        .setRequired(false)),
-  async execute(interaction, client, logModerationAction) {
-    // ADDED: Defer reply (can be non-ephemeral as lock is public)
-    await interaction.deferReply();
+    name: 'lock',
+    description: 'Lock a channel (deny sending messages for @everyone).',
+    aliases: ['lockdown'],
+    async execute(message, args, client) {
+        // 1. Permission Check (Manage Channels or Lead Mod/Admin roles)
+        const config = client.config;
+        const member = message.member;
+        const isAdmin = member.permissions.has(PermissionsBitField.Flags.Administrator) ||
+                        [config.roles.forgottenOne, config.roles.overseer].some(roleId => member.roles.cache.has(roleId));
+        // Allow Lead Mods or users with Manage Channels permission
+        const canLock = isAdmin || member.roles.cache.has(config.roles.leadMod) || member.permissions.has(PermissionsBitField.Flags.ManageChannels);
 
-    const channel = interaction.options.getChannel('channel') || interaction.channel;
-    const durationStr = interaction.options.getString('duration');
-    const reason = interaction.options.getString('reason') || 'No reason provided';
 
-    // Check bot permissions
-    const botMember = await interaction.guild.members.fetch(client.user.id);
-    if (!channel.permissionsFor(botMember).has(PermissionsBitField.Flags.ManageChannels) || !channel.permissionsFor(botMember).has(PermissionsBitField.Flags.ManageRoles)) {
-        return interaction.editReply({ content: '❌ **Error:** I need "Manage Channels" and "Manage Roles/Permissions" permissions to lock/unlock channels.', ephemeral: true });
-    }
-    // Deprecated check, use permissionsFor
-    // if (!channel.manageable) { ... }
+        // Check for Temp Mod Access Role - LOCK MIGHT BE TOO SENSITIVE FOR TEMP ROLE - uncomment if allowed
+        // const tempRole = message.guild.roles.cache.find(role => role.name === 'TempModAccess');
+        // const hasTempAccess = tempRole && member.roles.cache.has(tempRole.id);
+        // if (!canLock && !hasTempAccess) {
 
-    try {
-      // FIX: Removed invalid or non-existent thread permissions
-      await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
-        SendMessages: false,
-        AddReactions: false,
-      });
 
-      let endTime = null;
-      let durationMsg = '🔒 **permanently**';
-      let timeoutId = null; // To store timeout for potential cancellation
-
-      if (durationStr) {
-        const durationMs = ms(durationStr);
-        if (!durationMs || durationMs < 5000) { // Min duration 5s
-          // Use editReply
-          return interaction.editReply({ content: '❌ **Error:** Invalid duration format or duration too short (min 5s). Use e.g., 10m, 1h.', ephemeral: true });
+        if (!canLock) {
+            return message.reply('🔒 You need the Lead Moderator role or `Manage Channels` permission to use this command.');
         }
-        endTime = Date.now() + durationMs;
-        durationMsg = `for **${durationStr}** (until <t:${Math.floor(endTime / 1000)}:R>)`;
-
-        // Auto-unlock
-        timeoutId = setTimeout(async () => {
-          // Check if lock still exists in map before auto-unlocking
-          if (client.locks && client.locks.has(channel.id)) {
-            try {
-              // Fetch channel again in case of cache issues
-               const currentChannel = await client.channels.fetch(channel.id);
-               if (!currentChannel) return; // Channel deleted
-
-              await currentChannel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
-                SendMessages: null, // Reset to default/inherit
-                AddReactions: null,
-              });
-
-              client.locks.delete(channel.id); // Remove from map after successful unlock
-
-              const unlockEmbed = new EmbedBuilder()
-                .setTitle('🔓 Channel Unlocked')
-                .setDescription(`${currentChannel} is now unlocked as the temporary lock expired.`)
-                .setColor(0x00FF00)
-                .setTimestamp();
-              await currentChannel.send({ embeds: [unlockEmbed] }).catch(console.error);
-
-               // Log auto-unlock
-               const settings = await Settings.findOne({ guildId: interaction.guild.id });
-               if (logModerationAction && settings) {
-                   await logModerationAction(interaction.guild, settings, 'Channel Auto-Unlock', currentChannel, client.user, `Lock duration expired (${durationStr})`);
-               }
-
-            } catch (e) {
-                console.error(`Auto-unlock error for channel ${channel.id}:`, e);
-                // Attempt to notify in channel if possible
-                try {
-                   await channel.send(`⚠️ Error during auto-unlock for ${channel}. Permissions might need manual reset.`).catch(()=>{});
-                } catch {}
-            }
-          }
-        }, durationMs);
-
-         // Store lock info including the timeout ID
-         if (!client.locks) client.locks = new Map(); // Ensure map exists
-         client.locks.set(channel.id, { endTime, reason, timeoutId });
-
-      } else {
-           // For permanent locks, ensure no previous timer exists or clear it
-           if (client.locks && client.locks.has(channel.id)) {
-               const existingLock = client.locks.get(channel.id);
-               if (existingLock.timeoutId) clearTimeout(existingLock.timeoutId);
-           }
-           if (!client.locks) client.locks = new Map();
-           client.locks.set(channel.id, { endTime: null, reason, timeoutId: null }); // Store permanent lock marker
-      }
 
 
-      const lockEmbed = new EmbedBuilder()
-        .setTitle('🔒 Channel Locked')
-        .setDescription(`${channel} has been locked ${durationMsg}.`)
-        .addFields(
-            { name: 'Reason', value: reason }
-        )
-        .setColor(0xFF0000)
-        .setTimestamp()
-        .setFooter({ text: `Locked by ${interaction.user.tag}` });
+        // 2. Determine Target Channel
+        let targetChannel = message.mentions.channels.first();
+        let durationStr = null;
+        let reasonArgs = [...args]; // Copy args for reason processing
 
-      // Use editReply
-      await interaction.editReply({ embeds: [lockEmbed] });
+        if (targetChannel) {
+            reasonArgs = args.filter(arg => !arg.startsWith('<#') && !arg.endsWith('>')); // Remove channel mention
+        } else {
+            targetChannel = message.channel; // Default to current channel
+        }
 
-      // Log
-      try {
-         const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
-         if (logModerationAction && settings) {
-            await logModerationAction(interaction.guild, settings, 'Channel Lock', channel, interaction.user, reason, durationStr ? `Auto-unlock in ${durationStr}` : 'Permanent');
+         // Check if the channel is a valid text-based channel
+         if (!targetChannel.isTextBased() || targetChannel.isThread()) {
+             return message.reply('❌ This command can only be used in regular text channels.');
          }
-      } catch (logError) {
-          console.error("Error logging channel lock:", logError);
-      }
 
-    } catch (error) {
-      console.error('Lock error:', error);
-      // Use editReply or followUp for error after defer
-       try {
-           await interaction.editReply({ content: '❌ **Error:** Failed to lock channel. Check bot permissions (Manage Channels/Roles).', ephemeral: true });
-       } catch (replyError) {
-            await interaction.followUp({ content: '❌ **Error:** Failed to lock channel. Check bot permissions (Manage Channels/Roles).', ephemeral: true }).catch(console.error);
-       }
-    }
-  },
+
+        // 3. Parse Optional Duration (must be the first arg *after* potential channel mention)
+        const potentialDuration = reasonArgs[0];
+        const durationMs = ms(potentialDuration);
+        if (durationMs && durationMs >= 5000) { // Valid duration found (min 5s)
+            durationStr = potentialDuration;
+            reasonArgs.shift(); // Remove duration from reason args
+        } else if (ms(potentialDuration) && durationMs < 5000) {
+            return message.reply('❌ Duration too short (min 5s). Use e.g., 10m, 1h.');
+        }
+        // If the first arg wasn't a valid duration > 5s, assume it's part of the reason
+
+        const reason = reasonArgs.join(' ') || 'No reason provided';
+
+        // 4. Check Bot Permissions
+        const botMember = message.guild.members.me || await message.guild.members.fetch(client.user.id);
+        if (!targetChannel.permissionsFor(botMember).has(PermissionsBitField.Flags.ManageChannels)) {
+            return message.reply(`❌ I need "Manage Channels" permission in ${targetChannel} to lock/unlock it.`);
+        }
+
+        // 5. Apply Lock
+        try {
+            await targetChannel.permissionOverwrites.edit(message.guild.roles.everyone, {
+                SendMessages: false,
+                AddReactions: false, // Optionally lock reactions too
+            });
+
+            let endTime = null;
+            let durationMsg = '🔒 **permanently**';
+            let timeoutId = null;
+
+            if (durationStr) {
+                // We already validated durationMs >= 5000
+                endTime = Date.now() + durationMs;
+                durationMsg = `for **${durationStr}** (until <t:${Math.floor(endTime / 1000)}:R>)`;
+
+                // Auto-unlock
+                timeoutId = setTimeout(async () => {
+                    const lockInfo = client.locks.get(targetChannel.id);
+                     // Check if this specific lock timer should still run (wasn't manually unlocked)
+                     if (lockInfo && lockInfo.timeoutId === timeoutId) {
+                        try {
+                            const currentChannel = await client.channels.fetch(targetChannel.id).catch(() => null);
+                            if (currentChannel && currentChannel.permissionOverwrites.cache.get(message.guild.roles.everyone.id)?.deny.has(PermissionsBitField.Flags.SendMessages)) { // Check if still locked
+                                await currentChannel.permissionOverwrites.edit(message.guild.roles.everyone, {
+                                    SendMessages: null, // Reset
+                                    AddReactions: null,
+                                });
+                                console.log(`Auto-unlocked channel ${targetChannel.name} (${targetChannel.id})`);
+
+                                 const unlockEmbed = new EmbedBuilder()
+                                    .setTitle('🔓 Channel Auto-Unlocked')
+                                    .setDescription(`${currentChannel} is now unlocked as the lock duration expired.`)
+                                    .setColor(0x00FF00)
+                                    .setTimestamp();
+                                 await currentChannel.send({ embeds: [unlockEmbed] }).catch(console.error);
+
+                                 // Log auto-unlock
+                                 const settings = await Settings.findOne({ guildId: message.guild.id });
+                                 if (settings && settings.modlogChannelId) {
+                                     await logModerationAction(message.guild, settings, 'Channel Auto-Unlock', currentChannel, client.user, `Lock duration expired (${durationStr})`);
+                                 }
+                            }
+                        } catch (e) {
+                            console.error(`Auto-unlock error for ${targetChannel.id}:`, e);
+                            try { await targetChannel.send(`⚠️ Error during auto-unlock. Permissions might need manual reset.`).catch(()=>{}); } catch {}
+                        } finally {
+                            client.locks.delete(targetChannel.id); // Remove from map
+                        }
+                    } else {
+                         console.log(`Skipping expired timeout for ${targetChannel.id}, lock likely removed manually.`);
+                    }
+                }, durationMs);
+
+                // Store lock info
+                client.locks.set(targetChannel.id, { endTime, reason, timeoutId, moderatorId: message.author.id });
+
+            } else {
+                 // Permanent lock, clear any existing timer for this channel
+                 const existingLock = client.locks.get(targetChannel.id);
+                 if (existingLock?.timeoutId) {
+                     clearTimeout(existingLock.timeoutId);
+                 }
+                 client.locks.set(targetChannel.id, { endTime: null, reason, timeoutId: null, moderatorId: message.author.id });
+            }
+
+
+            const lockEmbed = new EmbedBuilder()
+                .setTitle('🔒 Channel Locked')
+                .setDescription(`${targetChannel} has been locked ${durationMsg}.`)
+                .addFields({ name: 'Reason', value: reason })
+                .setColor(0xFF0000)
+                .setTimestamp()
+                .setFooter({ text: `Locked by ${message.author.tag}` });
+
+            await message.channel.send({ embeds: [lockEmbed] });
+
+            // Log
+            const settings = await Settings.findOne({ guildId: message.guild.id });
+            if (settings && settings.modlogChannelId) {
+                await logModerationAction(message.guild, settings, 'Channel Lock', targetChannel, message.author, reason, durationStr ? `Duration: ${durationStr}` : 'Permanent');
+            }
+
+        } catch (error) {
+            console.error('Lock error:', error);
+            message.reply(`❌ Failed to lock ${targetChannel}. Check permissions.`);
+        }
+    },
 };
