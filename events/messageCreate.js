@@ -260,6 +260,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
 - **warn/timeout/softban**: {"command": "...", "targetId": "...", "reason": "..."} (Always provide a reason string, even a default one if the user is lazy, or explicitly state the reason)
 - **purge/purgeuser**: {"command": "...", "targetId": "...", "amount": "..."}
 - **warnlist/profile/userinfo**: {"command": "...", "targetId": "..."}
+- **lock/unlock**: {"command": "...", "targetId": "...", "duration": "...", "reason": "..."}
 
 1. **DISCORD ACTION COMMANDS (Basic Tasks)**: Requests like 'send dm', 'send message in channel', or 'send a gif'. For these, respond ONLY with a single JSON object in this format: {"action": "DISCORD_ACTION", "type": "<dm|channel|gif>", "targetId": "<user id, mention, or channel id>", "content": "<string message/gif URL>"}
     - **IMPORTANT**: Use the Server Member Context to convert a name into their mention/ID before outputting the JSON.
@@ -282,27 +283,27 @@ Your task is to interpret the user's request. **If the request sounds like a com
             
             let commandExecutionData;
             try {
-                // CRITICAL FIX: Attempt to parse the response; if it's JSON, we execute.
+                // Attempt to parse the response; if it's JSON, we execute.
                 commandExecutionData = JSON.parse(aiResponseText);
             } catch {}
 
 
-            // CRITICAL FIX: Removed the logic that sends the raw JSON string publicly.
-            // Execution proceeds silently now.
+            // CRITICAL FIX: The logic that sent the raw JSON string publicly is REMOVED.
 
             if (commandExecutionData && (commandExecutionData.action === 'COMMAND' || commandExecutionData.action === 'DISCORD_ACTION')) {
-                let { action, command, type, targetId, amount, reason, content } = commandExecutionData;
+                let { action, command, type, targetId, amount, reason, content, duration } = commandExecutionData;
                 
                 // --- EXECUTION HARDENING: ENSURE REASON IS PRESENT FOR MOD COMMANDS ---
-                if (['warn', 'timeout', 'softban'].includes(command) && !reason) {
+                if (['warn', 'timeout', 'softban', 'lock'].includes(command) && !reason) {
                     reason = "AI-inferred action: Reason was missing or unclear.";
                     commandExecutionData.reason = reason;
                 } else if (!reason) {
                     reason = null;
                 }
                 
-                // Ensure amount is safe
+                // Ensure amount/duration are safe
                 if (!amount) amount = null;
+                if (!duration) duration = null;
 
                 // --- DISCORD ACTION EXECUTION ---
                 if (action === 'DISCORD_ACTION') {
@@ -329,7 +330,10 @@ Your task is to interpret the user's request. **If the request sounds like a com
 
                     const resolvedTarget = resolveUserFromCommand(message.guild, targetId);
                     
-                    if (!resolvedTarget && command !== 'resetdailystreak') { // resetdailystreak doesn't need a target
+                    // Allow certain commands to proceed without a targetId/user object if they target the channel or 'all'
+                    const noTargetCommands = ['resetdailystreak', 'purge', 'lock', 'unlock', 'addcookiesall', 'removecookiesall'];
+                    
+                    if (!resolvedTarget && !noTargetCommands.includes(command)) {
                         return message.reply(`❌ **AI Command Error:** I could not find a user matching "${targetId}". Please try pinging them.`);
                     }
                     
@@ -348,12 +352,15 @@ Your task is to interpret the user's request. **If the request sounds like a com
                                 
                             const finalOptions = { content: finalContent, embeds: responseEmbeds };
 
-                            // If it's a mod action, use a clean reply for visibility
-                            if (!ephemeral && !content && responseEmbeds.length > 0) {
+                            // If it's a command that replies publicly, use a reply.
+                            // We don't want to reply with the ephemeral warning if the original command was *meant* to be public.
+                            if (!ephemeral && (!content || content.startsWith('⚠️')) && responseEmbeds.length > 0) {
+                                return message.reply(finalOptions).catch(console.error);
+                            } else if (ephemeral) {
+                                // If ephemeral, send the warning/content to the admin
                                 return message.reply(finalOptions).catch(console.error);
                             }
                             
-                            // Otherwise, use a reply (ephemeral messages requested by mock must be replied to directly)
                             return message.reply(finalOptions).catch(console.error);
                         };
 
@@ -363,7 +370,7 @@ Your task is to interpret the user's request. **If the request sounds like a com
                                 getInteger: (name) => (name === 'amount' && amount) ? parseInt(amount) : null,
                                 getString: (name) => {
                                     if (name === 'reason') return reason; // Now guaranteed to be string or null
-                                    if (name === 'duration') return amount ? amount.toString() : null; // duration is often 'amount' for timeout
+                                    if (name === 'duration') return duration || amount?.toString() || null; // duration or amount for timeout
                                     if (name === 'all_warns') return targetId?.toLowerCase() === 'all' ? 'all' : null; // Check for 'all' in user string
                                     return null;
                                 },
@@ -410,7 +417,6 @@ Your task is to interpret the user's request. **If the request sounds like a com
                 }
             } else {
                 // 3. Respond with AI chat (Chat Mode)
-                // CRITICAL FIX: Removed the intermediate JSON message deletion logic
                 await message.reply(aiResponseText).catch(console.error);
             }
             
