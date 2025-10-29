@@ -1,6 +1,6 @@
 const { Events } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const axios = require('axios');
+const fetch = require('node-fetch'); // Using your existing node-fetch instead of axios
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -123,8 +123,9 @@ async function handleMongoDBQuery(message, query) {
 async function handleGIF(message, query) {
     const searchTerm = query.replace('gif of', '').trim() || 'funny';
     try {
-        const response = await axios.get(`https://api.giphy.com/v1/gifs/search?api_key=${process.env.GIPHY_API_KEY}&q=${encodeURIComponent(searchTerm)}&limit=1&rating=g`);
-        const gif = response.data.data[0];
+        const response = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${process.env.GIPHY_API_KEY}&q=${encodeURIComponent(searchTerm)}&limit=1&rating=g`);
+        const data = await response.json();
+        const gif = data.data[0];
         if (gif) {
             await message.channel.send(gif.images.original.url);
             await message.reply('A GIF for your amusement, sir.');
@@ -140,8 +141,8 @@ async function handleWeather(message, query) {
     // Example using OpenWeather API; replace with your key if needed
     const city = query.replace('weather', '').trim() || 'London';
     try {
-        const response = await axios.get(`http://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${process.env.WEATHER_API_KEY}&units=metric`);
-        const weather = response.data;
+        const response = await fetch(`http://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${process.env.WEATHER_API_KEY}&units=metric`);
+        const weather = await response.json();
         await message.reply(`Weather in ${city}: ${weather.weather[0].description}, ${weather.main.temp}°C. Stay dry, sir.`);
     } catch (error) {
         await message.reply('Weather data unavailable. Perhaps check manually?');
