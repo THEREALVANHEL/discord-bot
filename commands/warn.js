@@ -1,154 +1,145 @@
-// commands/warn.js (REPLACE - Refined for better public visibility + GUI Update + User Tagging + Added deferReply)
-const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js'); // Added Permissions
+// commands/warn.js (Converted to Prefix Command)
+const { EmbedBuilder, PermissionsBitField } = require('discord.js');
 const User = require('../models/User');
+const Settings = require('../models/Settings');
+const { findUserInGuild } = require('../utils/findUserInGuild');
+const { logModerationAction } = require('../utils/logModerationAction');
 const ms = require('ms');
 
 module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('warn')
-    .setDescription('Warn a user.')
-    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
-      option.setName('target')
-        .setDescription('User to warn')
-        .setRequired(true))
-    .addStringOption(option =>
-      option.setName('reason')
-        .setDescription('Reason for warning')
-        .setRequired(true))
-    // Add default permissions
-    .setDefaultMemberPermissions(PermissionsBitField.Flags.ModerateMembers), // Users need Moderate Members to warn
-  async execute(interaction, client, logModerationAction) {
-    // ADDED: Defer reply (public)
-    await interaction.deferReply();
-
-    const target = interaction.options.getUser('target');
-    const reason = interaction.options.getString('reason');
-    const member = interaction.guild.members.cache.get(target.id); // Fetch member for checks
-
-    if (target.bot) {
-      // Use editReply (ephemeral)
-      return interaction.editReply({ content: '❌ **Error:** You cannot warn bots.', ephemeral: true });
-    }
-    if (target.id === interaction.user.id) {
-       // Use editReply (ephemeral)
-      await interaction.editReply({ content: '❌ **Error:** You cannot warn yourself.', ephemeral: true });
-      return;
-    }
-
-     // Check hierarchy - cannot warn users with higher/equal roles unless server owner
-     if (member && member.roles.highest.position >= interaction.member.roles.highest.position && interaction.guild.ownerId !== interaction.user.id) {
-         return interaction.editReply({ content: '❌ **Error:** You cannot warn someone with an equal or higher role.', ephemeral: true });
-     }
-     // Optionally check if target is admin (though role hierarchy should cover this)
-     // if (member && member.permissions.has(PermissionsBitField.Flags.Administrator)) { ... }
+    name: 'warn',
+    description: 'Warn a user.',
+    aliases: [],
+    async execute(message, args, client) {
+        // 1. Permission Check (Moderate Members or Mod/Admin roles)
+        const config = client.config;
+        const member = message.member;
+        const isAdmin = member.permissions.has(PermissionsBitField.Flags.Administrator) ||
+                        [config.roles.forgottenOne, config.roles.overseer].some(roleId => member.roles.cache.has(roleId));
+        const isMod = isAdmin || [config.roles.leadMod, config.roles.mod].some(roleId => member.roles.cache.has(roleId)) ||
+                      member.permissions.has(PermissionsBitField.Flags.ModerateMembers); // Added ModerateMembers perm check
 
 
-    let user = await User.findOne({ userId: target.id });
-    if (!user) {
-      user = new User({ userId: target.id });
-    }
+        // Check for Temp Mod Access Role
+        const tempRole = message.guild.roles.cache.find(role => role.name === 'TempModAccess');
+        const hasTempAccess = tempRole && member.roles.cache.has(tempRole.id);
 
-    const warningData = {
-      reason,
-      moderatorId: interaction.user.id,
-      date: new Date(),
-    };
-
-    user.warnings.push(warningData);
-
-    // Use try-catch for DB save
-    try {
-        await user.save();
-    } catch (dbError) {
-         console.error("Failed to save warning to DB:", dbError);
-         return interaction.editReply({ content: '❌ **Database Error:** Could not save the warning.', ephemeral: true });
-    }
-
-    const newWarningCount = user.warnings.length;
-
-    // DM user (private) - Best effort
-    try {
-      await target.send(`You have been warned in **${interaction.guild.name}** for: \`${reason}\`\nThis is warning **#${newWarningCount}**.`);
-    } catch (dmError) {
-        console.log(`Could not DM ${target.tag} about warning: ${dmError.message}`);
-    }
-
-    const embed = new EmbedBuilder()
-      .setTitle('⚠️ Warning Issued')
-      .setDescription(`Moderator ${interaction.user} issued a warning.`)
-      .addFields(
-        { name: 'Target', value: `${target} (\`${target.tag}\`)`, inline: true },
-        { name: 'Reason', value: reason, inline: false },
-        { name: 'Total Warnings', value: `**${newWarningCount}**`, inline: true }
-      )
-      .setColor(0xFFA500) // Orange
-      .setTimestamp();
-
-    // Public confirmation (visible to everyone) - Use editReply
-    await interaction.editReply({ embeds: [embed] });
-
-    // Log
-    try {
-        const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
-        if (logModerationAction && settings) {
-           await logModerationAction(interaction.guild, settings, 'Warn', target, interaction.user, reason, `Warning #${newWarningCount}`);
+        if (!isMod && !hasTempAccess) { // Check if user is Mod/Admin OR has temp access
+             return message.reply('🛡️ You need Moderator permissions or temporary access to use this command.');
         }
-    } catch (logError) {
-        console.error("Error logging warning:", logError);
-    }
 
 
-    // Auto timeout after 5 warnings (configurable later)
-    const AUTO_TIMEOUT_THRESHOLD = 5; // Example threshold
-    const AUTO_TIMEOUT_DURATION = '1h'; // Example duration
+        // 2. Argument Parsing: ?warn <user> [reason]
+        if (args.length < 1) {
+            return message.reply('Usage: `?warn <@user|userID|username> [reason]`');
+        }
 
-    if (newWarningCount >= AUTO_TIMEOUT_THRESHOLD) {
-      if (member) { // Ensure member object exists
-        // Check bot permissions and hierarchy before attempting timeout
-        const botMember = await interaction.guild.members.fetch(client.user.id);
-        if (botMember.permissions.has(PermissionsBitField.Flags.ModerateMembers) && member.roles.highest.position < botMember.roles.highest.position && !member.isCommunicationDisabled())
-        {
-            try {
-              const timeoutDuration = ms(AUTO_TIMEOUT_DURATION);
-              await member.timeout(timeoutDuration, `Auto timeout: ${AUTO_TIMEOUT_THRESHOLD} warnings reached`);
+        const targetIdentifier = args[0];
+        const reason = args.slice(1).join(' ') || 'No reason provided.';
 
-              const autoTimeoutEmbed = new EmbedBuilder()
-                .setTitle('🚨 Automatic Action: Timeout')
-                .setDescription(`${target} has reached **${newWarningCount} warnings** and was automatically timed out for **${AUTO_TIMEOUT_DURATION}** to prevent further issues.`)
-                .setColor(0xDC143C) // Crimson
-                .setTimestamp();
+        // 3. Find Target User/Member
+        const targetMember = await findUserInGuild(message.guild, targetIdentifier);
 
-              // Public auto-action message - Use followUp as reply is already done
-               await interaction.followUp({ embeds: [autoTimeoutEmbed], ephemeral: false }).catch(console.error);
+        if (!targetMember) {
+            return message.reply(`❌ Could not find user: "${targetIdentifier}". Please use a mention, ID, or full username.`);
+        }
+        const target = targetMember.user; // Get the User object
 
-               // Log Auto Timeout
-               try {
-                   const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
-                   if (logModerationAction && settings) {
-                       await logModerationAction(interaction.guild, settings, 'Auto Timeout', target, client.user, `${AUTO_TIMEOUT_THRESHOLD} warnings reached`, `Duration: ${AUTO_TIMEOUT_DURATION}`);
-                   }
-               } catch (logError) {
-                    console.error("Error logging auto-timeout:", logError);
-               }
+        // 4. Basic Checks
+        if (target.bot) {
+            return message.reply('❌ You cannot warn bots.');
+        }
+        if (target.id === message.author.id) {
+            return message.reply('❌ You cannot warn yourself.');
+        }
 
-              // DM user about auto-timeout - Best effort
-              try {
-                await target.send(`You have been automatically timed out in **${interaction.guild.name}** for **${AUTO_TIMEOUT_DURATION}** due to accumulating ${newWarningCount} warnings.`);
-              } catch {} // Ignore DM errors
+        // 5. Hierarchy Check
+        // Fetch bot member to check its hierarchy
+         const botMember = message.guild.members.me || await message.guild.members.fetch(client.user.id);
+         if (targetMember.roles.highest.position >= member.roles.highest.position && message.guild.ownerId !== message.author.id) {
+             return message.reply('❌ You cannot warn someone with an equal or higher role.');
+         }
+         if (targetMember.roles.highest.position >= botMember.roles.highest.position) {
+              return message.reply('❌ I cannot warn someone with an equal or higher role than me.');
+         }
 
-            } catch (timeoutError) {
-                console.error(`Failed to auto-timeout ${target.tag}:`, timeoutError);
-                // Optionally send a follow-up if timeout fails
-                await interaction.followUp({ content: `⚠️ Failed to automatically timeout ${target.tag}. Check permissions and role hierarchy.`, ephemeral: true }).catch(console.error);
+
+        // 6. Database Update
+        let userDB = await User.findOne({ userId: target.id });
+        if (!userDB) {
+            userDB = new User({ userId: target.id });
+        }
+
+        const warningData = {
+            reason,
+            moderatorId: message.author.id,
+            date: new Date(),
+        };
+        userDB.warnings.push(warningData);
+
+        try {
+            await userDB.save();
+        } catch (dbError) {
+            console.error("Failed to save warning:", dbError);
+            return message.reply('❌ Database Error: Could not save the warning.');
+        }
+
+        const newWarningCount = userDB.warnings.length;
+
+        // 7. DM User (Best effort)
+        try {
+            await target.send(`You have been warned in **${message.guild.name}** for: \`${reason}\`\nThis is warning **#${newWarningCount}**.`);
+        } catch (dmError) {
+            console.log(`Could not DM ${target.tag} about warning.`);
+        }
+
+        // 8. Public Confirmation Embed
+        const embed = new EmbedBuilder()
+            .setTitle('⚠️ Warning Issued')
+            .setDescription(`Moderator ${message.author} issued a warning.`)
+            .addFields(
+                { name: 'Target', value: `${target} (\`${target.tag}\`)`, inline: true },
+                { name: 'Reason', value: reason, inline: false },
+                { name: 'Total Warnings', value: `**${newWarningCount}**`, inline: true }
+            )
+            .setColor(0xFFA500) // Orange
+            .setTimestamp();
+
+        await message.channel.send({ embeds: [embed] });
+
+        // 9. Log Action
+        const settings = await Settings.findOne({ guildId: message.guild.id });
+         if (settings && settings.modlogChannelId) {
+            await logModerationAction(message.guild, settings, 'Warn', target, message.author, reason, `Warning #${newWarningCount}`);
+         }
+
+        // 10. Auto Timeout Logic (Keep existing logic)
+        const AUTO_TIMEOUT_THRESHOLD = 5;
+        const AUTO_TIMEOUT_DURATION = '1h';
+        if (newWarningCount >= AUTO_TIMEOUT_THRESHOLD) {
+            if (botMember.permissions.has(PermissionsBitField.Flags.ModerateMembers) && targetMember.moderatable && !targetMember.isCommunicationDisabled()) {
+                try {
+                    const timeoutDuration = ms(AUTO_TIMEOUT_DURATION);
+                    await targetMember.timeout(timeoutDuration, `Auto timeout: ${AUTO_TIMEOUT_THRESHOLD} warnings reached`);
+
+                    const autoTimeoutEmbed = new EmbedBuilder()
+                        .setTitle('🚨 Automatic Action: Timeout')
+                        .setDescription(`${target} reached **${newWarningCount} warnings** and was automatically timed out for **${AUTO_TIMEOUT_DURATION}**.`)
+                        .setColor(0xDC143C)
+                        .setTimestamp();
+                    await message.channel.send({ embeds: [autoTimeoutEmbed] });
+
+                     if (settings && settings.modlogChannelId) {
+                         await logModerationAction(message.guild, settings, 'Auto Timeout', target, client.user, `${AUTO_TIMEOUT_THRESHOLD} warnings reached`, `Duration: ${AUTO_TIMEOUT_DURATION}`);
+                     }
+                    try { await target.send(`You have been automatically timed out in **${message.guild.name}** for **${AUTO_TIMEOUT_DURATION}** due to accumulating ${newWarningCount} warnings.`); } catch {}
+                } catch (timeoutError) {
+                    console.error(`Failed to auto-timeout ${target.tag}:`, timeoutError);
+                    message.channel.send(`⚠️ Failed to automatically timeout ${target.tag}. Check permissions/hierarchy.`).catch(console.error);
+                }
+            } else {
+                 message.channel.send(`⚠️ ${target.tag} reached ${newWarningCount} warnings, but I couldn't apply the automatic timeout (Permissions/Hierarchy/Already Timed Out).`).catch(console.error);
             }
-        } else {
-             console.log(`Skipping auto-timeout for ${target.tag}: Bot lacks permissions, hierarchy issue, or user already timed out.`);
-              // Optionally inform mods ephemerally
-              await interaction.followUp({ content: `⚠️ ${target.tag} reached ${newWarningCount} warnings, but I couldn't apply the automatic timeout. Please check permissions/hierarchy or apply manually if needed.`, ephemeral: true }).catch(console.error);
         }
-      } else {
-          console.log(`Could not find member ${target.tag} for auto-timeout check.`);
-      }
-    }
-  },
+    },
 };
