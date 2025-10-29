@@ -1,103 +1,99 @@
-// commands/softban.js (REPLACE - Success reply now visible to everyone + GUI Update + User Tagging + Added deferReply)
-const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js'); // Added PermissionsBitField
+// commands/softban.js (Converted to Prefix Command)
+const { EmbedBuilder, PermissionsBitField } = require('discord.js');
+const Settings = require('../models/Settings');
+const { findUserInGuild } = require('../utils/findUserInGuild');
+const { logModerationAction } = require('../utils/logModerationAction');
 
 module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('softban')
-    .setDescription('Softban a user (kick user to purge messages, allows immediate rejoin).') // Clarified description
-    .addUserOption(option => // FIX: Changed 'addUser Option' to 'addUserOption'
-      option.setName('target')
-        .setDescription('User to softban')
-        .setRequired(true))
-    .addStringOption(option =>
-      option.setName('reason')
-        .setDescription('Reason for softban')
-        .setRequired(true))
-    // Add default permissions required
-    .setDefaultMemberPermissions(PermissionsBitField.Flags.BanMembers | PermissionsBitField.Flags.KickMembers),
-  async execute(interaction, client, logModerationAction) {
-    // ADDED: Defer reply (public, as the action result is public)
-    await interaction.deferReply();
+    name: 'softban',
+    description: 'Softban a user (kick to purge messages, allows immediate rejoin).',
+    aliases: ['sb'],
+    async execute(message, args, client) {
+        // 1. Permission Check (Ban Members + Kick Members or Mod/Admin roles)
+        const config = client.config;
+        const member = message.member;
+         const isAdmin = member.permissions.has(PermissionsBitField.Flags.Administrator) ||
+                         [config.roles.forgottenOne, config.roles.overseer].some(roleId => member.roles.cache.has(roleId));
+         const isMod = isAdmin || [config.roles.leadMod, config.roles.mod].some(roleId => member.roles.cache.has(roleId)) ||
+                       (member.permissions.has(PermissionsBitField.Flags.BanMembers) && member.permissions.has(PermissionsBitField.Flags.KickMembers)); // Check specific perms too
 
-    const target = interaction.options.getUser('target');
-    const reason = interaction.options.getString('reason');
+         // Check for Temp Mod Access Role
+         const tempRole = message.guild.roles.cache.find(role => role.name === 'TempModAccess');
+         const hasTempAccess = tempRole && member.roles.cache.has(tempRole.id);
 
-    const member = interaction.guild.members.cache.get(target.id);
-    if (!member) {
-      // Use editReply
-      return interaction.editReply({ content: '❌ **Error:** User not found in this server.', ephemeral: true });
-    }
-
-    if (member.id === interaction.user.id) {
-       // Use editReply (ephemeral recommended for self-action errors)
-       await interaction.editReply({ content: '❌ **Error:** You cannot softban yourself.', ephemeral: true });
-       return; // Make sure to return after replying
-    }
-
-    // Check hierarchy and permissions
-     const botMember = await interaction.guild.members.fetch(client.user.id);
-     if (!botMember.permissions.has(PermissionsBitField.Flags.BanMembers)) {
-         return interaction.editReply({ content: '❌ **Error:** I do not have permission to ban members.', ephemeral: true });
-     }
-     if (member.roles.highest.position >= interaction.member.roles.highest.position && interaction.guild.ownerId !== interaction.user.id) {
-         return interaction.editReply({ content: '❌ **Error:** You cannot softban someone with an equal or higher role.', ephemeral: true });
-     }
-      if (member.roles.highest.position >= botMember.roles.highest.position) {
-         return interaction.editReply({ content: '❌ **Error:** I cannot softban someone with an equal or higher role than me.', ephemeral: true });
-     }
-     // Deprecated check, use hierarchy checks above
-     // if (member.permissions.has('Administrator')) { ... }
+        if (!isMod && !hasTempAccess) {
+             return message.reply('🛡️ You need Ban & Kick permissions or temporary access to use this command.');
+        }
 
 
-    try {
-      // DM the user *before* banning (private)
-      try {
-        await target.send(`You are being softbanned from **${interaction.guild.name}** for: \`${reason}\`. This kicks you but allows you to rejoin immediately. Consider this a warning.`);
-      } catch (dmError) {
-        console.log(`Could not DM ${target.tag} before softban: ${dmError.message}`);
-      }
+        // 2. Argument Parsing: ?softban <user> [reason]
+        if (args.length < 1) {
+            return message.reply('Usage: `?softban <@user|userID|username> [reason]`');
+        }
+        const targetIdentifier = args[0];
+        const reason = args.slice(1).join(' ') || 'No reason provided.';
 
-      // Ban to kick and delete messages (deleteMessageSeconds: 0 = Don't delete messages for a true softban/kick effect)
-      // If you want message deletion, use a value like 60 * 60 * 24 * 1 (1 day worth of messages)
-      await interaction.guild.members.ban(target.id, { deleteMessageSeconds: 0, reason: `Softban: ${reason}` }); // Changed days to seconds
+        // 3. Find Target User/Member
+        const targetMember = await findUserInGuild(message.guild, targetIdentifier);
+        if (!targetMember) {
+            return message.reply(`❌ Could not find user: "${targetIdentifier}".`);
+        }
+        const target = targetMember.user;
 
-      // Immediate unban
-      await interaction.guild.members.unban(target.id, 'Softban automatic unban');
+        // 4. Basic & Hierarchy Checks
+        if (targetMember.id === message.author.id) {
+            return message.reply('❌ You cannot softban yourself.');
+        }
+        const botMember = message.guild.members.me || await message.guild.members.fetch(client.user.id);
+         if (!botMember.permissions.has(PermissionsBitField.Flags.BanMembers)) {
+             return message.reply('❌ I do not have permission to ban members (required for softban).');
+         }
+         if (targetMember.roles.highest.position >= member.roles.highest.position && message.guild.ownerId !== message.author.id) {
+             return message.reply('❌ You cannot softban someone with an equal or higher role.');
+         }
+          if (targetMember.roles.highest.position >= botMember.roles.highest.position) {
+             return message.reply('❌ I cannot softban someone with an equal or higher role than me.');
+         }
 
 
-      const embed = new EmbedBuilder()
-        .setTitle('🔨 Softban Executed')
-        .setDescription(`Moderator ${interaction.user} issued a softban (kick). The user can rejoin.`) // Clarified description
-        .addFields(
-            { name: 'Target', value: `${target} (\`${target.tag}\`)`, inline: true },
-            { name: 'Action', value: 'Kick (Softban)', inline: true }, // Clarified action
-            { name: 'Messages Purged?', value: 'No', inline: true }, // Based on deleteMessageSeconds: 0
-            { name: 'Reason', value: reason, inline: false }
-        )
-        .setColor(0xDC143C) // Crimson
-        .setTimestamp();
+        // 5. Perform Softban (Ban + Immediate Unban)
+        try {
+            // DM User (Best effort)
+            try {
+                await target.send(`You are being softbanned from **${message.guild.name}** for: \`${reason}\`. This kicks you but allows immediate rejoin.`);
+            } catch (dmError) {
+                console.log(`Could not DM ${target.tag} before softban.`);
+            }
 
-      // Public confirmation (visible to everyone) - Use editReply
-      await interaction.editReply({ embeds: [embed] });
+            // Ban (0 seconds = kick effect, no message deletion)
+            await message.guild.members.ban(target.id, { deleteMessageSeconds: 0, reason: `Softban by ${message.author.tag}: ${reason}` });
 
-      // Log the action (private modlog)
-      try {
-         const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
-          if (logModerationAction && settings) {
-             await logModerationAction(interaction.guild, settings, 'Softban', target, interaction.user, reason, 'No messages deleted');
-          }
-      } catch (logError) {
-          console.error("Error logging softban:", logError);
-      }
+            // Unban immediately
+            await message.guild.members.unban(target.id, 'Softban automatic unban');
 
-    } catch (error) {
-      console.error('Softban error:', error);
-       // Use editReply or followUp for error after defer
-       try {
-           await interaction.editReply({ content: '❌ **Error:** Failed to softban user. Ensure the bot has "Ban Members" permission and is above the target user\'s role.', ephemeral: true });
-       } catch (replyError) {
-           await interaction.followUp({ content: '❌ **Error:** Failed to softban user. Ensure the bot has "Ban Members" permission and is above the target user\'s role.', ephemeral: true }).catch(console.error);
-       }
-    }
-  },
+            // 6. Public Confirmation Embed
+            const embed = new EmbedBuilder()
+                .setTitle('🔨 Softban Executed')
+                .setDescription(`Moderator ${message.author} issued a softban (kick). The user can rejoin.`)
+                .addFields(
+                    { name: 'Target', value: `${target} (\`${target.tag}\`)`, inline: true },
+                    { name: 'Action', value: 'Kick (Softban)', inline: true },
+                    { name: 'Messages Purged?', value: 'No', inline: true }, // As deleteMessageSeconds is 0
+                    { name: 'Reason', value: reason, inline: false }
+                )
+                .setColor(0xDC143C) // Crimson
+                .setTimestamp();
+            await message.channel.send({ embeds: [embed] });
+
+            // 7. Log Action
+             const settings = await Settings.findOne({ guildId: message.guild.id });
+              if (settings && settings.modlogChannelId) {
+                 await logModerationAction(message.guild, settings, 'Softban', target, message.author, reason, 'No messages deleted');
+              }
+
+        } catch (error) {
+            console.error('Softban error:', error);
+            message.reply('❌ Failed to softban user. Check my "Ban Members" permission and role hierarchy.');
+        }
+    },
 };
