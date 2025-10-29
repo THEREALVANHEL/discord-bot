@@ -1,34 +1,48 @@
-// utils/searchGiphyGif.js (REPLACED - Converted to CommonJS)
-// Searches Giphy for a GIF URL.
-// IMPORTANT: Requires GIPHY_API_KEY in .env and node-fetch
-
-const fetch = require('node-fetch'); // Make sure node-fetch is installed
-const GIPHY_API_KEY = process.env.GIPHY_API_KEY; // Add this to your .env
+// utils/searchGiphyGif.js (REPLACED - Implemented Giphy Search)
+const fetch = require('node-fetch'); // Ensure node-fetch@2 is installed
+const GIPHY_API_KEY = process.env.GIPHY_API_KEY;
+const DEFAULT_GIF = 'https://media.giphy.com/media/l4pTsh45Dg7ClzJny/giphy.gif'; // Fallback GIF
 
 async function searchGiphyGif(term) {
     if (!GIPHY_API_KEY) {
         console.error("GIPHY_API_KEY not set in environment variables.");
-        return 'https://media.giphy.com/media/l4pTsh45Dg7ClzJny/giphy.gif'; // Default on error
+        return DEFAULT_GIF;
+    }
+    if (!term || typeof term !== 'string' || term.trim() === '') {
+        console.warn("searchGiphyGif called with invalid term.");
+        return DEFAULT_GIF;
     }
 
-    const searchTerm = encodeURIComponent(term);
-    const url = `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${searchTerm}&limit=1&offset=0&rating=g&lang=en`;
+    const searchTerm = encodeURIComponent(term.trim());
+    // Using the Giphy search endpoint
+    const url = `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${searchTerm}&limit=5&offset=0&rating=g&lang=en`;
 
     try {
-        const response = await fetch(url);
+        const response = await fetch(url, { timeout: 10000 }); // 10 second timeout
         if (!response.ok) {
-            throw new Error(`Giphy API error: ${response.statusText}`);
+            console.error(`Giphy API error: ${response.status} ${response.statusText}`);
+             const errorBody = await response.text();
+             console.error("Giphy Error Body:", errorBody);
+            return DEFAULT_GIF;
         }
         const json = await response.json();
+
         if (json.data && json.data.length > 0) {
-            // Prefer fixed height URL if available
-            return json.data[0].images?.fixed_height?.url || json.data[0].images?.original?.url || 'https://media.giphy.com/media/l4pTsh45Dg7ClzJny/giphy.gif';
+            // Pick a random GIF from the first few results
+            const randomIndex = Math.floor(Math.random() * json.data.length);
+            const gifData = json.data[randomIndex];
+            // Prefer a downsized or fixed_height version for Discord embeds
+            const gifUrl = gifData.images?.fixed_height?.url
+                        || gifData.images?.downsized?.url
+                        || gifData.images?.original?.url;
+            return gifUrl || DEFAULT_GIF;
         } else {
-            return 'https://media.giphy.com/media/l4pTsh45Dg7ClzJny/giphy.gif'; // Default if no results
+             console.log(`No Giphy results found for term: "${term}"`);
+            return DEFAULT_GIF; // Return default if no results
         }
     } catch (error) {
         console.error("Error searching Giphy:", error);
-        return 'https://media.giphy.com/media/l4pTsh45Dg7ClzJny/giphy.gif'; // Default on error
+        return DEFAULT_GIF; // Return default on any fetch error
     }
 }
 
