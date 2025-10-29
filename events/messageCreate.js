@@ -1,14 +1,14 @@
 // events/messageCreate.js (REPLACED - Handles Prefixes and ?blecky AI)
 const { Events, EmbedBuilder, Collection, PermissionsBitField } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const fetch = require('node-fetch'); // Required for Giphy/Gemini
-const User = require('../models/User'); // Import User model
-const Settings = require('../models/Settings'); // Import Settings model
-const { findUserInGuild } = require('../utils/findUserInGuild'); // Utility to find users
-const { searchGiphyGif } = require('../utils/searchGiphyGif'); // Import Giphy search
-const { getNextLevelXp } = require('../utils/levelUtils'); // Import XP calculation from your level utils
-const { generateUserLevel } = require('../utils/levelSystem'); // Import level up check
-const { XP_COOLDOWN, generateXP } = require('../utils/xpSystem'); // Import XP settings
+const fetch = require('node-fetch');
+const User = require('../models/User');
+const Settings = require('../models/Settings');
+const { findUserInGuild } = require('../utils/findUserInGuild');
+const { searchGiphyGif } = require('../utils/searchGiphyGif');
+const { getNextLevelXp } = require('../utils/levelUtils'); // <<<< ENSURE THIS LINE IS CORRECT
+const { generateUserLevel } = require('../utils/levelSystem');
+const { XP_COOLDOWN, generateXP } = require('../utils/xpSystem');
 
 // --- AI Configuration ---
 const AI_MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-1.5-flash-latest';
