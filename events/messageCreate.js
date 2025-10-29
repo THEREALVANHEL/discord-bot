@@ -1,10 +1,10 @@
-// events/messageCreate.js (REPLACED - Advanced AI Handler)
+// events/messageCreate.js (REPLACED - Removed duplicate getNextLevelXp declaration)
 const { Events, EmbedBuilder } = require('discord.js');
 const fetch = require('node-fetch'); // Ensure node-fetch@2 is installed
 const User = require('../models/User'); // Import User model
 const { findUserInGuild } = require('../utils/findUserInGuild'); // Utility to find users by name/ID
 const { searchGiphyGif } = require('../utils/searchGiphyGif'); // Import Giphy search
-const { getNextLevelXp } = require('../utils/levelUtils'); // Import XP calculation if available, or define locally
+const { getNextLevelXp } = require('../utils/levelUtils'); // <-- IMPORT the function
 
 const AI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash-latest';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -35,9 +35,9 @@ const AI_COOLDOWN_MS = 5000; // 5 seconds cooldown per user
 module.exports = {
   name: Events.MessageCreate,
   async execute(message) {
-    // Basic checks
+    // Basic checks first
     if (message.author.bot) return;
-    if (!message.guild) return; // Ignore DMs
+    if (!message.guild) return; // Ignore DMs for this handler
     if (message.content.startsWith('/')) return; // Ignore slash commands
 
     // Trigger check (case-insensitive)
@@ -65,7 +65,9 @@ module.exports = {
     let userPrompt = message.content.replace(new RegExp(TRIGGER_WORD, 'gi'), '').replace(/<@!?(\d+)>/g, '').trim();
     if (!userPrompt) {
          // If only "blecky" was said, provide a simple response
-         await message.reply("Yes? How can I help? 😄").catch(console.error);
+         if (message.content.trim().toLowerCase() === TRIGGER_WORD) {
+            await message.reply("Yes? How can I help? 😄").catch(console.error);
+         }
          aiCooldowns.delete(message.author.id); // Reset cooldown if prompt was empty
          return;
     }
@@ -85,7 +87,7 @@ module.exports = {
              userDataContext = "New user, no data yet.";
         } else {
              // Format user data for the AI prompt
-             const jobTitle = user.currentJob ? (client.config.workProgression.find(j => j.id === user.currentJob)?.title || 'Unknown Job') : 'Unemployed';
+             const jobTitle = user.currentJob ? (message.client.config.workProgression.find(j => j.id === user.currentJob)?.title || 'Unknown Job') : 'Unemployed';
              userDataContext = `Level ${user.level} | Coins: ${user.coins} | Cookies: ${user.cookies} | Warnings: ${user.warnings.length} | Current Job: ${jobTitle}`;
         }
 
@@ -133,12 +135,11 @@ module.exports = {
                 case 'SEND_GIF':
                     if (action.args) {
                         const gifUrl = await searchGiphyGif(action.args);
+                        const DEFAULT_GIF = 'https://media.giphy.com/media/l4pTsh45Dg7ClzJny/giphy.gif'; // Ensure default is defined or imported
                          if (gifUrl !== DEFAULT_GIF) { // Avoid sending default if search fails unless desired
                             await message.channel.send(gifUrl).catch(console.error);
                          } else {
                              console.log(`Could not find suitable GIF for "${action.args}"`);
-                             // Optionally send a message indicating GIF failure
-                             // await message.channel.send(`(Couldn't find a good GIF for "${action.args}")`).catch(console.error);
                          }
                     }
                     break;
@@ -146,12 +147,16 @@ module.exports = {
                     if (action.args) {
                          const targetMember = await findUserInGuild(message.guild, action.args);
                          if (targetMember) {
-                             const targetData = await User.findOne({ userId: targetMember.id });
+                             // Use targetMember.user.id or targetMember.id depending on what findUserInGuild returns
+                             const targetUserId = targetMember.user ? targetMember.user.id : targetMember.id;
+                             const targetData = await User.findOne({ userId: targetUserId });
                              const profileEmbed = new EmbedBuilder().setColor(0xADD8E6); // Light Blue
+                             const displayName = targetMember.displayName || (targetMember.user ? targetMember.user.username : 'Unknown User');
+
 
                              if (targetData) {
-                                 const nextXp = getNextLevelXp ? getNextLevelXp(targetData.level) : 'N/A'; // Use util or fallback
-                                 profileEmbed.setTitle(`📊 ${targetMember.displayName}'s Mini-Profile`)
+                                 const nextXp = getNextLevelXp ? getNextLevelXp(targetData.level) : 'N/A'; // Use imported function
+                                 profileEmbed.setTitle(`📊 ${displayName}'s Mini-Profile`)
                                      .addFields(
                                          { name: 'Level', value: `${targetData.level}`, inline: true },
                                          { name: 'XP', value: `${targetData.xp} / ${nextXp}`, inline: true },
@@ -160,7 +165,7 @@ module.exports = {
                                          { name: 'Warnings', value: `${targetData.warnings?.length || 0}`, inline: true }
                                      );
                              } else {
-                                 profileEmbed.setTitle(`📊 ${targetMember.displayName}'s Mini-Profile`)
+                                 profileEmbed.setTitle(`📊 ${displayName}'s Mini-Profile`)
                                      .setDescription("No economy/level data found for this user yet.");
                              }
                              await message.channel.send({ embeds: [profileEmbed] }).catch(console.error);
@@ -170,7 +175,6 @@ module.exports = {
                     }
                     break;
                 // Add more cases for other hardcoded actions here
-                // case 'CHECK_BALANCE': ...
                 default:
                     console.warn(`Unknown AI action requested: ${action.type}`);
             }
@@ -178,7 +182,6 @@ module.exports = {
 
     } catch (error) {
         console.error("Error in messageCreate AI handler:", error);
-         // Avoid replying if it might be a permissions issue sending the reply itself
          if (error.code !== 50013) { // 50013 = Missing Permissions
             await message.reply("⚠️ Oops! Something went wrong while processing that with Blecky.").catch(console.error);
          }
@@ -187,7 +190,6 @@ module.exports = {
 };
 
 // --- Helper: Fetch Gemini Response ---
-// (Includes System Prompt parameter now)
 async function fetchGeminiResponse(prompt, systemInstructionText) {
   const MAX_RETRIES = 3;
   let attempt = 0;
@@ -198,18 +200,8 @@ async function fetchGeminiResponse(prompt, systemInstructionText) {
       console.log(`AI fetch attempt ${attempt} for prompt: "${prompt.substring(0, 50)}..."`);
 
       const payload = {
-          contents: [
-              // We put the user message here now
-               { role: "user", parts: [{ text: prompt }] }
-          ],
-          // System Instruction
-          systemInstruction: {
-              role: "system", // Often optional, but good practice
-              parts: [{ text: systemInstructionText }]
-          },
-          // Optional: Add safety settings or generation config if needed
-          // safetySettings: [ ... ],
-          // generationConfig: { temperature: 0.7, maxOutputTokens: 1000, ... },
+          contents: [ { role: "user", parts: [{ text: prompt }] } ],
+          systemInstruction: { role: "system", parts: [{ text: systemInstructionText }] },
       };
 
       const response = await fetch(
@@ -218,7 +210,7 @@ async function fetchGeminiResponse(prompt, systemInstructionText) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
-          timeout: 45000 // Increased timeout (e.g., 45 seconds)
+          timeout: 45000
         }
       );
 
@@ -242,17 +234,12 @@ async function fetchGeminiResponse(prompt, systemInstructionText) {
           }
           if (data.candidates?.[0]?.finishReason && data.candidates[0].finishReason !== 'STOP') {
                console.warn(`AI response finished unexpectedly: ${data.candidates[0].finishReason}`);
-               // You might get SAFETY, RECITATION, MAX_TOKENS etc.
-               if (data.candidates[0].finishReason === 'SAFETY') {
-                   return `My response was stopped due to safety filters.`;
-               }
-               // Handle other reasons if needed
+               if (data.candidates[0].finishReason === 'SAFETY') { return `My response was stopped due to safety filters.`; }
           }
-
 
           const replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
-          if (replyText === undefined || replyText === null) { // Check specifically for undefined/null
+          if (replyText === undefined || replyText === null) {
               console.error("Invalid AI response structure (text missing):", JSON.stringify(data));
               throw new Error("Received an invalid response structure from the AI.");
           }
@@ -266,16 +253,15 @@ async function fetchGeminiResponse(prompt, systemInstructionText) {
       if (attempt === MAX_RETRIES) {
         return "❌ I couldn't get a response from the AI after multiple attempts. There might be an issue with the AI service.";
       }
-      await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000 + Math.random() * 500)); // Increased backoff
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000 + Math.random() * 500));
     }
   }
    return "❌ An unexpected error occurred while contacting the AI service.";
 }
 
-// Helper: Get Next Level XP (Example - ensure this matches your leveling system)
-// You might already have this in levelUtils.js - if so, require it instead.
-// const { getNextLevelXp } = require('../utils/levelUtils');
-function getNextLevelXp(level) {
-     // Using the 'Moderate' formula from profile.js/addxp.js
-     return Math.floor(100 * Math.pow(level + 1, 1.5));
-}
+// --- REMOVED LOCAL getNextLevelXp function ---
+// // Helper: Get Next Level XP (Example - ensure this matches your leveling system)
+// function getNextLevelXp(level) {
+//      // Using the 'Moderate' formula from profile.js/addxp.js
+//      return Math.floor(100 * Math.pow(level + 1, 1.5));
+// }
