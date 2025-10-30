@@ -1,6 +1,6 @@
-// events/messageCreate.js (FIXED - Correct Gemini Model Name)
+// events/messageCreate.js (REPLACED - Switched to OpenAI API)
 const { Events, EmbedBuilder, Collection, PermissionsBitField } = require('discord.js');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const OpenAI = require('openai'); // NEW: Import OpenAI
 const fetch = require('node-fetch');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -11,9 +11,7 @@ const { generateUserLevel } = require('../utils/levelSystem');
 const { XP_COOLDOWN, generateXP } = require('../utils/xpSystem');
 
 // --- AI Configuration ---
-// FIXED: Using gemini-1.5-flash which is confirmed to work
-const AI_MODEL_NAME = 'gemini-1.5-flash-latest'; // This model is available
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const AI_MODEL_NAME = 'gpt-4o-mini'; // NEW: OpenAI Model
 const AI_TRIGGER_PREFIX = '?blecky';
 const MAX_HISTORY = 5; // Max pairs of user/model messages
 const AI_COOLDOWN_MS = 3000; // 3 seconds
@@ -21,25 +19,23 @@ const AI_COOLDOWN_MS = 3000; // 3 seconds
 // --- Prefix Command Configuration ---
 const PREFIX = '?';
 
-// --- Initialize Gemini ---
-let genAI;
-let model;
-if (GEMINI_API_KEY) {
+// --- Initialize OpenAI ---
+let openai;
+if (process.env.OPENAI_API_KEY) {
     try {
-        genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-        model = genAI.getGenerativeModel({ model: AI_MODEL_NAME });
-        console.log(`[AI Init] Initialized Gemini AI model: ${AI_MODEL_NAME}`);
+        openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        console.log(`[AI Init] Initialized OpenAI model: ${AI_MODEL_NAME}`);
     } catch (error) {
-        console.error("[AI Init] Failed to initialize Gemini AI:", error.message);
-        model = null; // Ensure model is null if init fails
+        console.error("[AI Init] Failed to initialize OpenAI:", error.message);
+        openai = null; // Ensure openai is null if init fails
     }
 } else {
-    console.warn("[AI Init] GEMINI_API_KEY not found. AI features will be disabled.");
-    model = null;
+    console.warn("[AI Init] OPENAI_API_KEY not found. AI features will be disabled.");
+    openai = null;
 }
 
-// System instruction (History placeholder removed)
-const SYSTEM_INSTRUCTION = `You are Blecky Nephew, an advanced AI integrated into a Discord server named "The Nephews". You engage in helpful conversations, answer questions, provide information, and perform specific actions when requested. Your personality is helpful, slightly formal but friendly, and knowledgeable. Avoid slang unless mirroring the user. Be concise but informative. You MUST follow instructions precisely.
+// System instruction
+const SYSTEM_INSTRUCTION_TEMPLATE = `You are Blecky Nephew, an advanced AI integrated into a Discord server named "The Nephews". You engage in helpful conversations, answer questions, provide information, and perform specific actions when requested. Your personality is helpful, slightly formal but friendly, and knowledgeable. Avoid slang unless mirroring the user. Be concise but informative. You MUST follow instructions precisely.
 
 Server Context: You are in the "The Nephews" Discord server. Assume messages are from server members unless otherwise specified.
 
@@ -60,8 +56,6 @@ Response Guidelines:
 * Append actions EXACTLY as specified (e.g., [ACTION:SEND_GIF funny dog]). There should be NO text after the action tag.
 
 User Data Provided: {{USER_DATA}}
----
-User's Current Message: {{USER_MESSAGE}}
 ---
 Your Response:`;
 
@@ -174,7 +168,7 @@ module.exports = {
 
 
         // --- AI Trigger Logic (?blecky or AI Channel) ---
-        if (model && (lowerContent.startsWith(AI_TRIGGER_PREFIX) || message.channel.id === settings?.aiChannelId)) {
+        if (openai && (lowerContent.startsWith(AI_TRIGGER_PREFIX) || message.channel.id === settings?.aiChannelId)) {
             let userPrompt;
              if (lowerContent.startsWith(AI_TRIGGER_PREFIX)) {
                 userPrompt = message.content.substring(AI_TRIGGER_PREFIX.length).trim();
@@ -220,30 +214,57 @@ module.exports = {
                 }
 
                 const userId = message.author.id;
+                
+                // --- OpenAI History Conversion ---
                 let userHistory = conversationHistory.get(userId) || [];
-                userHistory.push({ role: 'user', parts: [{ text: userPrompt }] });
-                if (userHistory.length > MAX_HISTORY * 2) {
-                     userHistory = userHistory.slice(-(MAX_HISTORY * 2));
-                 }
+                // Convert history to OpenAI format (if it's in old Gemini format)
+                let openAIHistory = userHistory.map(msg => ({
+                    role: msg.role === 'model' ? 'assistant' : 'user',
+                    content: msg.parts ? msg.parts[0].text : msg.content // Handle both formats
+                }));
 
-                const finalSystemInstruction = SYSTEM_INSTRUCTION
-                    .replace('{{USER_DATA}}', `${message.author.tag}(${userDataContext})`)
-                    .replace('{{USER_MESSAGE}}', userPrompt);
+                // Add new user prompt
+                openAIHistory.push({ role: 'user', content: userPrompt });
+
+                // Prune history
+                if (openAIHistory.length > MAX_HISTORY * 2) {
+                    openAIHistory = openAIHistory.slice(-(MAX_HISTORY * 2));
+                }
+                
+                // Create the system message
+                const finalSystemInstruction = SYSTEM_INSTRUCTION_TEMPLATE
+                        .replace('{{USER_DATA}}', `${message.author.tag}(${userDataContext})`);
+                
+                const messages = [
+                    { role: 'system', content: finalSystemInstruction },
+                    ...openAIHistory
+                ];
+                // --- End History Conversion ---
 
                  console.log(`[AI Call] Sending request for ${message.author.tag}... Model: ${AI_MODEL_NAME}`);
-                 const chat = model.startChat({ history: userHistory.slice(0, -1) });
-                 const result = await chat.sendMessage(finalSystemInstruction);
-                 const response = result.response;
-                 let aiTextResult = response?.text();
+                 
+                 // --- OpenAI API Call ---
+                 const result = await openai.chat.completions.create({
+                    model: AI_MODEL_NAME,
+                    messages: messages,
+                    max_tokens: 1024,
+                 });
+        
+                 let aiTextResult = result.choices[0]?.message?.content;
                  console.log(`[AI Call] Received response for ${message.author.tag}. Success: ${!!aiTextResult}`);
+                 // --- End OpenAI API Call ---
 
                 if (!aiTextResult) {
-                    console.warn("[AI Error] Gemini returned empty response or block.", response?.promptFeedback || 'No feedback');
+                    console.warn("[AI Error] OpenAI returned empty response.");
                     aiTextResult = "I'm having trouble formulating a response right now. Could you try rephrasing?";
-                    if (response?.promptFeedback?.blockReason) aiTextResult += ` (Reason: ${response.promptFeedback.blockReason})`;
                 } else {
-                     userHistory.push({ role: 'model', parts: [{ text: aiTextResult }] });
-                     conversationHistory.set(userId, userHistory);
+                     // Save in OpenAI format
+                     openAIHistory.push({ role: 'assistant', content: aiTextResult });
+                     // Prune again just in case, and save
+                     if (openAIHistory.length > MAX_HISTORY * 2) {
+                         openAIHistory = openAIHistory.slice(-(MAX_HISTORY * 2));
+                     }
+                     conversationHistory.set(userId, openAIHistory); // Save the new format
                 }
 
                 let aiTextResponseForUser = aiTextResult;
@@ -273,11 +294,10 @@ module.exports = {
                  try {
                     if (error.code !== 50013 && message.channel.permissionsFor(message.guild.members.me)?.has(PermissionsBitField.Flags.SendMessages)) {
                          let errorMsg = "⚠️ Oops! Something went wrong with my AI core.";
-                         if (error.message && (error.message.includes("404") || error.message.includes("not found") || error.message.includes("models/"))) {
-                            errorMsg += ` (Model "${AI_MODEL_NAME}" might be unavailable. Check API key permissions.)`;
+                         if (error.response) { // OpenAI API error
+                             errorMsg += ` (API Error: ${error.response.status} - ${error.response.data?.error?.message || error.message})`;
                          } else if (error.message) {
                              errorMsg += ` (${error.message})`;
-                             console.error("Underlying AI error:", error.message);
                          }
                         await message.reply(errorMsg).catch(console.error);
                     } else {
