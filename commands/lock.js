@@ -4,6 +4,10 @@ const ms = require('ms');
 const Settings = require('../models/Settings'); // Required for logging
 const { logModerationAction } = require('../utils/logModerationAction'); // Required for logging
 
+// --- FIX: Target your specific role ID ---
+const TARGET_ROLE_ID = '1384141744303636610';
+// --- END FIX ---
+
 module.exports = {
     name: 'lock',
     description: 'Lock a channel (deny sending messages for @everyone).',
@@ -49,11 +53,7 @@ module.exports = {
                  // It looked like a duration (ms didn't return undefined/NaN), but it was too short
                  return message.reply('❌ Duration too short (min 5s). Use e.g., 10m, 1h.');
             }
-            // If ms(potentialDuration) was falsy (e.g., NaN, undefined because the arg wasn't a time string)
-            // or if it existed but was < 5000ms and wasn't caught above,
-            // we assume it's part of the reason, so we *don't* shift reasonArgs here.
         }
-        // If reasonArgs was empty initially, durationStr remains null (permanent lock)
         // --- FIX ENDS HERE ---
 
         const reason = reasonArgs.join(' ') || 'No reason provided';
@@ -63,10 +63,18 @@ module.exports = {
         if (!targetChannel.permissionsFor(botMember).has(PermissionsBitField.Flags.ManageChannels)) {
             return message.reply(`❌ I need "Manage Channels" permission in ${targetChannel} to lock/unlock it.`);
         }
+        
+        // --- FIX: Check if target role exists ---
+        const targetRole = message.guild.roles.cache.get(TARGET_ROLE_ID);
+        if (!targetRole) {
+            return message.reply(`❌ Error: The target role (ID: ${TARGET_ROLE_ID}) was not found.`);
+        }
+        // --- END FIX ---
+
 
         // 5. Apply Lock
         try {
-            await targetChannel.permissionOverwrites.edit(message.guild.roles.everyone, {
+            await targetChannel.permissionOverwrites.edit(targetRole, {
                 SendMessages: false,
                 AddReactions: false,
             });
@@ -86,10 +94,12 @@ module.exports = {
                     if (lockInfo && lockInfo.timeoutId === timeoutId) {
                         try {
                             const currentChannel = await client.channels.fetch(targetChannel.id).catch(() => null);
-                            if (currentChannel && currentChannel.permissionOverwrites.cache.get(message.guild.roles.everyone.id)?.deny.has(PermissionsBitField.Flags.SendMessages)) {
-                                await currentChannel.permissionOverwrites.edit(message.guild.roles.everyone, {
+                            // --- FIX: Check permissions for the specific role ID ---
+                            if (currentChannel && currentChannel.permissionOverwrites.cache.get(TARGET_ROLE_ID)?.deny.has(PermissionsBitField.Flags.SendMessages)) {
+                                await currentChannel.permissionOverwrites.edit(targetRole, {
                                     SendMessages: null, AddReactions: null,
                                 });
+                            // --- END FIX ---
                                 console.log(`Auto-unlocked channel ${targetChannel.name} (${targetChannel.id})`);
                                 const unlockEmbed = new EmbedBuilder().setTitle('🔓 Channel Auto-Unlocked').setDescription(`${currentChannel} unlocked as lock duration expired.`).setColor(0x00FF00).setTimestamp();
                                 await currentChannel.send({ embeds: [unlockEmbed] }).catch(console.error);
