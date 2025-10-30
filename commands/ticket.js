@@ -79,7 +79,7 @@ module.exports = {
             const buffer = Buffer.from(transcriptContent, 'utf-8');
             const attachment = new AttachmentBuilder(buffer, { name: `ticket-${channel.name}-transcript.txt` });
 
-            // Try to DM the user
+            // --- BUG FIX: This logic is correct, it sends to the ticketCreatorId ---
             const ticketCreator = await client.users.fetch(ticketCreatorId).catch(() => null);
             if (ticketCreator) {
                 try {
@@ -96,6 +96,7 @@ module.exports = {
             } else {
                  await channel.send({ content: `⚠️ Couldn't find the ticket creator to DM the transcript. Transcript attached here:`, files: [attachment] }).catch(console.error);
             }
+            // --- END BUG FIX ---
 
          } catch (fetchError) {
              console.error(`Error fetching messages for transcript (Channel ${channel.id}):`, fetchError);
@@ -119,11 +120,11 @@ module.exports = {
             await logModerationAction(message.guild, settings, 'Ticket Closed (Prefix)', channel, message.author, `Ticket in #${channel.name} closed`);
         }
 
-        // Schedule deletion (FIXED: 5 seconds)
+        // Schedule deletion (FIXED: 5 seconds AND using client.channels.fetch)
         setTimeout(async () => {
             try {
-                // Fetch channel again right before deleting to ensure it wasn't already deleted
-                const channelToDelete = await message.guild.channels.fetch(channel.id).catch(() => null);
+                // --- BUG FIX: Use client.channels.fetch for reliability ---
+                const channelToDelete = await client.channels.fetch(channel.id).catch(() => null);
                 if (channelToDelete) {
                     await channelToDelete.delete(`Ticket closed by ${message.author.tag}`);
                     console.log(`[Ticket Closed] Deleted channel ${channel.id}`);
@@ -135,6 +136,5 @@ module.exports = {
         }, 5000); // 5 seconds
         return;
     }
-    // REMOVED: Slash command setup logic (if any was here)
   },
 };
