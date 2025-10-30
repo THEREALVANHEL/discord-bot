@@ -11,8 +11,8 @@ const { generateUserLevel } = require('../utils/levelSystem');
 const { XP_COOLDOWN, generateXP } = require('../utils/xpSystem');
 
 // --- AI Configuration ---
-// FIXED: Using correct model name for Gemini API
-const AI_MODEL_NAME = 'gemini-pro'; // Use gemini-pro for stability
+// FIXED: Using the CORRECT model name that actually works
+const AI_MODEL_NAME = 'gemini-1.5-pro'; // This is the correct model name for API v1
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const AI_TRIGGER_PREFIX = '?blecky';
 const MAX_HISTORY = 5; // Max pairs of user/model messages
