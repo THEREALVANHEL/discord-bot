@@ -224,7 +224,7 @@ module.exports = {
         else if (customId === 'create_ticket') {
             try {
                 // --- FIX: Use new ephemeral flag ---
-                await interaction.deferReply({ flags: InteractionFlags.Ephemeral }); 
+                await interaction.deferReply({ flags: InteractionFlags.EPHEMERAL }); // <-- FIX: ALL CAPS
                 // --- END FIX ---
                 
                 const guild = interaction.guild;
@@ -332,7 +332,7 @@ module.exports = {
                 }
 
                 // --- FIX: Use new ephemeral flag ---
-                await interaction.deferReply({ flags: InteractionFlags.Ephemeral });
+                await interaction.deferReply({ flags: InteractionFlags.EPHEMERAL }); // <-- FIX: ALL CAPS
 
                 // --- TRANSCRIPT LOGIC ---
                 let transcriptContent = `Transcript for Ticket\nChannel: #${channel.name} (${channel.id})\n${topic}\nClosed by: ${interaction.user.tag}\n\n`;
