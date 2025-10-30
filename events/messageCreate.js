@@ -1,5 +1,5 @@
 const { Events, EmbedBuilder, Collection, PermissionsBitField } = require('discord.js');
-const { GoogleGenerativeAI } = require("@google/generative-ai"); // NEW: Gemini AI
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const fetch = require('node-fetch');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -10,7 +10,7 @@ const { generateUserLevel } = require('../utils/levelSystem');
 const { XP_COOLDOWN, generateXP } = require('../utils/xpSystem');
 
 // --- AI Configuration ---
-const AI_MODEL_NAME = 'gemini-pro'; // NEW: Gemini Model
+const AI_MODEL_NAME = 'gemini-pro'; // Gemini Model
 const AI_TRIGGER_PREFIX = '?blecky';
 const MAX_HISTORY = 5;
 const AI_COOLDOWN_MS = 3000;
@@ -24,7 +24,13 @@ let geminiModel;
 if (process.env.GEMINI_API_KEY) {
     try {
         genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        geminiModel = genAI.getGenerativeModel({ model: AI_MODEL_NAME });
+        geminiModel = genAI.getGenerativeModel({ 
+            model: AI_MODEL_NAME,
+            generationConfig: {
+                maxOutputTokens: 1024,
+                temperature: 0.7,
+            },
+        });
         console.log(`[AI Init] Initialized Gemini AI model: ${AI_MODEL_NAME}`);
     } catch (error) {
         console.error("[AI Init] Failed to initialize Gemini AI:", error.message);
@@ -35,7 +41,7 @@ if (process.env.GEMINI_API_KEY) {
     geminiModel = null;
 }
 
-// System instruction (updated for Gemini)
+// System instruction
 const SYSTEM_INSTRUCTION = `You are Blecky Nephew, an advanced AI integrated into a Discord server named "The Nephews". You engage in helpful conversations, answer questions, provide information, and perform specific actions when requested. Your personality is helpful, slightly formal but friendly, and knowledgeable. Avoid slang unless mirroring the user. Be concise but informative. You MUST follow instructions precisely.
 
 Server Context: You are in the "The Nephews" Discord server. Assume messages are from server members unless otherwise specified.
@@ -220,12 +226,12 @@ module.exports = {
                 // Prepare the full prompt with system instruction
                 const finalSystemInstruction = SYSTEM_INSTRUCTION.replace('{{USER_DATA}}', `${message.author.tag}(${userDataContext})`);
                 
-                // Build the conversation for Gemini (simpler approach)
+                // Build the conversation for Gemini
                 const fullPrompt = `${finalSystemInstruction}\n\nConversation History:\n${geminiHistory.join('\n')}\n\nUser: ${userPrompt}\nAssistant:`;
                 
                 console.log(`[AI Call] Sending request for ${message.author.tag}... Model: ${AI_MODEL_NAME}`);
                 
-                // --- Gemini API Call ---
+                // --- Gemini API Call (FIXED) ---
                 const result = await geminiModel.generateContent(fullPrompt);
                 const response = await result.response;
                 let aiTextResult = response.text();
@@ -275,7 +281,16 @@ module.exports = {
                     if (error.code !== 50013 && message.channel.permissionsFor(message.guild.members.me)?.has(PermissionsBitField.Flags.SendMessages)) {
                          let errorMsg = "⚠️ Oops! Something went wrong with my AI core.";
                          if (error.message) {
-                             errorMsg += ` (${error.message})`;
+                             // More user-friendly error messages
+                             if (error.message.includes('API key not valid')) {
+                                 errorMsg = "⚠️ AI service is temporarily unavailable. Please try again later.";
+                             } else if (error.message.includes('404') || error.message.includes('Not Found')) {
+                                 errorMsg = "⚠️ AI model is currently being updated. Please try again in a few moments.";
+                             } else if (error.message.includes('quota') || error.message.includes('rate limit')) {
+                                 errorMsg = "⚠️ AI service is experiencing high demand. Please try again later.";
+                             } else {
+                                 errorMsg += ` (${error.message})`;
+                             }
                          }
                         await message.reply(errorMsg).catch(console.error);
                     } else {
@@ -288,8 +303,67 @@ module.exports = {
             return;
         }
 
-        // --- Rest of the file remains unchanged ---
-        // ... (prefix command handling and other logic)
+        // --- Rest of the file (prefix command handling) remains unchanged ---
+        if (!message.content.startsWith(PREFIX)) return;
+
+        console.log(`[Prefix Cmd] Detected prefix from ${message.author.tag}: ${message.content}`);
+        const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+        const commandName = args.shift().toLowerCase();
+        const command = message.client.commands.get(commandName);
+
+        if (!command) {
+            console.log(`[Prefix Cmd] Command not found: ${commandName}`);
+            return;
+        }
+
+        if (command.name === 'ticket') {
+             if (args[0]?.toLowerCase() === 'setup') {
+                 console.log(`[Prefix Cmd] Ignoring 'ticket setup' prefix command.`);
+                 return message.reply('❌ The `ticket setup` command is only available as a slash command (`/ticket setup`).').catch(console.error);
+             }
+             if (commandName === 'ticket' && args[0]?.toLowerCase() !== 'close') {
+                 console.log(`[Prefix Cmd] Ignoring 'ticket' prefix command without 'close' arg.`);
+                 return message.reply('Did you mean `?ticket close`, `?close`, or `?closeticket`? Setup is slash-only (`/ticket setup`).').catch(console.error);
+             }
+             if (commandName === 'ticket' && args[0]?.toLowerCase() === 'close') {
+                 args.shift();
+             }
+        }
+
+        if (command.data && !command.name && command.data.name !== 'ticket') {
+             console.log(`[Prefix Cmd] Ignoring slash command file invoked via prefix: ${commandName}`);
+             return message.reply(`The command \`${commandName}\` is only available as a slash command (e.g., \`/${commandName}\`).`).catch(console.error);
+        }
+         else if (!command.name || !command.execute) {
+              console.warn(`[Prefix Cmd] Command file corresponding to '${commandName}' is invalid or slash-only.`);
+              return;
+         }
+
+         if (!message.client.cooldowns.has(command.name)) {
+            message.client.cooldowns.set(command.name, new Collection());
+         }
+         const nowCmd = Date.now();
+         const timestamps = message.client.cooldowns.get(command.name);
+         const cooldownAmount = (command.cooldown || 3) * 1000;
+
+         if (timestamps.has(message.author.id)) {
+            const expirationTime = timestamps.get(message.author.id) + cooldownAmount;
+            if (nowCmd < expirationTime) {
+                const timeLeft = (expirationTime - nowCmd) / 1000;
+                console.log(`[Prefix Cmd] User ${message.author.tag} on cooldown for ${command.name}`);
+                return message.reply(`⏱️ Please wait ${timeLeft.toFixed(1)}s before reusing \`${command.name}\`.`).catch(console.error);
+            }
+         }
+         timestamps.set(message.author.id, nowCmd);
+         setTimeout(() => timestamps.delete(message.author.id), cooldownAmount);
+
+        try {
+             console.log(`[Prefix Cmd] Executing command '${command.name}' (triggered by '${commandName}') for ${message.author.tag}`);
+            await command.execute(message, args, message.client);
+        } catch (error) {
+            console.error(`[Prefix Cmd Error] Error executing ${command.name}:`, error);
+            message.reply('❌ An error occurred while executing that command!').catch(console.error);
+        }
     },
 };
 
