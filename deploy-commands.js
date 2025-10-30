@@ -1,4 +1,4 @@
-// deploy-commands.js (FIXED)
+// deploy-commands.js (REMOVED aisetup)
 require('dotenv').config();
 const { REST, Routes } = require('discord.js');
 const fs = require('fs');
@@ -8,33 +8,53 @@ const commands = [];
 const commandsPath = path.join(__dirname, 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 
+console.log("--- Loading Slash Commands for Deployment ---");
 for (const file of commandFiles) {
-  const command = require(path.join(commandsPath, file));
-  if (command.data) {
-    try {
-        // Add robust error handling to skip malformed commands
+  const filePath = path.join(commandsPath, file); // Define filePath here
+  try {
+      const command = require(filePath);
+      // Only include commands that have the 'data' property (Slash Commands)
+      if (command.data && typeof command.data.toJSON === 'function') {
+        // --- REMOVAL START ---
+        // Skip the aisetup command
+        if (command.data.name === 'aisetup') {
+            console.log(`[DEPLOY] Skipping registration for: ${command.data.name} (Removed)`);
+            continue; // Go to the next file
+        }
+        // --- REMOVAL END ---
+
+        console.log(`[DEPLOY] Adding command: ${command.data.name}`);
         commands.push(command.data.toJSON());
-    } catch (error) {
-        // This log will help you find the broken file in future builds
-        console.error(`Skipping command file '${file}' due to serialization error:`, error.message);
-        continue;
-    }
+      } else {
+         console.log(`[DEPLOY] Skipping non-slash command file: ${file}`);
+      }
+  } catch (error) {
+      console.error(`❌ Error loading command file '${file}' for deployment:`, error);
   }
 }
+console.log("--- Finished Loading Slash Commands ---");
+
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
 (async () => {
   try {
-    console.log('Started refreshing application (/) commands.');
+    console.log(`Started refreshing ${commands.length} application (/) commands.`);
 
-    await rest.put(
+    // Deploy to specific guild
+    const data = await rest.put(
       Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
       { body: commands },
     );
 
-    console.log('Successfully reloaded application (/) commands.');
+    // // Deploy globally (uncomment if needed, takes ~1 hour to update)
+    // const data = await rest.put(
+    //    Routes.applicationCommands(process.env.CLIENT_ID),
+    //    { body: commands },
+    // );
+
+    console.log(`Successfully reloaded ${data.length} application (/) commands.`);
   } catch (error) {
-    console.error(error);
+    console.error("❌ Failed to deploy commands:", error);
   }
 })();
