@@ -1,4 +1,4 @@
-// index.js (Full Update - Work/Level/Cookie Roles Reworked)
+// index.js (FIX: Corrected command loading logic for hybrid commands)
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder } = require('discord.js');
 const mongoose = require('mongoose');
@@ -33,6 +33,7 @@ client.xpCooldowns = new Map();    // userId -> timestamp
 client.grantedUsers = new Map();   // userId -> { roleId: string, timeoutId: NodeJS.Timeout } (for grant/ungrant)
 
 // --- Bot Configuration ---
+// (Your client.config.roles, levelingRoles, cookieRoles, workProgression, etc. remain here)
 client.config = {
   guildId: process.env.GUILD_ID,
   roles: {
@@ -45,7 +46,6 @@ client.config = {
     gamelogUser: process.env.GAMELOG_USER_ROLE_ID || '1371003310223654974',
     headHost: process.env.HEAD_HOST_ROLE_ID || '1378338515791904808',
   },
-   // --- REWORK: Leveling Role Rewards ---
    levelingRoles: [
      { level: 30, roleId: '1371032270361853962' },
      { level: 60, roleId: '1371032537740214302' },
@@ -54,7 +54,6 @@ client.config = {
      { level: 300, roleId: '1371032964938600521' },
      { level: 450, roleId: '1371033073038266429' },
    ],
-   // --- REWORK: Cookie Role Rewards ---
    cookieRoles: [
      { cookies: 100, roleId: '1370998669884788788' },
      { cookies: 500, roleId: '1370999721593671760' },
@@ -63,8 +62,6 @@ client.config = {
      { cookies: 3000, roleId: '1371001806930579518' },
      { cookies: 5000, roleId: '1371004762761461770' },
    ],
-   // --- REWORK: Job Progression based on Works Done ---
-   // { title: 'Job Title', minWorks: X, maxWorks: Y, xpReward: [min, max], coinReward: [min, max], successRate: %, id: 'job_id' },
    workProgression: [
      { title: 'Intern', minWorks: 0, maxWorks: 9, xpReward: [10, 20], coinReward: [20, 40], successRate: 95, id: 'intern' },
      { title: 'Junior Developer', minWorks: 10, maxWorks: 19, xpReward: [20, 40], coinReward: [50, 90], successRate: 92, id: 'junior_dev' },
@@ -77,7 +74,6 @@ client.config = {
      { title: 'CTO', minWorks: 450, maxWorks: 999, xpReward: [800, 1100], coinReward: [2500, 4000], successRate: 65, id: 'cto' },
      { title: 'Tech Legend', minWorks: 1000, maxWorks: Infinity, xpReward: [1200, 2000], coinReward: [5000, 8000], successRate: 60, id: 'tech_legend' },
    ],
-   // --- END REWORK ---
    shopItems: [
      { id: 'xp_boost_1h', name: '1 Hour XP Boost', description: 'Gain 2x XP for 1 hour.', price: 500, type: 'boost' },
      { id: 'rename_ticket', name: 'Nickname Change Ticket', description: 'Change your nickname once.', price: 1000, type: 'utility' },
@@ -89,20 +85,54 @@ const commandsPath = path.join(__dirname, 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 
 console.log("--- Loading Commands ---");
+
+// --- REWORKED COMMAND LOADER ---
 for (const file of commandFiles) {
     const filePath = path.join(commandsPath, file);
     try {
         const command = require(filePath);
+        let loaded = false;
 
-        // Slash command check
-        if (command.data && typeof command.data.toJSON === 'function' && command.execute) {
-            client.commands.set(command.data.name, command);
-            console.log(`[SLASH] Loaded: ${command.data.name}`);
+        // --- 1. Check for HYBRID command ---
+        // (Has both slash 'data' and prefix 'name')
+        if (command.data && command.name && command.execute) {
+            client.commands.set(command.data.name, command); // Load Slash name
+            client.commands.set(command.name, command);     // Load Prefix name
+            console.log(`[HYBRID] Loaded: ${command.name}`);
+            loaded = true;
+
+            // Load aliases for hybrid command
+            if (command.aliases && Array.isArray(command.aliases)) {
+                command.aliases.forEach(alias => {
+                    if (!client.commands.has(alias)) {
+                       client.commands.set(alias, command);
+                       console.log(`       - Alias: ${alias}`);
+                    } else {
+                       console.warn(`[WARNING] Alias '${alias}' for command '${command.name}' conflicts with existing command/alias. Skipping alias.`);
+                    }
+                });
+            }
         }
-        // Prefix command check (must have name and execute, NO data)
+        // --- 2. Check for SLASH-ONLY command ---
+        // (Has 'data' but NO prefix 'name')
+        else if (command.data && command.execute && !command.name) {
+            // Ensure data.name exists before setting
+            if (command.data.name) {
+                client.commands.set(command.data.name, command);
+                console.log(`[SLASH] Loaded: ${command.data.name}`);
+                loaded = true;
+            } else {
+                 console.warn(`[WARNING] Slash command file '${file}' is missing 'data.name'. Skipping.`);
+            }
+        }
+        // --- 3. Check for PREFIX-ONLY command ---
+        // (Has 'name' but NO slash 'data')
         else if (command.name && command.execute && !command.data) {
              client.commands.set(command.name, command);
              console.log(`[PREFIX] Loaded: ${command.name}`);
+             loaded = true;
+
+             // Load aliases for prefix-only command
              if (command.aliases && Array.isArray(command.aliases)) {
                  command.aliases.forEach(alias => {
                      if (!client.commands.has(alias)) {
@@ -113,30 +143,18 @@ for (const file of commandFiles) {
                      }
                  });
              }
-        } else {
-             // This is a hybrid command (like ticket.js), load it for BOTH
-             if (command.data && command.name && command.execute) {
-                client.commands.set(command.data.name, command); // Load Slash
-                client.commands.set(command.name, command); // Load Prefix
-                console.log(`[HYBRID] Loaded: ${command.name}`);
-                if (command.aliases && Array.isArray(command.aliases)) {
-                 command.aliases.forEach(alias => {
-                     if (!client.commands.has(alias)) {
-                        client.commands.set(alias, command);
-                        console.log(`       - Alias: ${alias}`);
-                     } else {
-                        console.warn(`[WARNING] Alias '${alias}' for command '${command.name}' conflicts with existing command/alias. Skipping alias.`);
-                     }
-                 });
-             }
-             } else {
-                console.warn(`[WARNING] Command file '${file}' is invalid (missing properties). Skipping.`);
-             }
         }
+        
+        if (!loaded && file !== 'index.js') { // index.js is not a command
+             console.warn(`[WARNING] Command file '${file}' is invalid or missing properties. Skipping.`);
+        }
+
     } catch (error) {
         console.error(`❌ Error loading command ${file}:`, error);
     }
 }
+// --- END REWORKED LOADER ---
+
 console.log("--- Finished Loading Commands ---");
 
 
