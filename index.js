@@ -309,4 +309,27 @@ mongoose.connection.on('reconnected', () => {
 connectMongoDB();
 
 client.login(process.env.DISCORD_TOKEN).then(() => {
-    console.log(`✅ Logged in as ${
+    console.log(`✅ Logged in as ${client.user.tag}`);
+    client.user.setActivity('with code');
+}).catch(err => {
+    console.error('❌ Bot login failed:', err);
+    process.exit(1);
+});
+
+// --- Graceful Shutdown ---
+process.on('SIGINT', async () => {
+    console.log('SIGINT received. Shutting down gracefully...');
+    await mongoose.disconnect();
+    console.log('MongoDB disconnected.');
+    client.destroy();
+    console.log('Discord client destroyed.');
+    process.exit(0);
+});
+process.on('SIGTERM', async () => {
+    console.log('SIGTERM received. Shutting down gracefully...');
+    await mongoose.disconnect();
+    console.log('MongoDB disconnected.');
+    client.destroy();
+    console.log('Discord client destroyed.');
+    process.exit(0);
+});
