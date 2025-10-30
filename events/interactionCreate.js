@@ -32,8 +32,22 @@ module.exports = {
     }
     if (!member) return;
 
+    // --- FIX: Check if roles exist before accessing cache ---
     const roles = config.roles || {};
-    const isAdmin = member?.roles?.cache.has(roles.forgottenOne) || member?.roles?.cache.has(roles.overseer) || member?.permissions.has(PermissionsBitField.Flags.Administrator);
+    const forgottenOneRole = roles.forgottenOne;
+    const overseerRole = roles.overseer;
+    const leadModRole = roles.leadMod;
+    const modRole = roles.mod;
+    
+    const isAdmin = (forgottenOneRole && member?.roles?.cache.has(forgottenOneRole)) || 
+                    (overseerRole && member?.roles?.cache.has(overseerRole)) || 
+                    member?.permissions.has(PermissionsBitField.Flags.Administrator);
+                    
+    const isMod = isAdmin || 
+                  (leadModRole && member?.roles?.cache.has(leadModRole)) || 
+                  (modRole && member?.roles?.cache.has(modRole));
+    // --- END FIX ---
+
     
     // --- FIXED: CHAT INPUT COMMAND (SLASH COMMAND) HANDLER ---
     if (interaction.isChatInputCommand()) {
@@ -197,11 +211,14 @@ module.exports = {
                 const user = interaction.user;
                 const userName = user.username;
 
+                // --- FIX: Check if staffRoleId is valid ---
                 const staffRoleId = client.config?.roles?.mod;
-                if (!staffRoleId) {
-                     console.error("[Ticket Error] Moderator role ID is not configured in client.config.roles");
-                     return interaction.editReply({ content: '❌ Error: Ticket system moderator role is not configured.' });
+                if (!staffRoleId || !guild.roles.cache.has(staffRoleId)) {
+                     console.error(`[Ticket Error] Moderator role ID (${staffRoleId}) is not configured or not found.`);
+                     return interaction.editReply({ content: '❌ Error: Ticket system moderator role is not configured or is invalid.' });
                  }
+                // --- END FIX ---
+                 
                 const categoryId = settings?.ticketCategoryId;
                  if (!categoryId) {
                      console.error("[Ticket Error] Ticket category ID is not set in settings.");
@@ -282,8 +299,11 @@ module.exports = {
                 }
 
                 // Permission Check
+                const tempRoleId = '1433118039275999232'; // Added temp role check
+                const hasTempAccess = member.roles?.cache.has(tempRoleId);
                 const isOwner = ticketCreatorId === interaction.user.id;
-                if (!isMod && !isAdmin && !isOwner) {
+                
+                if (!isMod && !isAdmin && !isOwner && !hasTempAccess) {
                     return interaction.reply({ content: 'You do not have permission to close this ticket.', ephemeral: true });
                 }
 
@@ -315,7 +335,7 @@ module.exports = {
                 const attachment = new AttachmentBuilder(buffer, { name: `ticket-${channel.name}-transcript.txt` });
                 // --- END TRANSCRIPT ---
 
-                // Try to DM user
+                // --- BUG FIX: Send DM to ticketCreator, NOT interaction.user ---
                 const ticketCreator = await client.users.fetch(ticketCreatorId).catch(() => null);
                 if (ticketCreator) {
                     try {
@@ -330,6 +350,7 @@ module.exports = {
                 } else {
                      await channel.send({ content: `⚠️ Couldn't find ticket creator to DM transcript. Transcript attached:`, files: [attachment] }).catch(console.error);
                 }
+                // --- END BUG FIX ---
 
                 // Update Topic
                 try {
@@ -348,7 +369,8 @@ module.exports = {
                 // Schedule deletion (5 seconds)
                 setTimeout(async () => {
                     try {
-                        const channelToDelete = await interaction.guild.channels.fetch(interaction.channel.id).catch(() => null);
+                        // --- BUG FIX: Use client.channels.fetch for reliability ---
+                        const channelToDelete = await client.channels.fetch(interaction.channel.id).catch(() => null);
                         if (channelToDelete) {
                             await channelToDelete.delete(`Ticket closed by ${interaction.user.tag}`);
                             console.log(`[Ticket Closed] Deleted channel ${interaction.channel.id} via button`);
