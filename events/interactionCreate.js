@@ -1,56 +1,31 @@
-// events/interactionCreate.js (FIXED - No DB Tickets, Creator Name Channel, Transcript on Close Button, REMOVED Close Button from create)
-const { EmbedBuilder, PermissionsBitField, ChannelType, Collection, Events, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+// events/interactionCreate.js (REPLACE)
+const { Events, EmbedBuilder, PermissionsBitField, ChannelType, Collection, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const Settings = require('../models/Settings');
 const User = require('../models/User');
 const fs = require('fs').promises;
 const path = require('path');
 
-async function logModerationAction(guild, settings, action, target, moderator, reason = 'No reason provided', extra = '') {
- /* Placeholder - Use the actual utility if available */
- console.log(`[Moderation Log] Action: ${action}, Target: ${target?.tag || target?.name || target}, Mod: ${moderator.tag}, Reason: ${reason}`);
- const modlogChannelId = settings?.modlogChannelId;
- if (guild && modlogChannelId) {
-    const logChannel = await guild.channels.fetch(modlogChannelId).catch(() => null);
-    if (logChannel) {
-        let targetString = 'N/A';
-        if (target) {
-           if (target.tag && target.id) targetString = `${target.tag} (${target.id})`;
-           else if (target.name && target.id) targetString = `${target.name} (<#${target.id}>)`;
-           else if (typeof target === 'string') targetString = target.substring(0, 100);
-        }
-        const embed = new EmbedBuilder()
-            .setTitle(`Moderation Action: ${action}`)
-            .setColor(0x7289DA)
-            .addFields(
-              { name: 'Target', value: targetString },
-              { name: 'Moderator', value: moderator ? `${moderator.tag} (${moderator.id})` : 'Unknown/System' },
-              { name: 'Reason', value: reason.substring(0, 1020) },
-            )
-            .setTimestamp();
-        if (extra) embed.addFields({ name: 'Details', value: extra.substring(0, 1020) });
-        await logChannel.send({ embeds: [embed] }).catch(console.error);
-    }
- }
-}
-
-
+// --- Standard Interaction Handler ---
 module.exports = {
   name: Events.InteractionCreate,
-  async execute(interaction, client) {
+  async execute(interaction) {
+    // Use the client from the interaction
+    const client = interaction.client;
+    
     if (!interaction.guild) return;
 
     let member = interaction.member;
     const config = client.config;
     let settings;
-     try {
-         settings = await Settings.findOne({ guildId: interaction.guild.id });
-     } catch (dbError) {
-         console.error("Database error fetching settings:", dbError);
-         if (interaction.repliable) {
-             await interaction.reply({ content: 'Error fetching server settings.', ephemeral: true }).catch(console.error);
-         }
-         return;
-     }
+    try {
+        settings = await Settings.findOne({ guildId: interaction.guild.id });
+    } catch (dbError) {
+        console.error("Database error fetching settings:", dbError);
+        if (interaction.repliable) {
+            await interaction.reply({ content: 'Error fetching server settings.', ephemeral: true }).catch(console.error);
+        }
+        return;
+    }
 
     if (!member || member.partial) {
         try { member = await interaction.guild.members.fetch(interaction.user.id); } catch (e) { console.error("Could not fetch member:", e); return; }
@@ -59,23 +34,56 @@ module.exports = {
 
     const roles = config.roles || {};
     const isAdmin = member?.roles?.cache.has(roles.forgottenOne) || member?.roles?.cache.has(roles.overseer) || member?.permissions.has(PermissionsBitField.Flags.Administrator);
-    const isLeadMod = member?.roles?.cache.has(roles.leadMod);
-    const isMod = isLeadMod || member?.roles?.cache.has(roles.mod) || isAdmin;
-    const isHost = member?.roles?.cache.has(roles.gamelogUser) || member?.roles?.cache.has(roles.headHost);
-    const cookiesManagerRole = roles.cookiesManager;
-
-    // --- COMMAND LOGIC ---
+    
+    // --- FIXED: CHAT INPUT COMMAND (SLASH COMMAND) HANDLER ---
     if (interaction.isChatInputCommand()) {
         const command = client.commands.get(interaction.commandName);
+
         if (!command) {
             console.error(`No command matching ${interaction.commandName} was found.`);
-            await interaction.reply({ content: 'Error: Command not found.', ephemeral: true });
+            await interaction.reply({ content: 'Error: This command was not found.', ephemeral: true });
             return;
         }
-        // Permission & Cooldown checks... (Keep existing logic)
-        // ...
-         try {
-            await command.execute(interaction, client, logModerationAction);
+
+        // --- Cooldown Logic (Example) ---
+        if (!client.cooldowns.has(command.data.name)) {
+            client.cooldowns.set(command.data.name, new Collection());
+        }
+        
+        const now = Date.now();
+        const timestamps = client.cooldowns.get(command.data.name);
+        const defaultCooldownDuration = 3;
+        const cooldownAmount = (command.cooldown || defaultCooldownDuration) * 1000;
+
+        if (timestamps.has(interaction.user.id)) {
+            const expirationTime = timestamps.get(interaction.user.id) + cooldownAmount;
+            if (now < expirationTime) {
+                const expiredTimestamp = Math.round(expirationTime / 1000);
+                return interaction.reply({ 
+                    content: `Please wait, you are on a cooldown for \`${command.data.name}\`. You can use it again <t:${expiredTimestamp}:R>.`, 
+                    ephemeral: true 
+                });
+            }
+        }
+        timestamps.set(interaction.user.id, now);
+        setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
+        // --- End Cooldown Logic ---
+
+        // --- Permission Logic (Example) ---
+        if (command.permissions && !member.permissions.has(command.permissions)) {
+             return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+        }
+        
+        // --- Admin Only Command Check (Example from your files) ---
+        const adminOnlyCommands = ['addxp', 'removexp', 'addcoins', 'removecoins', 'addcookies', 'removecookies', 'addcookiesall', 'removecookiesall', 'resetdailystreak', 'dbstatus'];
+        if (adminOnlyCommands.includes(command.data.name) && !isAdmin) {
+            return interaction.reply({ content: '❌ This command can only be used by an Administrator.', ephemeral: true });
+        }
+        // --- End Permission Logic ---
+
+        try {
+            // Execute the slash command
+            await command.execute(interaction, client);
         } catch (error) {
             console.error(`Error executing ${interaction.commandName}:`, error);
             if (interaction.replied || interaction.deferred) {
@@ -84,31 +92,106 @@ module.exports = {
                 await interaction.reply({ content: 'There was an error executing this command!', ephemeral: true });
             }
         }
-        return;
+        return; // End after handling slash command
     }
 
     // --- BUTTON INTERACTION LOGIC ---
-     if (interaction.isButton()) {
-         const customId = interaction.customId;
-         if (!interaction.channel || !interaction.guild) return;
+    if (interaction.isButton()) {
+        const customId = interaction.customId;
+        if (!interaction.channel || !interaction.guild) return;
 
-         // --- Job Apply, Poll, Reminder Buttons (Keep existing logic) ---
-         if (customId.startsWith('job_apply_')) {
-              // ... (keep job apply logic)
-              return;
-         }
-         else if (customId === 'poll_result_manual') {
-              // ... (keep poll logic)
-              return;
-         }
-         else if (customId.startsWith('remove_reminder_')) {
-              // ... (keep reminder logic)
-              return;
-         }
+        // --- Job Apply Button ---
+        if (customId.startsWith('job_apply_')) {
+            try {
+                await interaction.deferUpdate(); // Acknowledge the button click
+                const jobId = customId.replace('job_apply_', '');
+                const workProgression = client.config.workProgression.sort((a, b) => a.minWorks - b.minWorks);
+                const jobToApply = workProgression.find(j => j.id === jobId);
+                
+                let user = await User.findOne({ userId: interaction.user.id });
+                if (!user) user = new User({ userId: interaction.user.id });
 
-         // --- TICKET CREATION BUTTON ---
-         else if (customId === 'create_ticket') {
-             try {
+                if (!jobToApply) {
+                    return interaction.followUp({ content: 'This job no longer exists.', ephemeral: true });
+                }
+                if (user.successfulWorks < jobToApply.minWorks) {
+                    return interaction.followUp({ content: `You do not meet the requirement of ${jobToApply.minWorks} successful works for this job.`, ephemeral: true });
+                }
+
+                user.currentJob = jobToApply.id;
+                user.lastWork = null; // Reset work cooldown on job change
+                await user.save();
+
+                const successEmbed = new EmbedBuilder()
+                    .setTitle('🎉 Congratulations!')
+                    .setDescription(`You have been hired as a **${jobToApply.title}**! You can start working using \`/work job\`.`)
+                    .setColor(0x00FF00);
+                
+                await interaction.editReply({ embeds: [successEmbed], components: [] }); // Remove buttons after applying
+
+            } catch (error) {
+                console.error("Error handling job_apply button:", error);
+            }
+            return;
+        }
+        // --- Poll Result Button ---
+        else if (customId === 'poll_result_manual') {
+            try {
+                const pollCommand = client.commands.get('poll'); // Assuming 'poll' is the slash command name
+                if (!pollCommand || !pollCommand.endPoll) {
+                    return interaction.reply({ content: 'Error: Poll command logic is missing.', ephemeral: true });
+                }
+                
+                const pollData = client.polls.get(interaction.message.id);
+                // Permission check: Only Mod/Admin or the poll creator can end it
+                if (!isAdmin && !isMod && interaction.user.id !== pollData?.creatorId) {
+                    return interaction.reply({ content: 'You do not have permission to end this poll.', ephemeral: true });
+                }
+
+                await interaction.deferUpdate(); // Acknowledge click
+                await pollCommand.endPoll(interaction.channel, interaction.message.id, client, interaction, true);
+                // endPoll now handles the reply
+            } catch (error) {
+                console.error("Error handling poll_result_manual button:", error);
+            }
+            return;
+        }
+        // --- Reminder Remove Button ---
+        else if (customId.startsWith('remove_reminder_')) {
+            try {
+                await interaction.deferUpdate();
+                const reminderId = customId.replace('remove_reminder_', '');
+                
+                let user = await User.findOne({ userId: interaction.user.id });
+                if (!user) {
+                    return interaction.editReply({ content: 'Could not find your user data.', components: [] });
+                }
+                
+                const reminderExists = user.reminders.some(r => r._id.toString() === reminderId);
+                if (!reminderExists) {
+                    return interaction.editReply({ content: 'This reminder was already removed or expired.', components: [] });
+                }
+
+                // Remove from DB
+                user.reminders = user.reminders.filter(r => r._id.toString() !== reminderId);
+                await user.save();
+
+                // Clear live timeout
+                const timeout = client.reminders.get(reminderId);
+                if (timeout) {
+                    clearTimeout(timeout);
+                    client.reminders.delete(reminderId);
+                }
+
+                await interaction.editReply({ content: `✅ Reminder (ID: ${reminderId}) has been successfully removed.`, components: [] });
+            } catch (error) {
+                console.error("Error handling remove_reminder button:", error);
+            }
+            return;
+        }
+        // --- TICKET CREATION BUTTON ---
+        else if (customId === 'create_ticket') {
+            try {
                 await interaction.deferReply({ ephemeral: true });
                 const guild = interaction.guild;
                 const user = interaction.user;
@@ -116,22 +199,23 @@ module.exports = {
 
                 const staffRoleId = client.config?.roles?.mod;
                 if (!staffRoleId) {
-                     console.error("[Ticket Error] Moderator role ID (MOD_ROLE_ID) is not configured in client.config.roles");
-                     return interaction.editReply({ content: '❌ Error: Ticket system moderator role is not configured correctly. Please contact an admin.' });
+                     console.error("[Ticket Error] Moderator role ID is not configured in client.config.roles");
+                     return interaction.editReply({ content: '❌ Error: Ticket system moderator role is not configured.' });
                  }
                 const categoryId = settings?.ticketCategoryId;
                  if (!categoryId) {
                      console.error("[Ticket Error] Ticket category ID is not set in settings.");
-                     return interaction.editReply({ content: '❌ Error: Ticket category not set up. An admin needs to run `/quicksetup` or use the settings command.' });
+                     return interaction.editReply({ content: '❌ Error: Ticket category not set up. An admin needs to run `/quicksetup`.' });
                  }
                 const categoryChannel = guild.channels.cache.get(categoryId);
                  if (!categoryChannel || categoryChannel.type !== ChannelType.GuildCategory) {
                      console.error(`[Ticket Error] Configured category ID ${categoryId} not found or is not a category.`);
-                     return interaction.editReply({ content: '❌ Error: Configured ticket category not found or is invalid. Please contact an admin.' });
+                     return interaction.editReply({ content: '❌ Error: Configured ticket category not found or is invalid.' });
                  }
 
                 const sanitizedUserName = userName.toLowerCase().replace(/[^a-z0-9_-]/g, '-').substring(0, 80) || 'ticket';
-                const channelName = `${sanitizedUserName}`;
+                // --- FIXED: Use creator's name in channel ---
+                const channelName = `ticket-${sanitizedUserName}`;
                 const channelTopic = `Ticket created by ${user.tag} (${user.id})`;
 
                  let ticketChannel;
@@ -153,7 +237,7 @@ module.exports = {
                       if (channelError.code === 50013) {
                           return interaction.editReply({ content: '❌ Error: I lack permissions to create channels in the designated category.' });
                       }
-                      return interaction.editReply({ content: '❌ Error: Could not create the ticket channel due to an unexpected issue.' });
+                      return interaction.editReply({ content: '❌ Error: Could not create the ticket channel.' });
                  }
 
                 console.log(`[Ticket Created] Channel ${ticketChannel.id} for user ${user.id}`);
@@ -164,53 +248,135 @@ module.exports = {
                     .setDescription(`Welcome ${user}!\n\nA staff member (<@&${staffRoleId}>) will be with you shortly.\nPlease describe your issue in detail so we can assist you efficiently.`)
                     .setTimestamp()
                     .setFooter({ text: `User ID: ${user.id}` });
+                
+                // --- FIXED: Do not add close button on creation ---
+                // const row = new ActionRowBuilder()...
 
-                // FIXED: Removed the ActionRowBuilder and ButtonBuilder for the close button here
-                // const row = new ActionRowBuilder().addComponents( ... );
-
-                // FIXED: Send message without components (no close button)
-                await ticketChannel.send({ content: `${user} <@&${staffRoleId}>`, embeds: [ticketEmbed] }); // Removed 'components: [row]'
-
+                await ticketChannel.send({ content: `${user} <@&${staffRoleId}>`, embeds: [ticketEmbed] }); // Removed components
                 await interaction.editReply({ content: `✅ Your ticket has been created! Please go to ${ticketChannel}.` });
 
             } catch (error) {
-                 // Keep the rest of the error handling as before
                  console.error('Error handling create_ticket button:', error);
-                 if (!interaction.replied && !interaction.deferred) {
+                 if (!interaction.replied && !interaction.deferred && error.code !== 10062) {
                      await interaction.reply({ content: 'An error occurred while creating your ticket.', ephemeral: true }).catch(console.error);
-                 } else if (!interaction.replied) {
-                      if (error.code !== 10062) {
-                         await interaction.editReply({ content: 'An error occurred while creating your ticket.' }).catch(console.error);
-                     } else {
-                         console.log("[Ticket Error] Could not send error reply: Interaction expired.");
-                     }
+                 } else if (!interaction.replied && error.code !== 10062) {
+                      await interaction.editReply({ content: 'An error occurred while creating your ticket.' }).catch(console.error);
                  }
             }
+            return;
          }
-         // --- TICKET CLOSE BUTTON --- (Keep this logic as is for manual closing via button if needed elsewhere, though the button isn't added on creation anymore)
+         // --- TICKET CLOSE BUTTON (This is for a button *if you add one later*) ---
          else if (customId === 'close_ticket_button') {
-              // ... (Keep the existing close_ticket_button logic, it won't be triggered by newly created tickets anymore unless you add the button somewhere else)
-              // Make sure the 5 second timeout is still here or in the ?close command
-              try {
-                  // ... (Existing permission checks, transcript logic, topic update, logging) ...
+            try {
+                const channel = interaction.channel;
+                const topic = channel.topic || '';
+                
+                const creatorMatch = topic.match(/Ticket created by .* \((\d{17,19})\)/);
+                if (!creatorMatch || !creatorMatch[1]) {
+                    return interaction.reply({ content: 'This does not appear to be an active ticket channel (invalid topic).', ephemeral: true });
+                }
+                const ticketCreatorId = creatorMatch[1];
+                
+                if (topic.includes('| Closed by:')) {
+                    return interaction.reply({ content: 'This ticket is already being closed.', ephemeral: true });
+                }
 
-                  // Schedule deletion (5 seconds)
-                  setTimeout(async () => {
-                      try {
-                          const channelToDelete = await interaction.guild.channels.fetch(interaction.channel.id).catch(() => null);
-                          if (channelToDelete) {
-                              await channelToDelete.delete(`Ticket closed by ${interaction.user.tag}`);
-                              console.log(`[Ticket Closed] Deleted channel ${interaction.channel.id} via button`);
-                          }
-                      } catch (deleteError) { console.error(`Failed to delete ticket channel ${interaction.channel.id}:`, deleteError); }
-                  }, 5000); // 5 seconds
-              } catch (error) {
-                   // ... (Existing error handling for close button) ...
-              }
+                // Permission Check
+                const isOwner = ticketCreatorId === interaction.user.id;
+                if (!isMod && !isAdmin && !isOwner) {
+                    return interaction.reply({ content: 'You do not have permission to close this ticket.', ephemeral: true });
+                }
 
+                await interaction.deferReply({ content: '🔒 Closing ticket and generating transcript...', ephemeral: true });
+
+                // --- TRANSCRIPT LOGIC ---
+                let transcriptContent = `Transcript for Ticket\nChannel: #${channel.name} (${channel.id})\n${topic}\nClosed by: ${interaction.user.tag}\n\n`;
+                let lastMessageId = null;
+                let fetchComplete = false;
+                const transcriptMessages = [];
+                let messageCount = 0;
+
+                while (!fetchComplete && messageCount < 1000) {
+                    const options = { limit: 100 };
+                    if (lastMessageId) options.before = lastMessageId;
+                    const fetched = await channel.messages.fetch(options);
+                    messageCount += fetched.size;
+                    if (fetched.size === 0) { fetchComplete = true; break; }
+                    transcriptMessages.push(...Array.from(fetched.values()));
+                    lastMessageId = fetched.lastKey();
+                    if (fetched.size < 100) fetchComplete = true;
+                }
+                transcriptMessages.reverse(); // Oldest to newest
+                for (const msg of transcriptMessages) {
+                    const timestamp = `[${new Date(msg.createdAt).toLocaleString('en-US', { timeZone: 'UTC' })} UTC]`;
+                    transcriptContent += `${timestamp} ${msg.author.tag}: ${msg.content}${msg.attachments.size > 0 ? ` [${msg.attachments.size} Attachment(s)]` : ''}\n`;
+                }
+                const buffer = Buffer.from(transcriptContent, 'utf-8');
+                const attachment = new AttachmentBuilder(buffer, { name: `ticket-${channel.name}-transcript.txt` });
+                // --- END TRANSCRIPT ---
+
+                // Try to DM user
+                const ticketCreator = await client.users.fetch(ticketCreatorId).catch(() => null);
+                if (ticketCreator) {
+                    try {
+                        await ticketCreator.send({
+                            content: `Here is the transcript for your ticket in ${interaction.guild.name} (#${channel.name}), which was closed by ${interaction.user.tag}.`,
+                            files: [attachment]
+                        });
+                    } catch (dmError) {
+                        console.error(`Failed to DM transcript to ${ticketCreator.tag}:`, dmError);
+                        await channel.send({ content: `⚠️ Couldn't DM transcript to ticket creator. Transcript attached:`, files: [attachment] }).catch(console.error);
+                    }
+                } else {
+                     await channel.send({ content: `⚠️ Couldn't find ticket creator to DM transcript. Transcript attached:`, files: [attachment] }).catch(console.error);
+                }
+
+                // Update Topic
+                try {
+                    const newTopic = `${topic} | Closed by: ${interaction.user.tag}`;
+                    await channel.setTopic(newTopic.substring(0, 1024));
+                } catch (topicError) { console.error("Could not update topic on close:", topicError); }
+
+                // Log
+                if (settings && settings.modlogChannelId) {
+                    // Assuming logModerationAction is available or defined in this file
+                    // await logModerationAction(interaction.guild, settings, 'Ticket Closed (Button)', channel, interaction.user, `Ticket in #${channel.name} closed`);
+                }
+
+                await interaction.editReply({ content: 'Ticket closed. Channel will be deleted in 5 seconds.' });
+
+                // Schedule deletion (5 seconds)
+                setTimeout(async () => {
+                    try {
+                        const channelToDelete = await interaction.guild.channels.fetch(interaction.channel.id).catch(() => null);
+                        if (channelToDelete) {
+                            await channelToDelete.delete(`Ticket closed by ${interaction.user.tag}`);
+                            console.log(`[Ticket Closed] Deleted channel ${interaction.channel.id} via button`);
+                        }
+                    } catch (deleteError) { console.error(`Failed to delete ticket channel ${interaction.channel.id}:`, deleteError); }
+                }, 5000); // 5 seconds
+            } catch (error) {
+                console.error("Error handling close_ticket_button:", error);
+                if (!interaction.replied && !interaction.deferred && error.code !== 10062) {
+                     await interaction.reply({ content: 'An error occurred while closing the ticket.', ephemeral: true }).catch(console.error);
+                 } else if (!interaction.replied && error.code !== 10062) {
+                      await interaction.editReply({ content: 'An error occurred while closing the ticket.' }).catch(console.error);
+                 }
+            }
+            return;
          }
-         // --- Add other button handlers here ---
-     }
-     // Handle other interaction types (e.g., Select Menus, Modals)...
+    }
+     
+    // --- SELECT MENU HANDLER (Example for /quicksetup wizard) ---
+    if (interaction.isStringSelectMenu()) {
+        const customId = interaction.customId;
+
+        if (customId === 'setup_category') {
+            // This logic is now handled inside the quicksetup.js command execute block
+            // But if you modularize it, this is where it would go.
+            // For now, we'll assume the collector in quicksetup.js handles it.
+            console.log(`[Interaction] Select menu interaction: ${customId}`);
+        }
+    }
   },
 };
