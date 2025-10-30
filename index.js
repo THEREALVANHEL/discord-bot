@@ -31,6 +31,7 @@ client.reminders = new Map();      // reminderId (from DB) -> timeoutId
 client.polls = new Map();          // messageId -> poll data
 client.xpCooldowns = new Map();    // userId -> timestamp
 client.grantedUsers = new Map();   // userId -> { roleId: string, timeoutId: NodeJS.Timeout } (for grant/ungrant)
+client.rrpanel_builders = new Map(); // NEW: For building rrpanels interactively
 
 // --- Bot Configuration ---
 // (Your client.config.roles, levelingRoles, cookieRoles, workProgression, etc. remain here)
