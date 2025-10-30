@@ -1,4 +1,4 @@
-// commands/ticket.js (FIXED - Added 'closeticket' alias)
+// commands/ticket.js (FIXED - Added 'close' alias)
 const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ChannelType, PermissionsBitField } = require('discord.js');
 const Settings = require('../models/Settings');
 const Ticket = require('../models/Ticket');
@@ -15,8 +15,8 @@ module.exports = {
         .setDescription('Configures the ticket panel in the current channel.') 
     ),
   name: 'ticket',
-  description: 'Close the current ticket channel (`?ticket close`). Setup is slash only.',
-  aliases: ['closeticket'], // <-- 1. ADDED ALIAS
+  description: 'Close the current ticket channel (`?ticket close` or `?close`). Setup is slash only.',
+  aliases: ['closeticket', 'close'], // <-- 1. ADDED 'close' ALIAS
 
   async execute(interactionOrMessage, args, client) {
     const isInteraction = interactionOrMessage.isChatInputCommand?.();
@@ -26,7 +26,7 @@ module.exports = {
     if (isInteraction) {
         const subcommand = interactionOrMessage.options.getSubcommand();
         if (subcommand === 'setup') {
-            // Check permissions (should be handled by default perms, but good to double check)
+            // Check permissions
             if (!interactionOrMessage.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
                 return interactionOrMessage.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
             }
@@ -65,9 +65,7 @@ module.exports = {
     if (isMessage) {
         const message = interactionOrMessage;
         
-        // --- 2. CHECK IF THIS IS A 'close' COMMAND (for ticket.js file) ---
-        // This logic is now handled in messageCreate.js, but we check command name
-        // The command name will be 'ticket' or 'closeticket'
+        // Logic to close the ticket (this will now run for ?ticket close, ?closeticket, AND ?close)
         
         const ticket = await Ticket.findOne({ channelId: message.channel.id });
         if (!ticket) return message.reply('This is not a ticket channel.');
