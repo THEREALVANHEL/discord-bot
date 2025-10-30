@@ -1,10 +1,10 @@
-// events/messageReactionAdd.js (REPLACE - Added null check for client.polls and fixed syntax)
+// events/messageReactionAdd.js (REPLACE - Fixed emoji identifier)
 const Settings = require('../models/Settings');
 const emojiList = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
 
 module.exports = {
   name: 'messageReactionAdd',
-  execute: async (reaction, user, client) => { // FIX: Changed syntax for stability
+  execute: async (reaction, user, client) => {
     if (user.bot) return;
     if (!reaction.message.guild) return;
     
@@ -22,14 +22,23 @@ module.exports = {
     const settings = await Settings.findOne({ guildId: reaction.message.guild.id });
     
     if (settings) {
+        // --- FIX: Use reaction.emoji.toString() to match custom emojis ---
         const rr = settings.reactionRoles.find(r =>
             r.messageId === reaction.message.id &&
-            (r.emoji === reaction.emoji.identifier || r.emoji === reaction.emoji.name)
+            r.emoji === reaction.emoji.toString() // Use .toString() to get <a:name:id> or <:name:id> or a unicode emoji
         );
+        // --- END FIX ---
+
         if (rr) {
             const member = await reaction.message.guild.members.fetch(user.id);
             if (member) {
                 try {
+                    // This handles the user's request: if they have the role, remove it and re-add it
+                    // to ensure the bot can remove it later if they unreact.
+                    // (Though simply adding it is usually fine)
+                    if (member.roles.cache.has(rr.roleId)) {
+                        await member.roles.remove(rr.roleId);
+                    }
                     await member.roles.add(rr.roleId);
                 } catch (error) {
                     console.error('Failed to add reaction role:', error);
