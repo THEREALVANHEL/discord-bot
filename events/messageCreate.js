@@ -12,7 +12,7 @@ const { XP_COOLDOWN, generateXP } = require('../utils/xpSystem');
 
 // --- AI Configuration ---
 // FIXED: Using correct model name for Gemini API
-const AI_MODEL_NAME = 'gemini-1.5-flash'; // Valid model name
+const AI_MODEL_NAME = 'gemini-pro'; // Use gemini-pro for stability
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const AI_TRIGGER_PREFIX = '?blecky';
 const MAX_HISTORY = 5; // Max pairs of user/model messages
