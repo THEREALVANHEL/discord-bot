@@ -9,7 +9,7 @@ const { generateUserLevel } = require('../utils/levelSystem');
 const { XP_COOLDOWN, generateXP } = require('../utils/xpSystem');
 
 // --- AI Configuration ---
-const AI_MODEL_NAME = 'gemini-1.5-flash';
+const AI_MODEL_NAME = 'gemini-pro'; // Use the basic gemini-pro model
 const AI_TRIGGER_PREFIX = '?blecky';
 const MAX_HISTORY = 5;
 const AI_COOLDOWN_MS = 3000;
@@ -55,7 +55,19 @@ async function callGeminiAPI(prompt) {
         
         if (!response.ok) {
             console.error(`[Gemini API] HTTP Error ${response.status}:`, responseText);
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            
+            // Parse the error for better messaging
+            let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+            try {
+                const errorData = JSON.parse(responseText);
+                if (errorData.error && errorData.error.message) {
+                    errorMessage = errorData.error.message;
+                }
+            } catch (e) {
+                // If JSON parsing fails, use the raw text
+            }
+            
+            throw new Error(errorMessage);
         }
 
         const data = JSON.parse(responseText);
@@ -309,9 +321,9 @@ module.exports = {
                     if (error.code !== 50013 && message.channel.permissionsFor(message.guild.members.me)?.has(PermissionsBitField.Flags.SendMessages)) {
                          let errorMsg = "⚠️ Oops! Something went wrong with my AI core.";
                          if (error.message) {
-                             if (error.message.includes('401') || error.message.includes('API key')) {
+                             if (error.message.includes('API key') || error.message.includes('401')) {
                                  errorMsg = "⚠️ AI service authentication failed. Please contact the bot administrator.";
-                             } else if (error.message.includes('404') || error.message.includes('Not Found')) {
+                             } else if (error.message.includes('404') || error.message.includes('NOT_FOUND')) {
                                  errorMsg = "⚠️ AI service is temporarily unavailable. Please try again later.";
                              } else if (error.message.includes('quota') || error.message.includes('rate limit')) {
                                  errorMsg = "⚠️ AI service is experiencing high demand. Please try again later.";
@@ -331,7 +343,19 @@ module.exports = {
         }
 
         // --- Rest of the file (prefix command handling) remains unchanged ---
-        // ... (your existing prefix command logic)
+        if (!message.content.startsWith(PREFIX)) return;
+
+        console.log(`[Prefix Cmd] Detected prefix from ${message.author.tag}: ${message.content}`);
+        const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+        const commandName = args.shift().toLowerCase();
+        const command = message.client.commands.get(commandName);
+
+        if (!command) {
+            console.log(`[Prefix Cmd] Command not found: ${commandName}`);
+            return;
+        }
+
+        // ... rest of your prefix command handling
     },
 };
 
