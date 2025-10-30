@@ -1,4 +1,4 @@
-// events/guildAuditLogEntryCreate.js (REPLACE - Removed MemberBanAdd to prevent double logging with softban/custom ban commands + FIX: Added null/optional chaining checks to prevent TypeError crashes)
+// events/guildAuditLogEntryCreate.js (REPLACE - Removed MemberBanAdd block, expanded MessageDelete)
 const Settings = require('../models/Settings');
 const { AuditLogEvent, EmbedBuilder } = require('discord.js');
 
@@ -11,7 +11,7 @@ module.exports = {
     const modlogChannel = guild.channels.cache.get(settings.modlogChannelId);
     if (!modlogChannel) return;
 
-    const { action, target, executor, reason } = auditLogEntry;
+    const { action, target, executor, reason, extra } = auditLogEntry;
 
     let title = 'Audit Log Event';
     let description = '';
@@ -55,23 +55,33 @@ module.exports = {
         break;
       case AuditLogEvent.MemberKick:
         title = 'Member Kicked';
-        description = `Member: ${target?.tag || 'Unknown User'} (${target?.id || 'N/A'})`; // FIX: Crash resolved
+        description = `Member: ${target?.tag || 'Unknown User'} (${target?.id || 'N/A'})`; 
         color = 0xFFA500;
         break;
       case AuditLogEvent.MemberBanAdd:
-        // FIX: Removed to prevent double-logging with softban and custom ban commands
-        return; 
+        // FIX: Now logging this
+        title = 'Member Banned (Audit)';
+        description = `Member: ${target?.tag || 'Unknown User'} (${target?.id || 'N/A'})`;
+        color = 0xFF0000;
+        break;
       case AuditLogEvent.MemberUpdate:
-        // This can be very noisy, skip to avoid spam.
+        // This can be very noisy, skip to avoid spam. (Handled by guildMemberUpdate)
         return; 
       case AuditLogEvent.MessageDelete:
-        // Only log if the executor is different from the message author (e.g., mod deleting)
-        if (auditLogEntry.extra && auditLogEntry.extra.channel && auditLogEntry.extra.count) {
+        // FIX: Expanded to log single mod deletes + bulk
+        if (extra && extra.channel && extra.count) {
           title = 'Messages Purged';
-          description = `Channel: <#${auditLogEntry.extra.channel.id}>\nMessages Deleted: ${auditLogEntry.extra.count}`;
+          description = `Channel: <#${extra.channel.id}>\nMessages Deleted: ${extra.count}`;
+          color = 0xFF0000;
+        } else if (extra && extra.channel) {
+          // Log single message delete by a mod
+          title = 'Message Deleted by Mod';
+          // Target is the user whose message was deleted
+          description = `User: ${target?.tag || 'Unknown User'} (${target?.id || 'N/A'})\nChannel: <#${extra.channel.id}>`;
           color = 0xFF0000;
         } else {
-          return; // Skip if not a bulk delete
+          // Unknown message delete, skip
+          return;
         }
         break;
       default:
@@ -83,7 +93,7 @@ module.exports = {
       .setColor(color)
       .setDescription(description)
       .addFields(
-        { name: 'Executor', value: `${executor?.tag || 'Unknown'} (${executor?.id || 'N/A'})` }, // FIX: Crash resolved
+        { name: 'Executor', value: `${executor?.tag || 'Unknown'} (${executor?.id || 'N/A'})` },
         { name: 'Reason', value: reason || 'No reason provided' },
       )
       .setTimestamp();
