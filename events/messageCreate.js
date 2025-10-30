@@ -9,7 +9,7 @@ const { generateUserLevel } = require('../utils/levelSystem');
 const { XP_COOLDOWN, generateXP } = require('../utils/xpSystem');
 
 // --- AI Configuration ---
-const AI_MODEL_NAME = 'gemini-1.5-flash-latest'; // Use latest flash model
+const AI_MODEL_NAME = 'gemini-2.0-flash-001'; // Updated to available model
 const AI_TRIGGER_PREFIX = '?blecky';
 const MAX_HISTORY = 5;
 const AI_COOLDOWN_MS = 3000;
@@ -24,7 +24,7 @@ async function callGeminiAPI(prompt) {
         throw new Error('GEMINI_API_KEY not found');
     }
 
-    // Use the correct endpoint with the latest model
+    // Use the correct endpoint with the updated model
     const url = `https://generativelanguage.googleapis.com/v1/models/${AI_MODEL_NAME}:generateContent?key=${apiKey}`;
     
     const requestBody = {
@@ -330,9 +330,8 @@ module.exports = {
                              if (error.message.includes('API key') || error.message.includes('401')) {
                                  errorMsg = "⚠️ AI service authentication failed. Please contact the bot administrator.";
                              } else if (error.message.includes('404') || error.message.includes('NOT_FOUND') || error.message.includes('is not found')) {
-                                 // Try alternative model automatically
                                  errorMsg = "⚠️ AI service is temporarily unavailable. Please try again later.";
-                                 console.error(`[AI Error] Model ${AI_MODEL_NAME} not available. Consider trying gemini-1.0-pro or gemini-1.5-pro-latest`);
+                                 console.error(`[AI Error] Model ${AI_MODEL_NAME} not available. Consider trying gemini-2.5-flash or gemini-2.5-pro`);
                              } else if (error.message.includes('quota') || error.message.includes('rate limit')) {
                                  errorMsg = "⚠️ AI service is experiencing high demand. Please try again later.";
                              } else {
