@@ -1,4 +1,4 @@
-// events/messageCreate.js (FIXED - AI Prompt Redundancy, Switched to gemini-pro for testing)
+// events/messageCreate.js (FIXED - AI Prompt Redundancy, Trying gemini-1.0-pro)
 const { Events, EmbedBuilder, Collection, PermissionsBitField } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fetch = require('node-fetch');
@@ -11,12 +11,12 @@ const { generateUserLevel } = require('../utils/levelSystem');
 const { XP_COOLDOWN, generateXP } = require('../utils/xpSystem');
 
 // --- AI Configuration ---
-// FIXED: Changed model name for testing based on 404 error
-const AI_MODEL_NAME = 'gemini-pro'; // Was 'gemini-1.5-flash-latest'
+// FIXED: Changed model name AGAIN for testing based on 404 error
+const AI_MODEL_NAME = 'gemini-1.0-pro'; // Was 'gemini-pro', previously 'gemini-1.5-flash-latest'
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const AI_TRIGGER_PREFIX = '?blecky';
-const MAX_HISTORY = 5;
-const AI_COOLDOWN_MS = 3000;
+const MAX_HISTORY = 5; // Max pairs of user/model messages
+const AI_COOLDOWN_MS = 3000; // 3 seconds
 
 // --- Prefix Command Configuration ---
 const PREFIX = '?';
@@ -39,7 +39,26 @@ if (GEMINI_API_KEY) {
 }
 
 // System instruction (History placeholder removed)
-const SYSTEM_INSTRUCTION = `You are Blecky Nephew, an advanced AI integrated into a Discord server... [Your existing detailed instructions remain here] ...
+const SYSTEM_INSTRUCTION = `You are Blecky Nephew, an advanced AI integrated into a Discord server named "The Nephews". You engage in helpful conversations, answer questions, provide information, and perform specific actions when requested. Your personality is helpful, slightly formal but friendly, and knowledgeable. Avoid slang unless mirroring the user. Be concise but informative. You MUST follow instructions precisely.
+
+Server Context: You are in the "The Nephews" Discord server. Assume messages are from server members unless otherwise specified.
+
+Capabilities & Actions:
+1.  Conversation: Engage naturally in chat.
+2.  Information Retrieval: Answer questions based on your knowledge. Use Markdown for formatting.
+3.  Calculations: Perform basic math.
+4.  GIF Search: If asked for a GIF or to show a reaction visually, use the Giphy API. Format: [ACTION:SEND_GIF <search term>] (e.g., [ACTION:SEND_GIF happy cat]) AppEND this EXACTLY at the end of your response, after any text. Only use this if explicitly asked or very strongly implied for a visual reaction.
+5.  User Profiles: If asked about a user's status, level, coins etc., provide a summary. Format: [ACTION:SHOW_PROFILE <username or ID>] AppEND this EXACTLY at the end of your response. Use the user mentioned in the prompt. If no user is mentioned, use the user who sent the message.
+6.  Command Execution: DO NOT attempt to execute Discord commands like /warn, /kick etc. yourself. State that you cannot perform moderation actions but can provide information.
+
+Response Guidelines:
+* Address the user respectfully (e.g., "Certainly," "Okay,").
+* Keep responses relevant to the prompt.
+* If unsure, state you don't know or need clarification.
+* Do NOT invent information.
+* Use Markdown for lists, code blocks, bolding etc. where appropriate.
+* Append actions EXACTLY as specified (e.g., [ACTION:SEND_GIF funny dog]). There should be NO text after the action tag.
+
 User Data Provided: {{USER_DATA}}
 ---
 User's Current Message: {{USER_MESSAGE}}
@@ -67,9 +86,7 @@ module.exports = {
             settings = await Settings.findOne({ guildId: message.guild.id });
         } catch (dbError) {
             console.error("Error fetching settings in messageCreate:", dbError);
-            // Optionally reply if critical features depend on settings
-            // message.reply("Error fetching server configuration.").catch(console.error);
-            return; // Exit early if settings are crucial and failed to load
+            return;
         }
         const noXpChannels = settings?.noXpChannels || [];
         const lowerContent = message.content.toLowerCase();
@@ -88,8 +105,6 @@ module.exports = {
 
                      const xpGained = generateXP();
                      user.xp += xpGained;
-
-                     // --- LEVEL UP LOGIC ---
                      const leveledUp = generateUserLevel(user);
 
                      if (leveledUp) {
@@ -97,28 +112,23 @@ module.exports = {
                           let notifyChannel = message.channel;
                           if (levelUpChannelId) {
                               const foundChannel = message.guild.channels.cache.get(levelUpChannelId);
-                              if (foundChannel && foundChannel.isTextBased()) notifyChannel = foundChannel; // Check if text-based
+                              if (foundChannel && foundChannel.isTextBased()) notifyChannel = foundChannel;
                           }
                           const levelUpEmbed = new EmbedBuilder().setTitle('🚀 Level UP!').setDescription(`${message.author}, congratulations! You've leveled up to **Level ${user.level}**! 🎉`).setThumbnail(message.author.displayAvatarURL({ dynamic: true })).setColor(0xFFD700).setTimestamp();
                           notifyChannel.send({ content: `${message.author}`, embeds: [levelUpEmbed] }).catch(console.error);
 
-                          // --- LEVEL ROLE ASSIGNMENT ---
                           const member = message.member;
                           if (member) {
                              const levelingRoles = message.client.config.levelingRoles || [];
-
                              const targetLevelRole = levelingRoles
                                  .filter(r => r.level <= user.level)
                                  .sort((a, b) => b.level - a.level)[0];
-
                              const targetLevelRoleId = targetLevelRole ? targetLevelRole.roleId : null;
 
                              for (const roleConfig of levelingRoles) {
                                 const roleId = roleConfig.roleId;
-                                if (!roleId) continue; // Skip if role ID is missing
-
+                                if (!roleId) continue;
                                 const hasRole = member.roles.cache.has(roleId);
-
                                 try {
                                     if (roleId === targetLevelRoleId) {
                                         if (!hasRole) await member.roles.add(roleId);
@@ -130,24 +140,20 @@ module.exports = {
                                 }
                              }
                           }
-                          // --- END LEVEL ROLE ASSIGNMENT ---
                      }
-                     // --- END LEVEL UP LOGIC ---
-
                      await user.save();
                 } catch (dbError) {
                     console.error("Error processing XP gain:", dbError);
                 }
             }
         }
-        // --- End XP Gain Logic ---
 
         // --- LOGGING: Log Attachments/Links ---
         if (settings && settings.autologChannelId && !message.content.startsWith(PREFIX) && !lowerContent.startsWith(AI_TRIGGER_PREFIX)) {
             if (message.attachments.size > 0 || message.content.includes('http://') || message.content.includes('https://')) {
                 const logChannel = message.guild.channels.cache.get(settings.autologChannelId);
-                if (logChannel && logChannel.isTextBased()) { // Check if text-based
-                    let logDescription = `**Message Content:**\n${message.content || '*(No text content)*'}`.substring(0, 4000); // Limit description length
+                if (logChannel && logChannel.isTextBased()) {
+                    let logDescription = `**Message Content:**\n${message.content || '*(No text content)*'}`.substring(0, 4000);
                     if (message.attachments.size > 0) {
                         logDescription += `\n\n**Attachments:**\n${message.attachments.map(a => `[${a.name}](${a.url})`).join('\n')}`.substring(0, 4000 - logDescription.length);
                     }
@@ -165,22 +171,18 @@ module.exports = {
                 }
             }
         }
-        // --- END LOGGING ---
 
 
-        // --- AI Trigger Logic (?blecky) ---
-        // Check if the model was initialized successfully
+        // --- AI Trigger Logic (?blecky or AI Channel) ---
         if (model && (lowerContent.startsWith(AI_TRIGGER_PREFIX) || message.channel.id === settings?.aiChannelId)) {
-            // Determine the actual prompt (remove prefix if used, otherwise use full content in AI channel)
             let userPrompt;
              if (lowerContent.startsWith(AI_TRIGGER_PREFIX)) {
                 userPrompt = message.content.substring(AI_TRIGGER_PREFIX.length).trim();
                 console.log(`[AI Trigger] Detected trigger prefix from ${message.author.tag}`);
              } else {
-                 userPrompt = message.content.trim(); // Use full message in AI channel
+                 userPrompt = message.content.trim();
                  console.log(`[AI Trigger] Detected message in AI channel (${message.channel.id}) from ${message.author.tag}`);
              }
-
 
             const nowAI = Date.now();
             const userAICooldown = aiCooldowns.get(message.author.id);
@@ -192,20 +194,16 @@ module.exports = {
                  }).catch(console.error);
                 return;
             }
-             // Apply cooldown only if there's a prompt
              if (userPrompt) {
                 aiCooldowns.set(message.author.id, nowAI + AI_COOLDOWN_MS);
              }
 
-
             if (!userPrompt) {
-                 // Only send greeting if triggered by prefix, not just any message in AI channel
                  if (lowerContent.startsWith(AI_TRIGGER_PREFIX)) {
                      console.log(`[AI Trigger] Empty prefix prompt from ${message.author.tag}, replying with greeting.`);
-                     aiCooldowns.delete(message.author.id); // Remove cooldown if no actual prompt
+                     aiCooldowns.delete(message.author.id);
                      return message.reply("Yes? How can I assist you?").catch(console.error);
                  } else {
-                     // Ignore empty messages in AI channel
                      console.log(`[AI Trigger] Ignoring empty message in AI channel from ${message.author.tag}.`);
                      return;
                  }
@@ -223,60 +221,44 @@ module.exports = {
 
                 const userId = message.author.id;
                 let userHistory = conversationHistory.get(userId) || [];
-                // Add current prompt to history *before* sending to AI
                 userHistory.push({ role: 'user', parts: [{ text: userPrompt }] });
-                // Trim history if it exceeds the limit (MAX_HISTORY pairs)
                 if (userHistory.length > MAX_HISTORY * 2) {
                      userHistory = userHistory.slice(-(MAX_HISTORY * 2));
                  }
 
-
-                // Build the prompt string with current user data and message
                 const finalSystemInstruction = SYSTEM_INSTRUCTION
                     .replace('{{USER_DATA}}', `${message.author.tag}(${userDataContext})`)
                     .replace('{{USER_MESSAGE}}', userPrompt);
 
-
                  console.log(`[AI Call] Sending request for ${message.author.tag}... Model: ${AI_MODEL_NAME}`);
-
-                 // Start chat *with* previous history (excluding the current user message which is part of the final prompt string)
                  const chat = model.startChat({ history: userHistory.slice(0, -1) });
-                 // Send the system instruction combined with the latest user message
                  const result = await chat.sendMessage(finalSystemInstruction);
-
                  const response = result.response;
                  let aiTextResult = response?.text();
                  console.log(`[AI Call] Received response for ${message.author.tag}. Success: ${!!aiTextResult}`);
-
 
                 if (!aiTextResult) {
                     console.warn("[AI Error] Gemini returned empty response or block.", response?.promptFeedback || 'No feedback');
                     aiTextResult = "I'm having trouble formulating a response right now. Could you try rephrasing?";
                     if (response?.promptFeedback?.blockReason) aiTextResult += ` (Reason: ${response.promptFeedback.blockReason})`;
-                    // Don't add problematic response to history
                 } else {
-                     // Add the successful model response to history
                      userHistory.push({ role: 'model', parts: [{ text: aiTextResult }] });
-                     conversationHistory.set(userId, userHistory); // Update history
+                     conversationHistory.set(userId, userHistory);
                 }
-
 
                 let aiTextResponseForUser = aiTextResult;
                 const actionsToPerform = [];
-                // Simple action parsing (adjust regex if needed)
-                const actionRegex = /\[ACTION:([A-Z_]+)\s*(.*?)\]/gi; // Global flag to find all actions
+                const actionRegex = /\[ACTION:([A-Z_]+)\s*(.*?)\]/gi;
                 let match;
                  while ((match = actionRegex.exec(aiTextResult)) !== null) {
                     actionsToPerform.push({ type: match[1].toUpperCase(), args: match[2]?.trim() });
-                    // Remove the action string from the user-facing response
                     aiTextResponseForUser = aiTextResponseForUser.replace(match[0], '').trim();
                  }
-
 
                  console.log(`[AI Respond] Sending text response (if any) for ${message.author.tag}`);
                 if (aiTextResponseForUser) {
                     await message.reply(aiTextResponseForUser.substring(0, 2000)).catch(console.error);
-                } else if (actionsToPerform.length === 0 && aiTextResult) { // Only reply "Okay." if there was a result but no text/action
+                } else if (actionsToPerform.length === 0 && aiTextResult) {
                      await message.reply("Okay.").catch(console.error);
                 }
 
@@ -287,17 +269,13 @@ module.exports = {
 
             } catch (error) {
                 console.error("[AI Error] Error during AI processing:", error);
-                 // Clear cooldown on error to allow retrying sooner
                  aiCooldowns.delete(message.author.id);
                  try {
-                    // Avoid replying if missing permissions
                     if (error.code !== 50013 && message.channel.permissionsFor(message.guild.members.me)?.has(PermissionsBitField.Flags.SendMessages)) {
                          let errorMsg = "⚠️ Oops! Something went wrong with my AI core.";
-                         // Add more details for specific Gemini errors if helpful
-                         if (error.message && error.message.includes("404 Not Found")) {
-                            errorMsg += ` (Model "${AI_MODEL_NAME}" might be unavailable.)`;
+                         if (error.message && (error.message.includes("404 Not Found") || error.message.includes("is not found for API version"))) {
+                            errorMsg += ` (Model "${AI_MODEL_NAME}" might be unavailable or invalid for your API key.)`;
                          } else if (error.message) {
-                             // Log the raw error message server-side but give generic to user
                              console.error("Underlying AI error:", error.message);
                          }
                         await message.reply(errorMsg).catch(console.error);
@@ -308,75 +286,52 @@ module.exports = {
                     console.error("[AI Error] Failed to send error reply:", replyError);
                  }
             }
-            return; // Stop further processing if AI handled it
+            return;
         }
-        // --- End AI Trigger Logic ---
 
 
         // --- Prefix Command Handling ---
         if (!message.content.startsWith(PREFIX)) return;
 
         console.log(`[Prefix Cmd] Detected prefix from ${message.author.tag}: ${message.content}`);
-
         const args = message.content.slice(PREFIX.length).trim().split(/ +/);
         const commandName = args.shift().toLowerCase();
-
-        // Find command by name or alias
         const command = message.client.commands.get(commandName);
 
         if (!command) {
             console.log(`[Prefix Cmd] Command not found: ${commandName}`);
-            // Optional: Add a reply like message.reply("Unknown command.").catch(console.error);
             return;
         }
 
-
-        // --- TICKET ALIAS/ARGUMENT FIX ---
-        // Special handling ONLY if the matched command's primary name is 'ticket'
         if (command.name === 'ticket') {
-             // Block 'setup' via prefix
              if (args[0]?.toLowerCase() === 'setup') {
                  console.log(`[Prefix Cmd] Ignoring 'ticket setup' prefix command.`);
                  return message.reply('❌ The `ticket setup` command is only available as a slash command (`/ticket setup`).').catch(console.error);
              }
-
-             // If the user typed just '?ticket' or '?ticket something_else'
              if (commandName === 'ticket' && args[0]?.toLowerCase() !== 'close') {
                  console.log(`[Prefix Cmd] Ignoring 'ticket' prefix command without 'close' arg.`);
                  return message.reply('Did you mean `?ticket close`, `?close`, or `?closeticket`? Setup is slash-only (`/ticket setup`).').catch(console.error);
              }
-
-             // If the user typed '?ticket close', remove 'close' from args before passing to execute
              if (commandName === 'ticket' && args[0]?.toLowerCase() === 'close') {
                  args.shift();
              }
-             // Aliases '?close' and '?closeticket' will naturally have no 'close' in args here.
         }
-        // --- END TICKET ALIAS/ARGUMENT FIX ---
 
-
-        // Check if it's a slash-only command definition (has 'data' but no prefix 'name')
-        // Allow ticket command to proceed as it's prefix-only now
-        if (command.data && !command.name && command.data.name !== 'ticket') { // Check data.name to be safe
+        if (command.data && !command.name && command.data.name !== 'ticket') {
              console.log(`[Prefix Cmd] Ignoring slash command file invoked via prefix: ${commandName}`);
              return message.reply(`The command \`${commandName}\` is only available as a slash command (e.g., \`/${commandName}\`).`).catch(console.error);
         }
-        // Check if it's NOT a valid prefix command (missing name or execute, OR it's slash-only)
          else if (!command.name || !command.execute) {
-              // This condition might catch hybrid commands if they lack `.name`, but the loader should handle that.
-              // It mainly ensures prefix-only commands have the required properties.
               console.warn(`[Prefix Cmd] Command file corresponding to '${commandName}' is invalid or slash-only.`);
               return;
          }
 
-
-        // Cooldown Check
          if (!message.client.cooldowns.has(command.name)) {
             message.client.cooldowns.set(command.name, new Collection());
          }
          const nowCmd = Date.now();
          const timestamps = message.client.cooldowns.get(command.name);
-         const cooldownAmount = (command.cooldown || 3) * 1000; // Use command-specific cooldown or default 3s
+         const cooldownAmount = (command.cooldown || 3) * 1000;
 
          if (timestamps.has(message.author.id)) {
             const expirationTime = timestamps.get(message.author.id) + cooldownAmount;
@@ -389,10 +344,8 @@ module.exports = {
          timestamps.set(message.author.id, nowCmd);
          setTimeout(() => timestamps.delete(message.author.id), cooldownAmount);
 
-        // Execute Prefix Command
         try {
              console.log(`[Prefix Cmd] Executing command '${command.name}' (triggered by '${commandName}') for ${message.author.tag}`);
-             // Pass message, args, client to the prefix command's execute function
             await command.execute(message, args, message.client);
         } catch (error) {
             console.error(`[Prefix Cmd Error] Error executing ${command.name}:`, error);
@@ -405,17 +358,15 @@ module.exports = {
 // --- Helper: Perform Specific Bot Actions ---
 async function performAction(message, actionType, actionArgs) {
      console.log(`[AI Action] Performing action: ${actionType}, Args: ${actionArgs}`);
-     try { // Add try-catch around actions
+     try {
         switch (actionType) {
             case 'SEND_GIF':
                 if (actionArgs) {
                     const gifUrl = await searchGiphyGif(actionArgs);
-                    if (gifUrl) { // Check if a URL was returned
+                    if (gifUrl) {
                         await message.channel.send(gifUrl).catch(e => console.error("[AI Action Error] Failed to send GIF:", e));
                     } else {
                          console.log(`[AI Action] No valid GIF URL returned for "${actionArgs}"`);
-                         // Optionally send a fallback message
-                         // await message.channel.send(`Couldn't find a GIF for "${actionArgs}".`).catch(console.error);
                     }
                 } else { console.warn("[AI Action Warn] SEND_GIF without args."); }
                 break;
