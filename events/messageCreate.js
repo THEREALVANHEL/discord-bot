@@ -1,4 +1,4 @@
-// events/messageCreate.js (FIXED - AI Model Name and Ticket Alias Logic)
+// events/messageCreate.js (FIXED - AI Prompt Redundancy)
 const { Events, EmbedBuilder, Collection, PermissionsBitField } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fetch = require('node-fetch');
@@ -35,12 +35,10 @@ if (GEMINI_API_KEY) {
     console.warn("[AI Init] GEMINI_API_KEY not found. AI features will be disabled.");
 }
 
-// --- AI FIX: Added {{CONVERSATION_HISTORY}} placeholder ---
+// --- AI FIX: REMOVED {{CONVERSATION_HISTORY}} placeholder ---
+// The history is now *only* passed via the .startChat({ history: ... }) method.
 const SYSTEM_INSTRUCTION = `You are Blecky Nephew, an advanced AI integrated into a Discord server... [Your existing detailed instructions remain here] ...
 User Data Provided: {{USER_DATA}}
----
-Conversation History:
-{{CONVERSATION_HISTORY}}
 ---
 User's Current Message: {{USER_MESSAGE}}
 ---
@@ -75,9 +73,14 @@ module.exports = {
                 message.client.xpCooldowns.set(message.author.id, now + XP_COOLDOWN);
                 let user = await User.findOne({ userId: message.author.id });
                 if (!user) user = new User({ userId: message.author.id });
+                
                 const xpGained = generateXP();
                 user.xp += xpGained;
-                const leveledUp = generateUserLevel(user);
+                
+                // --- LEVEL UP LOGIC ---
+                // generateUserLevel updates user.level and user.xp by reference
+                const leveledUp = generateUserLevel(user); 
+                
                 if (leveledUp) {
                     const levelUpChannelId = settings?.levelUpChannelId;
                      let notifyChannel = message.channel;
@@ -87,18 +90,37 @@ module.exports = {
                      }
                      const levelUpEmbed = new EmbedBuilder().setTitle('🚀 Level UP!').setDescription(`${message.author}, congratulations! You've leveled up to **Level ${user.level}**! 🎉`).setThumbnail(message.author.displayAvatarURL({ dynamic: true })).setColor(0xFFD700).setTimestamp();
                      notifyChannel.send({ content: `${message.author}`, embeds: [levelUpEmbed] }).catch(console.error);
+                     
+                     // --- LEVEL ROLE ASSIGNMENT ---
                      const member = message.member;
                      if (member) {
-                        const levelingRoles = message.client.config.levelingRoles || [];
-                        const targetLevelRole = levelingRoles.filter(r => r.level <= user.level).sort((a, b) => b.level - a.level)[0];
+                        // Use the config from index.js
+                        const levelingRoles = message.client.config.levelingRoles || []; 
+                        
+                        // Find the single highest eligible role
+                        const targetLevelRole = levelingRoles
+                            .filter(r => r.level <= user.level)
+                            .sort((a, b) => b.level - a.level)[0];
+                        
                         const targetLevelRoleId = targetLevelRole ? targetLevelRole.roleId : null;
+                        
+                        // Loop to add the correct role and remove incorrect ones
                         for (const roleConfig of levelingRoles) {
-                           const roleId = roleConfig.roleId; const hasRole = member.roles.cache.has(roleId);
-                           if (roleId === targetLevelRoleId) { if (!hasRole) await member.roles.add(roleId).catch(() => {}); }
-                           else { if (hasRole) await member.roles.remove(roleId).catch(() => {}); }
+                           const roleId = roleConfig.roleId; 
+                           const hasRole = member.roles.cache.has(roleId);
+                           
+                           if (roleId === targetLevelRoleId) { 
+                               if (!hasRole) await member.roles.add(roleId).catch(() => {}); 
+                           }
+                           else { 
+                               if (hasRole) await member.roles.remove(roleId).catch(() => {}); 
+                           }
                         }
                      }
+                     // --- END LEVEL ROLE ASSIGNMENT ---
                 }
+                // --- END LEVEL UP LOGIC ---
+                
                 await user.save();
             }
         }
@@ -110,11 +132,9 @@ module.exports = {
                 const logChannel = message.guild.channels.cache.get(settings.autologChannelId);
                 if (logChannel) {
                     let logDescription = `**Message Content:**\n${message.content || '*(No text content)*'}`;
-                    
                     if (message.attachments.size > 0) {
                         logDescription += `\n\n**Attachments:**\n${message.attachments.map(a => `[${a.name}](${a.url})`).join('\n')}`;
                     }
-                    
                     const logEmbed = new EmbedBuilder()
                         .setTitle('📝 Media/Link Logged')
                         .setColor(0x3498DB)
@@ -125,7 +145,6 @@ module.exports = {
                           { name: 'Message', value: `[Jump to Message](${message.url})`, inline: true }
                         )
                         .setTimestamp();
-                    
                     logChannel.send({ embeds: [logEmbed] }).catch(console.error);
                 }
             }
@@ -170,19 +189,19 @@ module.exports = {
                 userHistory.push({ role: 'user', parts: [{ text: userPrompt }] });
                 if (userHistory.length > MAX_HISTORY * 2) userHistory = userHistory.slice(-(MAX_HISTORY * 2));
                 
-                // Get just the text parts for the history string
-                const historyString = userHistory.map(h => `${h.role === 'user' ? 'User' : 'Blecky'}: ${h.parts[0].text}`).join('\n');
-
+                // --- AI FIX: Build the prompt WITHOUT the conversation history string ---
                 const finalSystemInstruction = SYSTEM_INSTRUCTION
                     .replace('{{USER_DATA}}', `${message.author.tag}(${userDataContext})`)
-                    .replace('{{CONVERSATION_HISTORY}}', historyString || "None.")
                     .replace('{{USER_MESSAGE}}', userPrompt);
+                // --- END AI FIX ---
 
                  console.log(`[AI Call] Sending request for ${message.author.tag}...`);
-                 // Use the userHistory (which contains role/parts objects) for the chat history
+                 
+                 // Pass the history ONLY to startChat
                  const chat = model.startChat({ history: userHistory.slice(0, -1) }); 
-                 // Send only the new prompt (wrapped in the system instruction)
+                 // Send only the new system instruction + prompt
                  const result = await chat.sendMessage(finalSystemInstruction); 
+                 
                  const response = result.response;
                  let aiTextResult = response?.text();
                  console.log(`[AI Call] Received response for ${message.author.tag}. Success: ${!!aiTextResult}`);
@@ -253,7 +272,7 @@ module.exports = {
         }
 
 
-        // --- TICKET ALIAS FIX: This logic block is moved *before* the slash command check ---
+        // --- TICKET ALIAS FIX ---
         if (command.name === 'ticket') { // Catches 'ticket' and 'closeticket'
              
              if (args[0]?.toLowerCase() === 'setup') {
@@ -263,7 +282,6 @@ module.exports = {
 
              if (commandName === 'ticket' && args[0]?.toLowerCase() !== 'close') {
                  console.log(`[Prefix Cmd] Ignoring 'ticket' prefix command without 'close' arg.`);
-                 // Reply to avoid confusion
                  return message.reply('Did you mean `?ticket close` or `?closeticket`? Setup is slash-only (`/ticket setup`).').catch(console.error);
              }
 
@@ -276,8 +294,6 @@ module.exports = {
 
         // Check if it's a slash-only command
         if (command.data && typeof command.data.toJSON === 'function') {
-            // This is a slash command file.
-            // We already handled the 'ticket' exception above.
             if (command.name !== 'ticket') {
                 console.log(`[Prefix Cmd] Ignoring slash command file invoked via prefix: ${commandName}`);
                 return message.reply(`The command \`${commandName}\` is only available as a slash command (e.g., \`/${commandName}\`).`).catch(console.error);
