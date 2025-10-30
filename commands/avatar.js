@@ -1,6 +1,6 @@
-// commands/prefix/avatar.js (NEW FILE)
+// commands/avatar.js (REPLACE)
 const { EmbedBuilder } = require('discord.js');
-const { findUserInGuild } = require('../../utils/findUserInGuild'); // Adjust path
+const { findUserInGuild } = require('../utils/findUserInGuild'); // FIXED PATH
 
 module.exports = {
     name: 'avatar',
