@@ -1,5 +1,5 @@
 // events/interactionCreate.js (REPLACE)
-const { Events, EmbedBuilder, PermissionsBitField, ChannelType, Collection, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, InteractionFlags } = require('discord.js'); // <-- ADDED InteractionFlags
+const { Events, EmbedBuilder, PermissionsBitField, ChannelType, Collection, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, InteractionFlags } = require('discord.js'); // <-- InteractionFlags is imported here
 const Settings = require('../models/Settings');
 const User = require('../models/User');
 const fs = require('fs').promises;
@@ -224,7 +224,7 @@ module.exports = {
         else if (customId === 'create_ticket') {
             try {
                 // --- FIX: Use new ephemeral flag ---
-                await interaction.deferReply({ flags: InteractionFlags.EPHEMERAL }); // <-- FIX: ALL CAPS
+                await interaction.deferReply({ flags: InteractionFlags.Ephemeral }); // <-- FIX: Ephemeral (not EPHEMERAL)
                 // --- END FIX ---
                 
                 const guild = interaction.guild;
@@ -332,7 +332,7 @@ module.exports = {
                 }
 
                 // --- FIX: Use new ephemeral flag ---
-                await interaction.deferReply({ flags: InteractionFlags.EPHEMERAL }); // <-- FIX: ALL CAPS
+                await interaction.deferReply({ flags: InteractionFlags.Ephemeral }); // <-- FIX: Ephemeral (not EPHEMERAL)
 
                 // --- TRANSCRIPT LOGIC ---
                 let transcriptContent = `Transcript for Ticket\nChannel: #${channel.name} (${channel.id})\n${topic}\nClosed by: ${interaction.user.tag}\n\n`;
