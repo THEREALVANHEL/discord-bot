@@ -1,4 +1,4 @@
-// commands/quicksetup.js (REPLACE - Added aiLogChannel option)
+// commands/quicksetup.js (REPLACE - Added all AI options)
 const { SlashCommandBuilder, ChannelType, EmbedBuilder } = require('discord.js');
 const Settings = require('../models/Settings');
 
@@ -26,10 +26,23 @@ module.exports = {
         .setDescription('Channel for moderation actions logging')
         .addChannelTypes(ChannelType.GuildText)
         .setRequired(false))
-    .addChannelOption(option => // NEW
+    .addChannelOption(option => 
         option.setName('ai_log_channel')
           .setDescription('Channel for AI command execution logs')
           .addChannelTypes(ChannelType.GuildText)
+          .setRequired(false))
+    .addChannelOption(option => // NEW
+        option.setName('ai_channel')
+          .setDescription('Set the designated AI chat channel')
+          .addChannelTypes(ChannelType.GuildText)
+          .setRequired(false))
+    .addBooleanOption(option => // NEW
+        option.setName('ai_anonymous_mode')
+          .setDescription('Enable anonymous mode for AI channel (hides usernames)')
+          .setRequired(false))
+    .addBooleanOption(option => // NEW
+        option.setName('ai_math_mode')
+          .setDescription('Enable automatic math expression evaluation')
           .setRequired(false))
     .addChannelOption(option =>
       option.setName('suggestion_channel')
@@ -46,7 +59,7 @@ module.exports = {
         .setDescription('Category for new ticket channels')
         .addChannelTypes(ChannelType.GuildCategory)
         .setRequired(false))
-    .addChannelOption(option => // NEW
+    .addChannelOption(option => 
       option.setName('level_up_channel')
         .setDescription('Channel for level up messages (defaults to current channel)')
         .addChannelTypes(ChannelType.GuildText)
@@ -95,13 +108,31 @@ module.exports = {
       updatedFields.push(`Mod-Log Channel: ${modlogChannel}`);
     }
     
-    // NEW: AI Log Channel
     const aiLogChannel = interaction.options.getChannel('ai_log_channel');
     if (aiLogChannel) {
       settings.aiLogChannelId = aiLogChannel.id;
       updatedFields.push(`AI-Log Channel: ${aiLogChannel}`);
     }
 
+    // --- NEW AI SETTINGS ---
+    const aiChannel = interaction.options.getChannel('ai_channel');
+    if (aiChannel) {
+      settings.aiChannelId = aiChannel.id;
+      updatedFields.push(`AI Channel: ${aiChannel}`);
+    }
+
+    const anonymousMode = interaction.options.getBoolean('ai_anonymous_mode');
+    if (anonymousMode !== null) {
+      settings.aiAnonymousMode = anonymousMode;
+      updatedFields.push(`AI Anonymous Mode: ${anonymousMode ? 'Enabled' : 'Disabled'}`);
+    }
+
+    const mathMode = interaction.options.getBoolean('ai_math_mode');
+    if (mathMode !== null) {
+      settings.aiMathMode = mathMode;
+      updatedFields.push(`AI Math Mode: ${mathMode ? 'Enabled' : 'Disabled'}`);
+    }
+    // --- END NEW AI SETTINGS ---
 
     const suggestionChannel = interaction.options.getChannel('suggestion_channel');
     if (suggestionChannel) {
@@ -121,7 +152,6 @@ module.exports = {
       updatedFields.push(`Ticket Category: ${ticketCategory}`);
     }
     
-    // NEW
     const levelUpChannel = interaction.options.getChannel('level_up_channel');
     if (levelUpChannel) {
       settings.levelUpChannelId = levelUpChannel.id;
