@@ -1,6 +1,27 @@
-// commands/quicksetup.js (REPLACE - Added all AI options)
+// commands/quicksetup.js (REPLACE - Refactored for maintainability)
 const { SlashCommandBuilder, ChannelType, EmbedBuilder } = require('discord.js');
 const Settings = require('../models/Settings');
+
+// --- IMPROVEMENT: Map for channel options ---
+// Maps the command option name to its database key and display name
+const channelOptionsMap = {
+  'welcome_channel': { dbKey: 'welcomeChannelId', name: 'Welcome Channel' },
+  'leave_channel': { dbKey: 'leaveChannelId', name: 'Leave Channel' },
+  'autolog_channel': { dbKey: 'autologChannelId', name: 'Auto-Log Channel' },
+  'modlog_channel': { dbKey: 'modlogChannelId', name: 'Mod-Log Channel' },
+  'ai_log_channel': { dbKey: 'aiLogChannelId', name: 'AI-Log Channel' },
+  'ai_channel': { dbKey: 'aiChannelId', name: 'AI Channel' },
+  'suggestion_channel': { dbKey: 'suggestionChannelId', name: 'Suggestion Channel' },
+  'ticket_panel_channel': { dbKey: 'ticketPanelChannelId', name: 'Ticket Panel Channel' },
+  'ticket_category': { dbKey: 'ticketCategoryId', name: 'Ticket Category' },
+  'level_up_channel': { dbKey: 'levelUpChannelId', name: 'Level Up Channel' }
+};
+
+// --- IMPROVEMENT: Map for boolean options ---
+const booleanOptionsMap = {
+  'ai_anonymous_mode': { dbKey: 'aiAnonymousMode', name: 'AI Anonymous Mode' },
+  'ai_math_mode': { dbKey: 'aiMathMode', name: 'AI Math Mode' }
+};
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -31,16 +52,16 @@ module.exports = {
           .setDescription('Channel for AI command execution logs')
           .addChannelTypes(ChannelType.GuildText)
           .setRequired(false))
-    .addChannelOption(option => // NEW
+    .addChannelOption(option => 
         option.setName('ai_channel')
           .setDescription('Set the designated AI chat channel')
           .addChannelTypes(ChannelType.GuildText)
           .setRequired(false))
-    .addBooleanOption(option => // NEW
+    .addBooleanOption(option => 
         option.setName('ai_anonymous_mode')
           .setDescription('Enable anonymous mode for AI channel (hides usernames)')
           .setRequired(false))
-    .addBooleanOption(option => // NEW
+    .addBooleanOption(option => 
         option.setName('ai_math_mode')
           .setDescription('Enable automatic math expression evaluation')
           .setRequired(false))
@@ -74,6 +95,8 @@ module.exports = {
         .setDescription('Another channel where XP gain is disabled')
         .addChannelTypes(ChannelType.GuildText)
         .setRequired(false)),
+        
+  // --- REFACTORED EXECUTE FUNCTION ---
   async execute(interaction) {
     await interaction.deferReply({ ephemeral: true });
 
@@ -83,92 +106,41 @@ module.exports = {
     }
 
     const updatedFields = [];
+    const { options } = interaction; // Get the options from the interaction
 
-    const welcomeChannel = interaction.options.getChannel('welcome_channel');
-    if (welcomeChannel) {
-      settings.welcomeChannelId = welcomeChannel.id;
-      updatedFields.push(`Welcome Channel: ${welcomeChannel}`);
-    }
-
-    const leaveChannel = interaction.options.getChannel('leave_channel');
-    if (leaveChannel) {
-      settings.leaveChannelId = leaveChannel.id;
-      updatedFields.push(`Leave Channel: ${leaveChannel}`);
+    // --- IMPROVEMENT: Loop through channel options ---
+    for (const [optionName, config] of Object.entries(channelOptionsMap)) {
+      const channel = options.getChannel(optionName);
+      if (channel) {
+        settings[config.dbKey] = channel.id; // Dynamically set the correct key
+        updatedFields.push(`${config.name}: ${channel}`);
+      }
     }
 
-    const autologChannel = interaction.options.getChannel('autolog_channel');
-    if (autologChannel) {
-      settings.autologChannelId = autologChannel.id;
-      updatedFields.push(`Auto-Log Channel: ${autologChannel}`);
+    // --- IMPROVEMENT: Loop through boolean options ---
+    for (const [optionName, config] of Object.entries(booleanOptionsMap)) {
+      const booleanValue = options.getBoolean(optionName);
+      if (booleanValue !== null) { // Check for null, as 'false' is a valid input
+        settings[config.dbKey] = booleanValue;
+        updatedFields.push(`${config.name}: ${booleanValue ? 'Enabled' : 'Disabled'}`);
+      }
     }
 
-    const modlogChannel = interaction.options.getChannel('modlog_channel');
-    if (modlogChannel) {
-      settings.modlogChannelId = modlogChannel.id;
-      updatedFields.push(`Mod-Log Channel: ${modlogChannel}`);
-    }
-    
-    const aiLogChannel = interaction.options.getChannel('ai_log_channel');
-    if (aiLogChannel) {
-      settings.aiLogChannelId = aiLogChannel.id;
-      updatedFields.push(`AI-Log Channel: ${aiLogChannel}`);
-    }
-
-    // --- NEW AI SETTINGS ---
-    const aiChannel = interaction.options.getChannel('ai_channel');
-    if (aiChannel) {
-      settings.aiChannelId = aiChannel.id;
-      updatedFields.push(`AI Channel: ${aiChannel}`);
-    }
-
-    const anonymousMode = interaction.options.getBoolean('ai_anonymous_mode');
-    if (anonymousMode !== null) {
-      settings.aiAnonymousMode = anonymousMode;
-      updatedFields.push(`AI Anonymous Mode: ${anonymousMode ? 'Enabled' : 'Disabled'}`);
-    }
-
-    const mathMode = interaction.options.getBoolean('ai_math_mode');
-    if (mathMode !== null) {
-      settings.aiMathMode = mathMode;
-      updatedFields.push(`AI Math Mode: ${mathMode ? 'Enabled' : 'Disabled'}`);
-    }
-    // --- END NEW AI SETTINGS ---
-
-    const suggestionChannel = interaction.options.getChannel('suggestion_channel');
-    if (suggestionChannel) {
-      settings.suggestionChannelId = suggestionChannel.id;
-      updatedFields.push(`Suggestion Channel: ${suggestionChannel}`);
-    }
-
-    const ticketPanelChannel = interaction.options.getChannel('ticket_panel_channel');
-    if (ticketPanelChannel) {
-      settings.ticketPanelChannelId = ticketPanelChannel.id;
-      updatedFields.push(`Ticket Panel Channel: ${ticketPanelChannel}`);
-    }
-
-    const ticketCategory = interaction.options.getChannel('ticket_category');
-    if (ticketCategory) {
-      settings.ticketCategoryId = ticketCategory.id;
-      updatedFields.push(`Ticket Category: ${ticketCategory}`);
-    }
-    
-    const levelUpChannel = interaction.options.getChannel('level_up_channel');
-    if (levelUpChannel) {
-      settings.levelUpChannelId = levelUpChannel.id;
-      updatedFields.push(`Level Up Channel: ${levelUpChannel}`);
-    }
-
+    // --- Handle special case: no_xp_channels (as it's an array) ---
     const noXpChannels = [];
-    const noXpChannel1 = interaction.options.getChannel('no_xp_channel_1');
+    const noXpChannel1 = options.getChannel('no_xp_channel_1');
+    const noXpChannel2 = options.getChannel('no_xp_channel_2');
+    
     if (noXpChannel1) noXpChannels.push(noXpChannel1.id);
-    const noXpChannel2 = interaction.options.getChannel('no_xp_channel_2');
     if (noXpChannel2) noXpChannels.push(noXpChannel2.id);
 
     if (noXpChannels.length > 0) {
+      // Use Set to avoid duplicates if user selects the same channel twice
       settings.noXpChannels = [...new Set([...settings.noXpChannels, ...noXpChannels])];
       updatedFields.push(`No-XP Channels added: ${noXpChannels.map(id => `<#${id}>`).join(', ')}`);
     }
 
+    // --- Save and Reply ---
     await settings.save();
 
     const embed = new EmbedBuilder()
