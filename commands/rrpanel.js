@@ -1,4 +1,4 @@
-// commands/rrpanel.js (SIMPLIFIED - Comma separated with fullstop breaks)
+// commands/rrpanel.js (REWORKED EMBED - Kept as Prefix Command)
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
 const Settings = require('../models/Settings');
 
@@ -20,9 +20,6 @@ module.exports = {
     let sections = fullInput.split('.').map(s => s.trim()).filter(s => s);
     
     // 4. First comma separates panel description from first role
-    // Everything before first comma = panel description
-    // Everything after = role entries separated by periods
-    
     if (sections.length === 0) {
         return message.reply(
             '❌ Invalid format!\n\n' +
@@ -57,24 +54,18 @@ module.exports = {
     // 6. Parse each role entry
     const rolesToAdd = [];
     const emojisToReact = [];
-    let embedDescription = `**${panelDescription}**\n\n`;
+    let roleListString = ''; // NEW: String for the embed field
 
     for (let i = 0; i < roleSections.length; i++) {
         const section = roleSections[i];
-        
-        // Split by comma to get: RoleID, Role Description, Emoji
         const parts = section.split(',').map(p => p.trim());
 
-        // Validate we have exactly 3 parts
         if (parts.length !== 3) {
             return message.reply(
                 `❌ Invalid format in entry ${i + 1}: "${section}"\n\n` +
                 `**Found ${parts.length} parts, expected 3:**\n` +
                 parts.map((p, idx) => `${idx + 1}. \`${p}\``).join('\n') +
-                '\n\n**Required format:** `<RoleID>, <Role Description>, <Emoji>`\n\n' +
-                '**Examples:**\n' +
-                '• Single role: `?rpanel Panel Title, 123456789, Red Color Role, ❤️`\n' +
-                '• Multiple roles: `?rpanel Panel Title, 123456789, Red Role, ❤️. 987654321, Blue Role, 💙.`'
+                '\n\n**Required format:** `<RoleID>, <Role Description>, <Emoji>`'
             );
         }
 
@@ -89,7 +80,7 @@ module.exports = {
             );
         }
 
-        // 8. Validate Emoji (basic check for custom or unicode emoji)
+        // 8. Validate Emoji
         const emojiRegex = /^(<a?:.+?:\d+>|[\p{Emoji}\p{Emoji_Modifier}\p{Emoji_Component}\p{Emoji_Presentation}\p{Emoji_Modifier_Base}]+)$/u;
         if (!emojiRegex.test(emojiIdentifier)) {
             return message.reply(
@@ -101,8 +92,8 @@ module.exports = {
         // 9. Add to lists
         rolesToAdd.push({ roleId: role.id, emoji: emojiIdentifier });
         emojisToReact.push(emojiIdentifier);
-        // Order: @role mention, description, then emoji
-        embedDescription += `${role} - *${roleDescription}* ${emojiIdentifier}\n`;
+        // CHANGED: Build a clean string for the embed field
+        roleListString += `${emojiIdentifier} ${role} - ${roleDescription}\n`;
     }
 
     // 10. Validate we have at least one role
@@ -110,10 +101,11 @@ module.exports = {
         return message.reply('❌ No valid role entries found. Please add at least one role.');
     }
 
-    // 11. Build the Embed
+    // 11. Build the Embed (REWORKED)
     const embed = new EmbedBuilder()
       .setTitle('🎭 Reaction Roles')
-      .setDescription(embedDescription)
+      .setDescription(panelDescription) // Use user's description here
+      .addFields({ name: 'Available Roles', value: roleListString.substring(0, 1024) }) // Add roles as a field
       .setColor(0x7289DA) // Blurple
       .setFooter({ text: 'React to an emoji below to get the corresponding role!' })
       .setTimestamp();
