@@ -1,7 +1,7 @@
-// commands/prefix/whois.js (NEW FILE)
+// commands/whois.js (REPLACE)
 const { EmbedBuilder } = require('discord.js');
-const User = require('../../models/User'); // Adjust path up two levels
-const { findUserInGuild } = require('../../utils/findUserInGuild'); // Adjust path
+const User = require('../models/User'); // FIXED PATH
+const { findUserInGuild } = require('../utils/findUserInGuild'); // FIXED PATH
 
 // Helper function from profile.js
 const getNextLevelXp = (level) => {
