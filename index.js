@@ -32,6 +32,7 @@ client.polls = new Map();
 client.xpCooldowns = new Map();
 client.grantedUsers = new Map();
 client.rrpanel_builders = new Map();
+client.activeInteractions = new Set(); // <-- FIX for button spam
 
 // --- Bot Configuration ---
 // (Your existing config remains unchanged)
@@ -337,12 +338,15 @@ client.login(process.env.DISCORD_TOKEN).then(() => {
     process.exit(1);
 });
 
-// --- Graceful Shutdown (FIXED) ---
+// --- Graceful Shutdown (FIXED to prevent double-spam) ---
 const shutdown = (signal) => {
-    console.log(` ${signal} received. Shutting down...`);
-    client.destroy(); // Destroy client first
+    console.log(` ${signal} received. Shutting down gracefully...`);
+    // --- FIX: Destroy client FIRST to stop receiving new messages ---
+    client.destroy(); 
     console.log('Discord client destroyed.');
-    mongoose.disconnect().then(() => { // Disconnect in background
+    
+    // Disconnect from MongoDB *after* client is dead
+    mongoose.disconnect().then(() => {
         console.log('MongoDB disconnected.');
         process.exit(0);
     }).catch(err => {
@@ -351,5 +355,5 @@ const shutdown = (signal) => {
     });
 };
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
