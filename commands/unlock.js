@@ -3,6 +3,9 @@ const { EmbedBuilder, PermissionsBitField, ChannelType } = require('discord.js')
 const Settings = require('../models/Settings'); // Required for logging
 const { logModerationAction } = require('../utils/logModerationAction'); // Required for logging
 
+// --- FIX: Target your specific role ID ---
+const TARGET_ROLE_ID = '1384141744303636610';
+// --- END FIX ---
 
 module.exports = {
     name: 'unlock',
@@ -15,12 +18,6 @@ module.exports = {
          const isAdmin = member.permissions.has(PermissionsBitField.Flags.Administrator) ||
                         [config.roles.forgottenOne, config.roles.overseer].some(roleId => member.roles.cache.has(roleId));
          const canUnlock = isAdmin || member.roles.cache.has(config.roles.leadMod) || member.permissions.has(PermissionsBitField.Flags.ManageChannels);
-
-
-        // Check for Temp Mod Access Role - UNLOCK MIGHT BE TOO SENSITIVE FOR TEMP ROLE - uncomment if allowed
-        // const tempRole = message.guild.roles.cache.find(role => role.name === 'TempModAccess');
-        // const hasTempAccess = tempRole && member.roles.cache.has(tempRole.id);
-        // if (!canUnlock && !hasTempAccess) {
 
 
         if (!canUnlock) {
@@ -47,19 +44,27 @@ module.exports = {
         if (!targetChannel.permissionsFor(botMember).has(PermissionsBitField.Flags.ManageChannels)) {
             return message.reply(`❌ I need "Manage Channels" permission in ${targetChannel} to unlock it.`);
         }
+        
+        // --- FIX: Check if target role exists ---
+        const targetRole = message.guild.roles.cache.get(TARGET_ROLE_ID);
+        if (!targetRole) {
+            return message.reply(`❌ Error: The target role (ID: ${TARGET_ROLE_ID}) was not found.`);
+        }
+        // --- END FIX ---
 
         // 4. Apply Unlock
         try {
-            const currentOverwrites = targetChannel.permissionOverwrites.cache.get(message.guild.roles.everyone.id);
+            // --- FIX: Check permissions for the specific role ID ---
+            const currentOverwrites = targetChannel.permissionOverwrites.cache.get(TARGET_ROLE_ID);
             // Check if it's actually locked by the bot's standard lock method
              if (!currentOverwrites || !currentOverwrites.deny.has(PermissionsBitField.Flags.SendMessages)) {
-                 // It might be locked differently, or not locked at all for @everyone
-                 // Still attempt the unlock, but warn the user
-                 message.channel.send(`⚠️ Channel ${targetChannel} might not be locked in the standard way (or is already unlocked). Attempting unlock...`).catch(console.error);
+                 // It might be locked differently, or not locked at all for this role
+                 message.channel.send(`⚠️ Channel ${targetChannel} might not be locked for the target role (or is already unlocked). Attempting unlock...`).catch(console.error);
              }
+            // --- END FIX ---
 
 
-            await targetChannel.permissionOverwrites.edit(message.guild.roles.everyone, {
+            await targetChannel.permissionOverwrites.edit(targetRole, {
                 SendMessages: null, // Reset to default/inherit
                 AddReactions: null, // Also reset reactions
             });
