@@ -1,7 +1,7 @@
-// commands/ticket.js (FIXED - No DB, Transcript on Prefix Close, Prefix ONLY)
+// commands/ticket.js (FIXED - No DB, Transcript on Prefix Close, Prefix ONLY, 5 Second Close)
 const { EmbedBuilder, PermissionsBitField, AttachmentBuilder } = require('discord.js'); // Removed SlashCommandBuilder etc.
 const Settings = require('../models/Settings');
-// REMOVED: const Ticket = require('../models/Ticket');
+// REMOVED: const Ticket = require('../models/Ticket'); // Ensure this line is removed or commented out
 const { logModerationAction } = require('../utils/logModerationAction');
 const fs = require('fs').promises;
 const path = require('path');
@@ -29,14 +29,14 @@ module.exports = {
         const ticketCreatorId = creatorMatch[1];
 
         if (topic.includes('| Closed by:')) {
-            return message.reply('This ticket is already closed.');
+            return message.reply('This ticket is already closed or being closed.');
         }
 
         // Permission Check
         const member = message.member;
         const config = client.config; const roles = config.roles || {};
-        const isAdmin = member.permissions.has(PermissionsBitField.Flags.Administrator) || [roles.forgottenOne, roles.overseer].some(roleId => member.roles?.cache.has(roleId));
-        const isMod = isAdmin || [roles.leadMod, roles.mod].some(roleId => member.roles?.cache.has(roleId));
+        const isAdmin = member.permissions.has(PermissionsBitField.Flags.Administrator) || [roles.forgottenOne, roles.overseer].some(roleId => roleId && member.roles?.cache.has(roleId));
+        const isMod = isAdmin || [roles.leadMod, roles.mod].some(roleId => roleId && member.roles?.cache.has(roleId));
         const isOwner = ticketCreatorId === message.author.id; // Check against ID from topic
         const tempRoleId = '1433118039275999232';
         const hasTempAccess = member.roles?.cache.has(tempRoleId);
@@ -58,7 +58,7 @@ module.exports = {
          let messageCount = 0;
 
          try {
-             while (!fetchComplete && messageCount < 1000) {
+             while (!fetchComplete && messageCount < 1000) { // Limit message fetch
                 const options = { limit: 100 };
                 if (lastMessageId) options.before = lastMessageId;
                 const fetched = await channel.messages.fetch(options);
@@ -90,10 +90,11 @@ module.exports = {
                      await channel.send(`Transcript sent via DM to the ticket creator.`).catch(console.error);
                 } catch (dmError) {
                     console.error(`Failed to DM transcript to ${ticketCreator.tag}:`, dmError);
-                    await channel.send(`⚠️ Couldn't DM transcript to the ticket creator (DMs might be closed).`).catch(console.error);
+                    // Send transcript in channel if DM fails
+                    await channel.send({ content: `⚠️ Couldn't DM transcript to the ticket creator. Transcript attached here:`, files: [attachment] }).catch(console.error);
                 }
             } else {
-                 await channel.send(`⚠️ Couldn't find the ticket creator to DM the transcript.`).catch(console.error);
+                 await channel.send({ content: `⚠️ Couldn't find the ticket creator to DM the transcript. Transcript attached here:`, files: [attachment] }).catch(console.error);
             }
 
          } catch (fetchError) {
@@ -105,7 +106,11 @@ module.exports = {
         // --- Update Channel Topic ---
          try {
              const newTopic = `${topic} | Closed by: ${message.author.tag}`;
-             await channel.setTopic(newTopic.substring(0, 1024));
+             // Check if channel still exists before setting topic
+             const currentChannel = await message.guild.channels.fetch(channel.id).catch(() => null);
+             if (currentChannel) {
+                await currentChannel.setTopic(newTopic.substring(0, 1024));
+             }
          } catch (topicError) { console.error("Could not update topic on close:", topicError); }
 
         // Log
@@ -114,18 +119,22 @@ module.exports = {
             await logModerationAction(message.guild, settings, 'Ticket Closed (Prefix)', channel, message.author, `Ticket in #${channel.name} closed`);
         }
 
-        // Schedule deletion
+        // Schedule deletion (FIXED: 5 seconds)
         setTimeout(async () => {
             try {
+                // Fetch channel again right before deleting to ensure it wasn't already deleted
                 const channelToDelete = await message.guild.channels.fetch(channel.id).catch(() => null);
                 if (channelToDelete) {
                     await channelToDelete.delete(`Ticket closed by ${message.author.tag}`);
+                    console.log(`[Ticket Closed] Deleted channel ${channel.id}`);
                     // --- REMOVED DB Deletion ---
+                } else {
+                    console.log(`[Ticket Closed] Channel ${channel.id} already deleted before timeout.`);
                 }
             } catch (deleteError) { console.error(`Failed to delete ticket channel ${channel.id}:`, deleteError); }
-        }, 15000); // 15 seconds
+        }, 5000); // 5 seconds
         return;
     }
-    // REMOVED: Slash command setup logic
+    // REMOVED: Slash command setup logic (if any was here)
   },
 };
