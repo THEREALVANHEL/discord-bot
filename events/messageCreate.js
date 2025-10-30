@@ -1,6 +1,6 @@
-// events/messageCreate.js (REPLACED - Switched to OpenAI API)
+// events/messageCreate.js (REPLACED - Switched to Deepseek API)
 const { Events, EmbedBuilder, Collection, PermissionsBitField } = require('discord.js');
-const OpenAI = require('openai'); // NEW: Import OpenAI
+const OpenAI = require('openai'); // We keep this package!
 const fetch = require('node-fetch');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -11,7 +11,7 @@ const { generateUserLevel } = require('../utils/levelSystem');
 const { XP_COOLDOWN, generateXP } = require('../utils/xpSystem');
 
 // --- AI Configuration ---
-const AI_MODEL_NAME = 'gpt-4o-mini'; // NEW: OpenAI Model
+const AI_MODEL_NAME = 'deepseek-chat'; // NEW: Deepseek Model
 const AI_TRIGGER_PREFIX = '?blecky';
 const MAX_HISTORY = 5; // Max pairs of user/model messages
 const AI_COOLDOWN_MS = 3000; // 3 seconds
@@ -19,19 +19,22 @@ const AI_COOLDOWN_MS = 3000; // 3 seconds
 // --- Prefix Command Configuration ---
 const PREFIX = '?';
 
-// --- Initialize OpenAI ---
-let openai;
-if (process.env.OPENAI_API_KEY) {
+// --- Initialize Deepseek (using OpenAI-compatible client) ---
+let deepseek;
+if (process.env.DEEPSEEK_API_KEY) {
     try {
-        openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-        console.log(`[AI Init] Initialized OpenAI model: ${AI_MODEL_NAME}`);
+        deepseek = new OpenAI({
+            apiKey: process.env.DEEPSEEK_API_KEY,
+            baseURL: 'https://api.deepseek.com/v1' // NEW: Point to Deepseek
+        });
+        console.log(`[AI Init] Initialized Deepseek (OpenAI-compatible) model: ${AI_MODEL_NAME}`);
     } catch (error) {
-        console.error("[AI Init] Failed to initialize OpenAI:", error.message);
-        openai = null; // Ensure openai is null if init fails
+        console.error("[AI Init] Failed to initialize Deepseek:", error.message);
+        deepseek = null; // Ensure deepseek is null if init fails
     }
 } else {
-    console.warn("[AI Init] OPENAI_API_KEY not found. AI features will be disabled.");
-    openai = null;
+    console.warn("[AI Init] DEEPSEEK_API_KEY not found. AI features will be disabled.");
+    deepseek = null;
 }
 
 // System instruction
@@ -168,7 +171,7 @@ module.exports = {
 
 
         // --- AI Trigger Logic (?blecky or AI Channel) ---
-        if (openai && (lowerContent.startsWith(AI_TRIGGER_PREFIX) || message.channel.id === settings?.aiChannelId)) {
+        if (deepseek && (lowerContent.startsWith(AI_TRIGGER_PREFIX) || message.channel.id === settings?.aiChannelId)) {
             let userPrompt;
              if (lowerContent.startsWith(AI_TRIGGER_PREFIX)) {
                 userPrompt = message.content.substring(AI_TRIGGER_PREFIX.length).trim();
@@ -215,15 +218,8 @@ module.exports = {
 
                 const userId = message.author.id;
                 
-                // --- OpenAI History Conversion ---
-                let userHistory = conversationHistory.get(userId) || [];
-                // Convert history to OpenAI format (if it's in old Gemini format)
-                let openAIHistory = userHistory.map(msg => ({
-                    role: msg.role === 'model' ? 'assistant' : 'user',
-                    content: msg.parts ? msg.parts[0].text : msg.content // Handle both formats
-                }));
-
-                // Add new user prompt
+                // --- History ---
+                let openAIHistory = conversationHistory.get(userId) || [];
                 openAIHistory.push({ role: 'user', content: userPrompt });
 
                 // Prune history
@@ -239,12 +235,12 @@ module.exports = {
                     { role: 'system', content: finalSystemInstruction },
                     ...openAIHistory
                 ];
-                // --- End History Conversion ---
+                // --- End History ---
 
                  console.log(`[AI Call] Sending request for ${message.author.tag}... Model: ${AI_MODEL_NAME}`);
                  
-                 // --- OpenAI API Call ---
-                 const result = await openai.chat.completions.create({
+                 // --- Deepseek API Call ---
+                 const result = await deepseek.chat.completions.create({
                     model: AI_MODEL_NAME,
                     messages: messages,
                     max_tokens: 1024,
@@ -252,13 +248,12 @@ module.exports = {
         
                  let aiTextResult = result.choices[0]?.message?.content;
                  console.log(`[AI Call] Received response for ${message.author.tag}. Success: ${!!aiTextResult}`);
-                 // --- End OpenAI API Call ---
+                 // --- End Deepseek API Call ---
 
                 if (!aiTextResult) {
-                    console.warn("[AI Error] OpenAI returned empty response.");
+                    console.warn("[AI Error] Deepseek returned empty response.");
                     aiTextResult = "I'm having trouble formulating a response right now. Could you try rephrasing?";
                 } else {
-                     // Save in OpenAI format
                      openAIHistory.push({ role: 'assistant', content: aiTextResult });
                      // Prune again just in case, and save
                      if (openAIHistory.length > MAX_HISTORY * 2) {
@@ -294,7 +289,7 @@ module.exports = {
                  try {
                     if (error.code !== 50013 && message.channel.permissionsFor(message.guild.members.me)?.has(PermissionsBitField.Flags.SendMessages)) {
                          let errorMsg = "⚠️ Oops! Something went wrong with my AI core.";
-                         if (error.response) { // OpenAI API error
+                         if (error.response) { // API error
                              errorMsg += ` (API Error: ${error.response.status} - ${error.response.data?.error?.message || error.message})`;
                          } else if (error.message) {
                              errorMsg += ` (${error.message})`;
