@@ -30,7 +30,7 @@ async function findUserAnyMethod(guild, searchTerm) {
             const member = await guild.members.fetch(cleanTerm).catch(() => null);
             if (member) return member;
         } catch (error) {
-            // Ignore and try other methods
+            // Ignore and other methods
         }
     }
     
@@ -41,7 +41,7 @@ async function findUserAnyMethod(guild, searchTerm) {
             const member = await guild.members.fetch(userId).catch(() => null);
             if (member) return member;
         } catch (error) {
-            // Ignore and try other methods
+            // Ignore and other methods
         }
     }
     
@@ -484,7 +484,7 @@ module.exports = {
                          if (error.message) {
                              if (error.message.includes('API key') || error.message.includes('401')) {
                                  errorMsg = "⚠️ AI service authentication failed. Please contact the bot administrator.";
-                             } else if (error.message.includes('404') || errorMessage.includes('NOT_FOUND') || error.message.includes('is not found')) {
+                             } else if (error.message.includes('404') || error.message.includes('NOT_FOUND') || error.message.includes('is not found')) {
                                  errorMsg = "⚠️ AI service is temporarily unavailable. Please try again later.";
                                  console.error(`[AI Error] Model ${AI_MODEL_NAME} not available. Consider trying gemini-2.5-flash or gemini-2.5-pro`);
                              } else if (error.message.includes('quota') || error.message.includes('rate limit')) {
@@ -504,20 +504,61 @@ module.exports = {
             return;
         }
 
-        // --- Rest of the file (prefix command handling) remains unchanged ---
+        // --- Prefix Command Handling ---
         if (!message.content.startsWith(PREFIX)) return;
 
         console.log(`[Prefix Cmd] Detected prefix from ${message.author.tag}: ${message.content}`);
         const args = message.content.slice(PREFIX.length).trim().split(/ +/);
         const commandName = args.shift().toLowerCase();
+        
+        // Use client.commands (which has aliases) to find the command
         const command = message.client.commands.get(commandName);
 
         if (!command) {
             console.log(`[Prefix Cmd] Command not found: ${commandName}`);
             return;
         }
+        
+        // --- ADDED: Prefix Command Execution Logic ---
+        
+        // Check for prefix command permissions (example, adjust as needed)
+        // Note: Many of your prefix commands have permission checks inside them already,
+        // but this is a good global check.
+        if (command.permissions && !message.member.permissions.has(command.permissions)) {
+            return message.reply('You do not have permission to use this command.');
+        }
 
-        // ... rest of your prefix command handling
+        // Check for prefix command cooldowns
+        if (!message.client.cooldowns.has(command.name)) {
+            message.client.cooldowns.set(command.name, new Collection());
+        }
+
+        const now = Date.now();
+        const timestamps = message.client.cooldowns.get(command.name);
+        const defaultCooldownDuration = 3;
+        const cooldownAmount = (command.cooldown || defaultCooldownDuration) * 1000;
+
+        if (timestamps.has(message.author.id)) {
+            const expirationTime = timestamps.get(message.author.id) + cooldownAmount;
+            if (now < expirationTime) {
+                const expiredTimestamp = Math.round(expirationTime / 1000);
+                return message.reply(`Please wait, you are on a cooldown for \`?${command.name}\`. You can use it again <t:${expiredTimestamp}:R>.`)
+                    .then(msg => setTimeout(() => msg.delete().catch(console.error), 5000));
+            }
+        }
+        timestamps.set(message.author.id, now);
+        setTimeout(() => timestamps.delete(message.author.id), cooldownAmount);
+        // --- End Cooldown Logic ---
+
+        try {
+            // Execute the prefix command
+            console.log(`[Prefix Cmd] Executing: ${command.name}`);
+            await command.execute(message, args, message.client);
+        } catch (error) {
+            console.error(`Error executing prefix command ${commandName}:`, error);
+            await message.reply('There was an error trying to execute that command!').catch(console.error);
+        }
+        // --- END: Prefix Command Execution Logic ---
     },
 };
 
