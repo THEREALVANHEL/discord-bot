@@ -11,8 +11,7 @@ const { generateUserLevel } = require('../utils/levelSystem');
 const { XP_COOLDOWN, generateXP } = require('../utils/xpSystem');
 
 // --- AI Configuration ---
-// --- 1. AI FIX: Hardcoded correct model name ---
-const AI_MODEL_NAME = 'gemini-1.5-flash-latest'; // WAS: process.env.GEMINI_MODEL || 'gemini-1.5-flash-latest';
+const AI_MODEL_NAME = 'gemini-1.5-flash-latest';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const AI_TRIGGER_PREFIX = '?blecky';
 const MAX_HISTORY = 5;
@@ -36,13 +35,17 @@ if (GEMINI_API_KEY) {
     console.warn("[AI Init] GEMINI_API_KEY not found. AI features will be disabled.");
 }
 
-// System instructions
+// --- AI FIX: Added {{CONVERSATION_HISTORY}} placeholder ---
 const SYSTEM_INSTRUCTION = `You are Blecky Nephew, an advanced AI integrated into a Discord server... [Your existing detailed instructions remain here] ...
 User Data Provided: {{USER_DATA}}
+---
+Conversation History:
+{{CONVERSATION_HISTORY}}
 ---
 User's Current Message: {{USER_MESSAGE}}
 ---
 Your Response:`;
+// --- END AI FIX ---
 
 const conversationHistory = new Map();
 const aiCooldowns = new Map();
@@ -101,6 +104,35 @@ module.exports = {
         }
         // --- End XP Gain Logic ---
 
+        // --- LOGGING: Log Attachments/Links ---
+        if (settings && settings.autologChannelId && !message.content.startsWith(PREFIX) && !lowerContent.startsWith(AI_TRIGGER_PREFIX)) {
+            if (message.attachments.size > 0 || message.content.includes('http://') || message.content.includes('https://')) {
+                const logChannel = message.guild.channels.cache.get(settings.autologChannelId);
+                if (logChannel) {
+                    let logDescription = `**Message Content:**\n${message.content || '*(No text content)*'}`;
+                    
+                    if (message.attachments.size > 0) {
+                        logDescription += `\n\n**Attachments:**\n${message.attachments.map(a => `[${a.name}](${a.url})`).join('\n')}`;
+                    }
+                    
+                    const logEmbed = new EmbedBuilder()
+                        .setTitle('📝 Media/Link Logged')
+                        .setColor(0x3498DB)
+                        .setDescription(logDescription)
+                        .addFields(
+                          { name: 'User', value: `${message.author.tag} (${message.author.id})`, inline: true },
+                          { name: 'Channel', value: `${message.channel}`, inline: true },
+                          { name: 'Message', value: `[Jump to Message](${message.url})`, inline: true }
+                        )
+                        .setTimestamp();
+                    
+                    logChannel.send({ embeds: [logEmbed] }).catch(console.error);
+                }
+            }
+        }
+        // --- END LOGGING ---
+
+
         // --- AI Trigger Logic (?blecky) ---
         if (model && lowerContent.startsWith(AI_TRIGGER_PREFIX)) {
             console.log(`[AI Trigger] Detected trigger from ${message.author.tag}`);
@@ -137,8 +169,9 @@ module.exports = {
                 let userHistory = conversationHistory.get(userId) || [];
                 userHistory.push({ role: 'user', parts: [{ text: userPrompt }] });
                 if (userHistory.length > MAX_HISTORY * 2) userHistory = userHistory.slice(-(MAX_HISTORY * 2));
-                conversationHistory.set(userId, userHistory);
-                const historyString = userHistory.map(h => `${h.role === 'user' ? 'U' : 'B'}: ${h.parts[0].text}`).join('\n');
+                
+                // Get just the text parts for the history string
+                const historyString = userHistory.map(h => `${h.role === 'user' ? 'User' : 'Blecky'}: ${h.parts[0].text}`).join('\n');
 
                 const finalSystemInstruction = SYSTEM_INSTRUCTION
                     .replace('{{USER_DATA}}', `${message.author.tag}(${userDataContext})`)
@@ -146,8 +179,10 @@ module.exports = {
                     .replace('{{USER_MESSAGE}}', userPrompt);
 
                  console.log(`[AI Call] Sending request for ${message.author.tag}...`);
-                 const chat = model.startChat({ history: userHistory.slice(0, -1) });
-                 const result = await chat.sendMessage(finalSystemInstruction);
+                 // Use the userHistory (which contains role/parts objects) for the chat history
+                 const chat = model.startChat({ history: userHistory.slice(0, -1) }); 
+                 // Send only the new prompt (wrapped in the system instruction)
+                 const result = await chat.sendMessage(finalSystemInstruction); 
                  const response = result.response;
                  let aiTextResult = response?.text();
                  console.log(`[AI Call] Received response for ${message.author.tag}. Success: ${!!aiTextResult}`);
@@ -168,6 +203,7 @@ module.exports = {
                     aiTextResponseForUser = aiTextResult.replace(match[0], '').trim();
                 }
 
+                 // Add the model's response to the history
                  userHistory.push({ role: 'model', parts: [{ text: aiTextResponseForUser || '(Action)' }] });
                  conversationHistory.set(userId, userHistory);
 
@@ -216,41 +252,43 @@ module.exports = {
             return;
         }
 
-        if (command.data && typeof command.data.toJSON === 'function') {
-            console.log(`[Prefix Cmd] Ignoring slash command file invoked via prefix: ${commandName}`);
-            return message.reply(`The command \`${commandName}\` is only available as a slash command (e.g., \`/${commandName}\`).`).catch(console.error);
-        }
-        else if (!command.name || !command.execute || command.data) {
-             console.warn(`[Prefix Cmd] Command file '${commandName}' is invalid.`);
-             return;
-        }
 
-
-        // --- 2. TICKET ALIAS FIX: Updated logic ---
-        // Handle 'ticket' or 'closeticket'
-        if (command.name === 'ticket') { // This will catch 'ticket' and 'closeticket' (as 'closeticket' is an alias for 'ticket')
+        // --- TICKET ALIAS FIX: This logic block is moved *before* the slash command check ---
+        if (command.name === 'ticket') { // Catches 'ticket' and 'closeticket'
              
-             // If they typed "?ticket setup"
              if (args[0]?.toLowerCase() === 'setup') {
                  console.log(`[Prefix Cmd] Ignoring 'ticket setup' prefix command.`);
                  return message.reply('❌ The `ticket setup` command is only available as a slash command (`/ticket setup`).');
              }
 
-             // If they typed "?ticket" (with no args) or "?ticket anything_else"
              if (commandName === 'ticket' && args[0]?.toLowerCase() !== 'close') {
                  console.log(`[Prefix Cmd] Ignoring 'ticket' prefix command without 'close' arg.`);
-                 return; // Ignore
+                 // Reply to avoid confusion
+                 return message.reply('Did you mean `?ticket close` or `?closeticket`? Setup is slash-only (`/ticket setup`).').catch(console.error);
              }
 
-             // If they typed "?ticket close"
              if (commandName === 'ticket' && args[0]?.toLowerCase() === 'close') {
                  args.shift(); // Remove 'close' from args
              }
-             
-             // If they typed "?closeticket", commandName is 'closeticket', command.name is 'ticket'.
-             // No args need to be shifted.
         }
         // --- END TICKET ALIAS FIX ---
+
+
+        // Check if it's a slash-only command
+        if (command.data && typeof command.data.toJSON === 'function') {
+            // This is a slash command file.
+            // We already handled the 'ticket' exception above.
+            if (command.name !== 'ticket') {
+                console.log(`[Prefix Cmd] Ignoring slash command file invoked via prefix: ${commandName}`);
+                return message.reply(`The command \`${commandName}\` is only available as a slash command (e.g., \`/${commandName}\`).`).catch(console.error);
+            }
+        }
+        // Check if it's a valid prefix command (handles non-hybrid slash commands)
+        else if (!command.name || !command.execute || command.data) {
+             console.warn(`[Prefix Cmd] Command file '${commandName}' is invalid.`);
+             return;
+        }
+
 
         // Cooldown Check
          if (!message.client.cooldowns.has(command.name)) {
@@ -323,4 +361,4 @@ async function performAction(message, actionType, actionArgs) {
         default:
             console.warn(`[AI Action Warn] Unsupported action: ${actionType}`);
     }
-            }
+}
