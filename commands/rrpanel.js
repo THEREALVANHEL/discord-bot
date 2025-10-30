@@ -16,44 +16,51 @@ module.exports = {
     // 2. Combine all args into a single string
     const fullInput = args.join(' ');
 
-    // 3. Split by fullstop (period) to get panel description and role entries
-    // If no periods, treat the whole thing as one entry (single role panel)
+    // 3. Split by fullstop (period) to get role entries
     let sections = fullInput.split('.').map(s => s.trim()).filter(s => s);
     
-    // If only one section (no periods found), assume it's: description, roleID, desc, emoji
-    if (sections.length === 1) {
-        const parts = sections[0].split(',').map(p => p.trim());
-        if (parts.length >= 4) {
-            // Rearrange: first part is panel desc, rest is the role
-            sections = [parts[0], parts.slice(1).join(', ')];
-        }
-    }
-
-    // 4. Validate minimum input (panel description + at least 1 role)
-    if (sections.length < 2) {
+    // 4. First comma separates panel description from first role
+    // Everything before first comma = panel description
+    // Everything after = role entries separated by periods
+    
+    if (sections.length === 0) {
         return message.reply(
             '❌ Invalid format!\n\n' +
             '**Usage:** `?rpanel <Panel Description>, <RoleID>, <Role Description>, <Emoji>. <RoleID2>, <Role Description2>, <Emoji2>.`\n\n' +
             '**Example:**\n' +
-            '```?rpanel Get your awesome roles here, 123456789012345678, Color Role Red, ❤️. 876543210987654321, Notification Role, 🔔.```\n\n' +
-            '**Important Notes:**\n' +
-            '• Separate role entries with a period (`.`)\n' +
-            '• Each role entry has 3 parts separated by commas\n' +
-            '• Format: `RoleID, Description, Emoji`\n' +
-            '• Don\'t forget the period at the end of each role!'
+            '```?rpanel Get your roles, 123456789, Red Role, ❤️. 987654321, Blue Role, 💙.```'
         );
     }
+    
+    // Parse the first section to extract panel description
+    const firstSection = sections[0];
+    const firstCommaIndex = firstSection.indexOf(',');
+    
+    if (firstCommaIndex === -1) {
+        return message.reply(
+            '❌ Invalid format! Need at least one comma to separate panel description from roles.\n\n' +
+            '**Format:** `?rpanel <Description>, <RoleID>, <RoleDesc>, <Emoji>.`'
+        );
+    }
+    
+    const panelDescription = firstSection.substring(0, firstCommaIndex).trim();
+    const firstRoleData = firstSection.substring(firstCommaIndex + 1).trim();
+    
+    // Rebuild sections array: first role + remaining roles
+    const roleSections = [firstRoleData, ...sections.slice(1)].filter(s => s);
 
-    // 5. First section is the panel description (title)
-    const panelDescription = sections.shift();
+    // 5. Validate we have at least one role
+    if (roleSections.length === 0) {
+        return message.reply('❌ No role entries found. Please add at least one role after the panel description.');
+    }
 
     // 6. Parse each role entry
     const rolesToAdd = [];
     const emojisToReact = [];
-    let embedDescription = `${panelDescription}\n\n`;
+    let embedDescription = `**${panelDescription}**\n\n`;
 
-    for (let i = 0; i < sections.length; i++) {
-        const section = sections[i];
+    for (let i = 0; i < roleSections.length; i++) {
+        const section = roleSections[i];
         
         // Split by comma to get: RoleID, Role Description, Emoji
         const parts = section.split(',').map(p => p.trim());
@@ -94,7 +101,8 @@ module.exports = {
         // 9. Add to lists
         rolesToAdd.push({ roleId: role.id, emoji: emojiIdentifier });
         emojisToReact.push(emojiIdentifier);
-        embedDescription += `${emojiIdentifier} ${role} - *${roleDescription}*\n`;
+        // Order: @role mention, description, then emoji
+        embedDescription += `${role} - *${roleDescription}* ${emojiIdentifier}\n`;
     }
 
     // 10. Validate we have at least one role
