@@ -148,13 +148,29 @@ console.log("--- Loading Events ---");
 for (const file of eventFiles) {
     const filePath = path.join(eventsPath, file);
     try {
+        // --- FIX for files with multiple exports ---
+        // We delete the cache to prevent old code from running
+        delete require.cache[require.resolve(filePath)];
         const event = require(filePath);
-        if (event.once) {
-            client.once(event.name, (...args) => event.execute(...args, client));
+        
+        // Check if the event is valid and has a name
+        if (event && event.name) {
+            if (event.once) {
+                client.once(event.name, (...args) => event.execute(...args, client));
+            } else {
+                // Check if this event is already loaded (to prevent duplicates)
+                const currentListeners = client.listeners(event.name);
+                if (currentListeners.length === 0) {
+                     client.on(event.name, (...args) => event.execute(...args, client));
+                     console.log(`[EVENT] Loaded: ${event.name}`);
+                } else {
+                     // This catches the duplicate guildBanAdd, etc.
+                     console.warn(`[EVENT] SKIPPED duplicate listener for: ${event.name} (from file ${file})`);
+                }
+            }
         } else {
-            client.on(event.name, (...args) => event.execute(...args, client));
+            console.warn(`[EVENT] SKIPPED file ${file}: Invalid event structure (missing name).`);
         }
-        console.log(`[EVENT] Loaded: ${event.name}`);
     } catch (error) {
         console.error(`❌ Error loading event ${file}:`, error);
     }
@@ -321,20 +337,19 @@ client.login(process.env.DISCORD_TOKEN).then(() => {
     process.exit(1);
 });
 
-// --- Graceful Shutdown ---
-process.on('SIGINT', async () => {
-    console.log('SIGINT received. Shutting down gracefully...');
-    await mongoose.disconnect();
-    console.log('MongoDB disconnected.');
-    client.destroy();
+// --- Graceful Shutdown (FIXED) ---
+const shutdown = (signal) => {
+    console.log(` ${signal} received. Shutting down...`);
+    client.destroy(); // Destroy client first
     console.log('Discord client destroyed.');
-    process.exit(0);
-});
-process.on('SIGTERM', async () => {
-    console.log('SIGTERM received. Shutting down gracefully...');
-    await mongoose.disconnect();
-    console.log('MongoDB disconnected.');
-    client.destroy();
-    console.log('Discord client destroyed.');
-    process.exit(0);
-});
+    mongoose.disconnect().then(() => { // Disconnect in background
+        console.log('MongoDB disconnected.');
+        process.exit(0);
+    }).catch(err => {
+        console.error('Error disconnecting MongoDB:', err);
+        process.exit(1); // Exit with error
+    });
+};
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
