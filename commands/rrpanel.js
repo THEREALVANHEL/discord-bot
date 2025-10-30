@@ -1,4 +1,4 @@
-// commands/rrpanel.js (NEW - Prefix Command Version, Uses Role ID)
+// commands/rrpanel.js (REWORKED - Single line input with '|')
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
 const Settings = require('../models/Settings');
 
@@ -13,72 +13,61 @@ module.exports = {
         return message.reply('❌ You need the `Manage Guild` permission to use this command.');
     }
 
-    // 2. Get all arguments (everything after the command) using message.content
-    const commandName = message.content.split(' ')[0].slice(1); // ?rpanel or ?rrpanel
-    const fullArgs = message.content.substring(message.content.indexOf(commandName) + commandName.length).trim();
+    // 2. Combine args back into a single string and split by '|'
+    const fullArgsString = args.join(' ');
+    const parts = fullArgsString.split('|').map(part => part.trim());
 
-    // 3. Provide example if no args are given
-    if (!fullArgs) {
-        // FIXED: Provide example in reply
-        return message.reply('❌ Invalid format. Please provide the details on new lines after the command.\n**Example:**\n`?rpanel`\n`Cool Roles`\n`Get your roles here!`\n`123456789012345678 - Color Role Red - ❤️`\n`876543210987654321 - Ping Role Updates - ✨`');
+    // 3. Validate Format (Title, Description, at least 1 role part)
+    if (parts.length < 3 || !parts[0] || !parts[1] || !parts[2]) {
+        // Provide example in reply
+        return message.reply(
+            '❌ Invalid format. Use: `?rpanel <Title> | <Description> | <RoleID> <Emoji> <Details> | <RoleID2> <Emoji2> <Details2> ...`\n' +
+            '**Example:**\n' +
+            '`?rpanel Cool Roles | Get your roles! | 123456789012345678 ❤️ Color Role Red | 876543210987654321 ✨ Ping Role Updates`'
+        );
     }
 
-    const lines = fullArgs.split('\n');
-
-    // 4. Validate Format (Title, Description, at least 1 role line)
-    if (lines.length < 3) {
-        return message.reply('❌ Invalid format. Use:\n`?rpanel`\n`Title`\n`Description`\n`<RoleID> - Details - Emoji`\n`<RoleID2> - Details 2 - Emoji2`');
-    }
-
-    // 5. Parse Arguments
-    const title = lines.shift().trim();
-    const description = lines.shift().trim();
-    const roleLines = lines;
+    // 4. Parse Arguments
+    const title = parts.shift(); // First part is title
+    const description = parts.shift(); // Second part is description
+    const roleParts = parts; // Remaining parts are role definitions
 
     const rolesToAdd = [];
     const emojisToReact = [];
     let embedDescription = `${description}\n\n`;
 
-    for (const line of roleLines) {
-        const parts = line.split('-');
+    for (const roleString of roleParts) {
+        // 5. Extract RoleID, Emoji, and Details for each role part
+        // Match RoleID (first digits), Emoji (custom or unicode), and the rest is Details
+        const match = roleString.match(/^(\d{17,19})\s+(<a?:.+?:\d+>|[\p{Emoji}\p{Emoji_Modifier}\p{Emoji_Component}\p{Emoji_Presentation}\p{Emoji_Modifier_Base}]+)\s+(.+)$/u);
 
-        // Ensure we have at least 3 parts (RoleID, Details, Emoji)
-        if (parts.length < 3) {
-            return message.reply(`❌ Invalid line format: "${line}". Make sure to use \`<RoleID> - Details - Emoji\`.`);
+        if (!match) {
+            return message.reply(`❌ Invalid role format: "${roleString}". Use \`<RoleID> <Emoji> <Details>\`. Make sure the emoji is right after the ID.`);
         }
 
-        // 6. Extract Parts
-        const roleIdString = parts[0].trim();
-        const detailString = parts.slice(1, -1).join('-').trim(); // Join middle parts for details
-        const emojiString = parts[parts.length - 1].trim();
+        const roleIdString = match[1];
+        const emojiIdentifier = match[2]; // The detected emoji (custom or unicode)
+        const detailString = match[3].trim();
 
-        // 7. Validate Role ID
-        if (!/^\d{17,19}$/.test(roleIdString)) { // Check if it looks like a Discord ID
-            return message.reply(`❌ Invalid Role ID: "${roleIdString}". Please provide a valid Role ID number.`);
-        }
+        // 6. Validate Role ID
         const role = message.guild.roles.cache.get(roleIdString);
         if (!role) {
-            return message.reply(`❌ Role with ID "${roleIdString}" not found.`);
+            return message.reply(`❌ Role with ID "${roleIdString}" not found in line: "${roleString}".`);
         }
 
-        // 8. Validate Emoji
-        const emojiMatch = emojiString.match(/<a?:(.+?):(\d+)>|(.+)/); // Matches custom or unicode
-        if (!emojiMatch) {
-            return message.reply(`❌ Invalid emoji: "${emojiString}".`);
-        }
-        const emojiIdentifier = emojiString; // Use the full string
+        // 7. Validate Emoji (already implicitly validated by regex)
 
-        // 9. Add to lists
+        // 8. Add to lists
         rolesToAdd.push({ roleId: role.id, emoji: emojiIdentifier });
         emojisToReact.push(emojiIdentifier);
-        embedDescription += `${emojiIdentifier} - ${role} - *${detailString}*\n`; // Still show role mention in embed
+        embedDescription += `${emojiIdentifier} - ${role} - *${detailString}*\n`; // Show role mention in embed
     }
 
     if (rolesToAdd.length === 0) {
-         return message.reply('❌ No valid role lines were found.');
+         return message.reply('❌ No valid role definitions were found after the title and description.');
     }
 
-    // 10. Build the Embed
+    // 9. Build the Embed
     const embed = new EmbedBuilder()
       .setTitle(title)
       .setDescription(embedDescription)
@@ -86,10 +75,10 @@ module.exports = {
       .setFooter({ text: 'React to an emoji below to get the corresponding role!' });
 
     try {
-      // 11. Send the panel message
+      // 10. Send the panel message
       const panelMessage = await message.channel.send({ embeds: [embed] });
 
-      // 12. Add reactions to the message
+      // 11. Add reactions to the message
       for (const emoji of emojisToReact) {
         await panelMessage.react(emoji).catch(reactError => {
             console.warn(`Could not react with ${emoji}: ${reactError.message}`);
@@ -97,7 +86,7 @@ module.exports = {
         });
       }
 
-      // 13. Save to database
+      // 12. Save to database
       let settings = await Settings.findOne({ guildId: message.guild.id });
       if (!settings) {
         settings = new Settings({ guildId: message.guild.id });
@@ -112,7 +101,7 @@ module.exports = {
       settings.reactionRoles.push(...newReactionRoles);
       await settings.save();
 
-      // 14. Clean up
+      // 13. Clean up
       await message.delete().catch(() => {}); // Delete the user's command
       const confirmation = await message.channel.send('✅ **Success!** The reaction role panel has been created.');
       setTimeout(() => confirmation.delete().catch(() => {}), 5000);
