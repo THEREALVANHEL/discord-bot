@@ -6,11 +6,14 @@ module.exports = {
   name: 'guildMemberAdd',
   async execute(member, client) {
     try {
-      // Auto assign join role
+      // --- FIX: Auto assign join role REMOVED ---
+      /*
       const autoJoinRoleId = client.config.roles.autoJoin;
       if (autoJoinRoleId && !member.roles.cache.has(autoJoinRoleId)) {
         await member.roles.add(autoJoinRoleId).catch(console.error);
       }
+      */
+      // --- END FIX ---
 
       const settings = await Settings.findOne({ guildId: member.guild.id });
 
