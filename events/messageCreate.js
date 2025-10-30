@@ -1,4 +1,4 @@
-// events/messageCreate.js (FIXED - AI Prompt Redundancy, Trying gemini-1.0-pro)
+// events/messageCreate.js (FIXED - Correct Gemini Model Name)
 const { Events, EmbedBuilder, Collection, PermissionsBitField } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fetch = require('node-fetch');
@@ -11,8 +11,8 @@ const { generateUserLevel } = require('../utils/levelSystem');
 const { XP_COOLDOWN, generateXP } = require('../utils/xpSystem');
 
 // --- AI Configuration ---
-// FIXED: Changed model name AGAIN for testing based on 404 error
-const AI_MODEL_NAME = 'gemini-1.0-pro'; // Was 'gemini-pro', previously 'gemini-1.5-flash-latest'
+// FIXED: Using correct model name for Gemini API
+const AI_MODEL_NAME = 'gemini-1.5-flash'; // Valid model name
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const AI_TRIGGER_PREFIX = '?blecky';
 const MAX_HISTORY = 5; // Max pairs of user/model messages
@@ -273,9 +273,10 @@ module.exports = {
                  try {
                     if (error.code !== 50013 && message.channel.permissionsFor(message.guild.members.me)?.has(PermissionsBitField.Flags.SendMessages)) {
                          let errorMsg = "⚠️ Oops! Something went wrong with my AI core.";
-                         if (error.message && (error.message.includes("404 Not Found") || error.message.includes("is not found for API version"))) {
-                            errorMsg += ` (Model "${AI_MODEL_NAME}" might be unavailable or invalid for your API key.)`;
+                         if (error.message && (error.message.includes("404") || error.message.includes("not found") || error.message.includes("models/"))) {
+                            errorMsg += ` (Model "${AI_MODEL_NAME}" might be unavailable. Check API key permissions.)`;
                          } else if (error.message) {
+                             errorMsg += ` (${error.message})`;
                              console.error("Underlying AI error:", error.message);
                          }
                         await message.reply(errorMsg).catch(console.error);
