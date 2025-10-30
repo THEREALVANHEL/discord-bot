@@ -1,5 +1,5 @@
 // events/interactionCreate.js (REPLACE)
-const { Events, EmbedBuilder, PermissionsBitField, ChannelType, Collection, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, InteractionFlags } = require('discord.js');
+const { Events, EmbedBuilder, PermissionsBitField, ChannelType, Collection, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, InteractionFlags } = require('discord.js'); // <-- ADDED InteractionFlags
 const Settings = require('../models/Settings');
 const User = require('../models/User');
 const fs = require('fs').promises;
