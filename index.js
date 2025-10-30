@@ -1,4 +1,4 @@
-// index.js (FIX: Corrected command loading logic for hybrid commands)
+// index.js (FIX: Corrected command loading logic for prefix/hybrid commands)
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder } = require('discord.js');
 const mongoose = require('mongoose');
@@ -86,7 +86,7 @@ const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('
 
 console.log("--- Loading Commands ---");
 
-// --- REWORKED COMMAND LOADER ---
+// --- REWORKED COMMAND LOADER (Handles tpanel and prefix-only ticket) ---
 for (const file of commandFiles) {
     const filePath = path.join(commandsPath, file);
     try {
@@ -94,28 +94,12 @@ for (const file of commandFiles) {
         let loaded = false;
 
         // --- 1. Check for HYBRID command ---
-        // (Has both slash 'data' and prefix 'name')
-        if (command.data && command.name && command.execute) {
-            client.commands.set(command.data.name, command); // Load Slash name
-            client.commands.set(command.name, command);     // Load Prefix name
-            console.log(`[HYBRID] Loaded: ${command.name}`);
-            loaded = true;
+        // (Has both slash 'data' and prefix 'name') - TICKET IS NO LONGER HYBRID
+        // if (command.data && command.name && command.execute) { ... } // Removed this block
 
-            // Load aliases for hybrid command
-            if (command.aliases && Array.isArray(command.aliases)) {
-                command.aliases.forEach(alias => {
-                    if (!client.commands.has(alias)) {
-                       client.commands.set(alias, command);
-                       console.log(`       - Alias: ${alias}`);
-                    } else {
-                       console.warn(`[WARNING] Alias '${alias}' for command '${command.name}' conflicts with existing command/alias. Skipping alias.`);
-                    }
-                });
-            }
-        }
         // --- 2. Check for SLASH-ONLY command ---
         // (Has 'data' but NO prefix 'name')
-        else if (command.data && command.execute && !command.name) {
+        if (command.data && command.execute && !command.name) {
             // Ensure data.name exists before setting
             if (command.data.name) {
                 client.commands.set(command.data.name, command);
@@ -126,7 +110,7 @@ for (const file of commandFiles) {
             }
         }
         // --- 3. Check for PREFIX-ONLY command ---
-        // (Has 'name' but NO slash 'data')
+        // (Has 'name' but NO slash 'data') - Includes tpanel.js and the modified ticket.js
         else if (command.name && command.execute && !command.data) {
              client.commands.set(command.name, command);
              console.log(`[PREFIX] Loaded: ${command.name}`);
@@ -144,7 +128,7 @@ for (const file of commandFiles) {
                  });
              }
         }
-        
+
         if (!loaded && file !== 'index.js') { // index.js is not a command
              console.warn(`[WARNING] Command file '${file}' is invalid or missing properties. Skipping.`);
         }
@@ -207,21 +191,21 @@ async function connectMongoDB() {
 // --- Data Loading Functions ---
 async function loadReminders() {
   try {
-    const User = require('./models/User'); 
+    const User = require('./models/User');
     const users = await User.find({ 'reminders.0': { $exists: true } });
     let loadedCount = 0;
     console.log(`📋 Checking reminders for ${users.length} users...`);
 
     users.forEach(user => {
       let remindersChanged = false;
-      const activeRemindersForUser = []; 
+      const activeRemindersForUser = [];
 
       user.reminders.forEach(reminder => {
         const reminderIdString = reminder._id.toString();
         const timeUntil = reminder.remindAt.getTime() - Date.now();
 
         if (timeUntil > 0) {
-          activeRemindersForUser.push(reminder); 
+          activeRemindersForUser.push(reminder);
           if (!client.reminders.has(reminderIdString)) {
              const timeout = setTimeout(async () => {
                 try {
@@ -242,7 +226,7 @@ async function loadReminders() {
                 } catch (error) {
                   console.error(`Could not send reminder DM to ${user.userId}:`, error);
                 } finally {
-                    client.reminders.delete(reminderIdString); 
+                    client.reminders.delete(reminderIdString);
                 }
              }, timeUntil);
              client.reminders.set(reminderIdString, timeout);
@@ -281,7 +265,7 @@ async function loadGiveaways() {
 
       if (timeUntil > 0) {
         if (!client.giveaways.has(messageId)) {
-           const giveawayData = giveaway.toObject(); 
+           const giveawayData = giveaway.toObject();
            const timeout = setTimeout(() => {
              endGiveaway(client, giveawayData).catch(err => console.error(`Error ending giveaway ${messageId}:`, err));
            }, timeUntil);
@@ -327,7 +311,7 @@ mongoose.connection.on('reconnected', () => {
 });
 
 // --- Start Bot ---
-connectMongoDB(); 
+connectMongoDB();
 
 client.login(process.env.DISCORD_TOKEN).then(() => {
     console.log(`✅ Logged in as ${client.user.tag}`);
