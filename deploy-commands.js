@@ -1,4 +1,4 @@
-// deploy-commands.js (REMOVED aisetup)
+// deploy-commands.js (REMOVED ticket)
 require('dotenv').config();
 const { REST, Routes } = require('discord.js');
 const fs = require('fs');
@@ -10,15 +10,15 @@ const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('
 
 console.log("--- Loading Slash Commands for Deployment ---");
 for (const file of commandFiles) {
-  const filePath = path.join(commandsPath, file); // Define filePath here
+  const filePath = path.join(commandsPath, file);
   try {
       const command = require(filePath);
       // Only include commands that have the 'data' property (Slash Commands)
       if (command.data && typeof command.data.toJSON === 'function') {
         // --- REMOVAL START ---
-        // Skip the aisetup command
-        if (command.data.name === 'aisetup') {
-            console.log(`[DEPLOY] Skipping registration for: ${command.data.name} (Removed)`);
+        // Skip the ticket command (now prefix only for setup)
+        if (command.data.name === 'ticket') {
+            console.log(`[DEPLOY] Skipping registration for: ${command.data.name} (Now Prefix)`);
             continue; // Go to the next file
         }
         // --- REMOVAL END ---
@@ -46,12 +46,6 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
       Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
       { body: commands },
     );
-
-    // // Deploy globally (uncomment if needed, takes ~1 hour to update)
-    // const data = await rest.put(
-    //    Routes.applicationCommands(process.env.CLIENT_ID),
-    //    { body: commands },
-    // );
 
     console.log(`Successfully reloaded ${data.length} application (/) commands.`);
   } catch (error) {
