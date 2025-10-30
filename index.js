@@ -85,62 +85,57 @@ client.config = {
 console.log("--- Loading Commands ---");
 
 // Function to recursively load commands from subfolders
-const loadCommands = (dir, type) => {
-    const commandFolders = fs.readdirSync(dir, { withFileTypes: true })
-        .filter(dirent => dirent.isDirectory())
-        .map(dirent => dirent.name);
+const loadCommands = (dir) => {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
 
-    // Load files in the current directory
-    const commandFiles = fs.readdirSync(dir).filter(file => file.endsWith('.js'));
-    for (const file of commandFiles) {
-        const filePath = path.join(dir, file);
-        try {
-            const command = require(filePath);
-            let loaded = false;
+    for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            loadCommands(fullPath); // Recurse
+        } else if (entry.isFile() && entry.name.endsWith('.js') && entry.name !== 'index.js') {
+            try {
+                // We clear the cache to ensure the latest version is loaded on (e.g.) a re-run
+                delete require.cache[require.resolve(fullPath)];
+                const command = require(fullPath);
+                let loaded = false;
 
-            if (type === 'slash' && command.data && command.execute) {
-                client.commands.set(command.data.name, command);
-                console.log(`[SLASH] Loaded: ${command.data.name}`);
-                loaded = true;
-            } else if (type === 'prefix' && command.name && command.execute) {
-                client.commands.set(command.name, command);
-                console.log(`[PREFIX] Loaded: ${command.name}`);
-                loaded = true;
-                if (command.aliases && Array.isArray(command.aliases)) {
-                    command.aliases.forEach(alias => {
-                        if (!client.commands.has(alias)) {
-                            client.commands.set(alias, command);
-                            console.log(`       - Alias: ${alias}`);
-                        } else {
-                            console.warn(`[WARNING] Alias '${alias}' for command '${command.name}' conflicts. Skipping.`);
-                        }
-                    });
+                // Check for Slash Command
+                if (command.data && command.execute) {
+                    client.commands.set(command.data.name, command);
+                    console.log(`[SLASH] Loaded: ${command.data.name}`);
+                    loaded = true;
+                } 
+                
+                // Check for Prefix Command
+                // Use 'else if' to prevent double-loading if a file matches both
+                else if (command.name && command.execute) { 
+                    client.commands.set(command.name, command);
+                    console.log(`[PREFIX] Loaded: ${command.name}`);
+                    loaded = true;
+                    if (command.aliases && Array.isArray(command.aliases)) {
+                        command.aliases.forEach(alias => {
+                            if (!client.commands.has(alias)) {
+                                client.commands.set(alias, command);
+                                console.log(`       - Alias: ${alias}`);
+                            } else {
+                                console.warn(`[WARNING] Alias '${alias}' for command '${command.name}' conflicts. Skipping.`);
+                            }
+                        });
+                    }
                 }
-            }
 
-            if (!loaded && file !== 'index.js') {
-                 console.warn(`[WARNING] Command file '${file}' in '${dir}' is invalid or wrong type. Skipping.`);
+                if (!loaded) {
+                     console.warn(`[WARNING] Command file '${entry.name}' in '${dir}' is invalid (missing data or name). Skipping.`);
+                }
+            } catch (error) {
+                console.error(`❌ Error loading command ${entry.name}:`, error);
             }
-        } catch (error) {
-            console.error(`❌ Error loading command ${file}:`, error);
         }
-    }
-
-    // Recursively load from subfolders
-    for (const folder of commandFolders) {
-        loadCommands(path.join(dir, folder), type);
     }
 };
 
-// Create dirs if they don't exist (for user's step-by-step)
-const slashCommandsPath = path.join(__dirname, 'commands', 'slash');
-const prefixCommandsPath = path.join(__dirname, 'commands', 'prefix');
-if (!fs.existsSync(slashCommandsPath)) fs.mkdirSync(slashCommandsPath, { recursive: true });
-if (!fs.existsSync(prefixCommandsPath)) fs.mkdirSync(prefixCommandsPath, { recursive: true });
-
-// Load commands
-loadCommands(slashCommandsPath, 'slash');
-loadCommands(prefixCommandsPath, 'prefix');
+// Load all commands from the root 'commands' directory
+loadCommands(path.join(__dirname, 'commands'));
 
 console.log("--- Finished Loading Commands ---");
 
@@ -258,7 +253,7 @@ async function loadGiveaways() {
   try {
     const Giveaway = require('./models/Giveaway');
     // IMPORTANT: We must require the command file *here* to get the exported helper function
-    const { endGiveaway } = require('./commands/slash/giveaway.js'); // Assuming you move it to /slash
+    const { endGiveaway } = require('./commands/giveaway.js'); // <-- FIXED PATH
 
     const giveaways = await Giveaway.find({ endTime: { $gt: new Date() } });
     let loadedCount = 0;
