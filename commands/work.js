@@ -1,59 +1,64 @@
-// commands/work.js (REPLACE - Final fix for Job Application display/logic + FIX: Moved defer to top)
+// commands/work.js (REPLACE - Level-Based Progression, Sub-Tiers, Fixes)
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const User = require('../models/User');
-const Settings = require('../models/Settings');
+const Settings = require('../models/Settings'); // Keep for level up notifications
 const ms = require('ms');
 
-// Function to calculate XP needed for the next level (Harder formula) - KEPT FOR CHAT LEVELING
+// Function to calculate XP needed for the next level (Keep Moderate formula for chat leveling)
 const getNextLevelXp = (level) => {
-    return Math.floor(150 * Math.pow(level + 1, 1.8));
+    return Math.floor(100 * Math.pow(level + 1, 1.5));
 };
 
 const WORK_COOLDOWN_MS = ms('1h');
-const RESIGN_COOLDOWN_MS = ms('1h'); // Defined for clarity
+const RESIGN_COOLDOWN_MS = ms('1h');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('work')
     .setDescription('Manage your career and work for coins and XP!')
-    .addSubcommand(subcommand => // RENAMED: was 'work work' -> now 'work job'
-        subcommand.setName('job') 
+    .addSubcommand(subcommand =>
+        subcommand.setName('job')
             .setDescription('Work your current job to earn rewards.')
     )
     .addSubcommand(subcommand =>
         subcommand.setName('apply')
-            .setDescription('Apply for a new job based on your progress.')
+            .setDescription('Apply for a new job based on your level.')
         )
     .addSubcommand(subcommand =>
         subcommand.setName('resign')
             .setDescription('Resign from your current job.')
     ),
-  // Removed global cooldown: 3600, 
-  execute: async (interaction, client) => { // Fixed syntax
-    const subcommand = interaction.options.getSubcommand();
-    // FIX: Move defer reply to the very top!
+
+  execute: async (interaction, client) => {
+    // Defer reply at the very top
     await interaction.deferReply();
-    
+
+    const subcommand = interaction.options.getSubcommand();
     let user = await User.findOne({ userId: interaction.user.id });
 
     if (!user) {
       user = new User({ userId: interaction.user.id });
-      await user.save();
+      // Save immediately if new user to prevent issues later
+      try {
+          await user.save();
+      } catch (saveError) {
+          console.error("Error saving new user for work command:", saveError);
+          return interaction.editReply({ content: "❌ Error initializing your profile. Please try again." });
+      }
     }
-    
-    // NOTE: Job progression relies only on minWorks, minLevel removed.
-    const workProgression = client.config.workProgression.sort((a, b) => a.minWorks - b.minWorks); // Sort by works required
 
-    // --- SUBCOMMAND: JOB (formerly 'work') ---
+    const workProgression = client.config.workProgression.sort((a, b) => a.minLevel - b.minLevel); // Sort by level
+
+    // --- SUBCOMMAND: JOB ---
     if (subcommand === 'job') {
         if (!user.currentJob) {
-            return interaction.editReply({ 
-                content: `⚠️ **Unemployed:** You are currently unemployed. Use \`/work apply\` to start your career!`, 
-                ephemeral: true 
+            return interaction.editReply({
+                content: `⚠️ **Unemployed:** You are currently unemployed. Use \`/work apply\` to start your career!`,
+                ephemeral: true
             });
         }
-        
-        // Cooldown check is now localized to the 'job' subcommand
+
+        // Local cooldown check
         if (user.lastWork && (Date.now() - user.lastWork.getTime()) < WORK_COOLDOWN_MS) {
             const timeLeft = ms(WORK_COOLDOWN_MS - (Date.now() - user.lastWork.getTime()), { long: true });
             return interaction.editReply({ content: `⏱️ **Work Cooldown:** You can work again in **${timeLeft}**.`, ephemeral: true });
@@ -63,53 +68,45 @@ module.exports = {
         if (!currentJob) {
              user.currentJob = null;
              await user.save();
-             return interaction.editReply({ 
-                content: `❌ **Job Invalid:** Your current job ID is invalid. You have been resigned. Please \`/work apply\` again.`, 
-                ephemeral: true 
+             return interaction.editReply({
+                content: `❌ **Job Invalid:** Your current job ID is invalid. You have been resigned. Please \`/work apply\` again.`,
+                ephemeral: true
             });
         }
-        
-        // Check for major promotion before proceeding with work (Automatic Promotion)
-        // CRITICAL FIX: Removed dependency on user.level for job progression.
-        const nextJob = workProgression.find(job => 
-             job.minWorks > currentJob.minWorks && user.successfulWorks >= job.minWorks
-        );
 
-        if (nextJob) {
+        // Automatic Promotion Check (Based on LEVEL now)
+        const currentJobIndex = workProgression.findIndex(j => j.id === currentJob.id);
+        const nextJob = workProgression[currentJobIndex + 1]; // Get the next job in the sorted list
+
+        // Check if there IS a next job and if the user's level meets its requirement
+        if (nextJob && user.level >= nextJob.minLevel) {
              user.currentJob = nextJob.id;
              await user.save();
              return interaction.editReply({
-                 content: `⬆️ **AUTOMATIC MAJOR PROMOTION!** Congratulations, ${interaction.user}! You have earned a promotion to **${nextJob.title}** after **${user.successfulWorks}** successful works!`,
+                 content: `⬆️ **AUTOMATIC PROMOTION!** Congratulations, ${interaction.user}! Your Level ${user.level} qualifies you for promotion to **${nextJob.title}**!`,
                  ephemeral: false
              });
         }
-        
-        // --- DYNAMIC SUB-PROMOTION TITLE CALCULATION (10 internal promotions) ---
-        const worksInCurrentMajor = user.successfulWorks - currentJob.minWorks;
-        const totalWorksInMajor = currentJob.worksToNextMajor; // Comes from index.js
-        
-        let subTier = 10; // Max tier for the job
-        
-        if (totalWorksInMajor !== Infinity) {
-            // Calculate works needed for each of the 10 sub-tiers (10 promotions + starting tier 1)
-            const worksPerSubTier = Math.floor(totalWorksInMajor / 10) || 1;
-            
-            // Tier 1 is 0 to (worksPerSubTier-1). Tier 10 is max.
-            subTier = Math.min(10, Math.floor(worksInCurrentMajor / worksPerSubTier) + 1);
-        }
-        
+
+        // --- DYNAMIC SUB-PROMOTION TITLE CALCULATION (Based on level within tier) ---
+        const levelWithinTier = Math.max(0, user.level - currentJob.minLevel); // Level progress into the current job tier
+        const levelsInTier = (currentJob.maxLevel === Infinity ? 500 : currentJob.maxLevel - currentJob.minLevel + 1); // Total levels spanned by this job (+1 includes both ends)
+        const levelsPerSubTier = Math.max(1, Math.floor(levelsInTier / 10)); // Levels needed for each sub-tier (at least 1)
+
+        let subTier = Math.min(10, Math.floor(levelWithinTier / levelsPerSubTier) + 1); // Calculate current sub-tier (1-10)
+        if (currentJob.maxLevel === Infinity && user.level >= currentJob.minLevel) subTier = 10; // Max out for Tech Legend
+
         const dynamicTitle = `${currentJob.title} (Sub-Tier ${subTier}/10)`;
 
-
-        // Success check based on job's successRate
+        // Success check
         let success = Math.random() * 100 <= currentJob.successRate;
-        user.lastWork = new Date(); // Update last work regardless of success
+        user.lastWork = new Date(); // Update last work time
 
         if (!success) {
             await user.save();
             const failEmbed = new EmbedBuilder()
                 .setTitle('😔 Work Failed')
-                .setDescription(`You tried to work as a **${dynamicTitle}** but got distracted and earned nothing. Try again in an hour!`)
+                .setDescription(`You tried to work as a **${dynamicTitle}** but failed this time. Try again in an hour!`)
                 .addFields(
                     { name: 'Coins', value: `0 💰`, inline: true },
                     { name: 'XP', value: `0 ✨`, inline: true },
@@ -119,71 +116,84 @@ module.exports = {
                 .setTimestamp();
             return interaction.editReply({ embeds: [failEmbed] });
         }
-        
-        // Successful Work Logic
-        user.successfulWorks++;
 
-        // Calculate rewards from ranges
-        // NOTE: These values are read from the updated client.config.workProgression in index.js
+        // Successful Work
+        // Successful works counter is no longer needed for progression
+        // user.successfulWorks++; // REMOVED
+
         const coinsEarned = Math.floor(Math.random() * (currentJob.coinReward[1] - currentJob.coinReward[0] + 1)) + currentJob.coinReward[0];
         const xpEarned = Math.floor(Math.random() * (currentJob.xpReward[1] - currentJob.xpReward[0] + 1)) + currentJob.xpReward[0];
 
         user.coins += coinsEarned;
         user.xp += xpEarned;
-        
-        // Level up check (existing chat leveling logic, preserved)
-        const settings = await require('../models/Settings').findOne({ guildId: interaction.guild.id });
-        const levelUpChannel = settings?.levelUpChannelId ? 
-            interaction.guild.channels.cache.get(settings.levelUpChannelId) : 
-            interaction.channel;
 
+        // Level up check (using chat leveling XP system)
         let leveledUp = false;
-        const nextLevelXpCheck = getNextLevelXp(user.level);
-        if (user.xp >= nextLevelXpCheck) {
+        let originalLevel = user.level; // Store level before potential change
+        let nextLevelXpCheck = getNextLevelXp(user.level);
+
+        // Handle multiple level ups
+        while (user.xp >= nextLevelXpCheck) {
             user.level++;
             user.xp -= nextLevelXpCheck;
             leveledUp = true;
-            
-            // ... (rest of role/message logic for chat leveling is unchanged) ...
-            const member = interaction.guild.members.cache.get(interaction.user.id);
-            if (member) {
-                const levelingRoles = client.config.levelingRoles;
-                for (const roleConfig of levelingRoles) {
-                    if (member.roles.cache.has(roleConfig.roleId)) {
-                        await member.roles.remove(roleConfig.roleId).catch(() => {});
-                    }
-                }
-                const newLevelRole = levelingRoles
-                    .filter(r => r.level <= user.level)
-                    .sort((a, b) => b.level - a.level)[0];
-                if (newLevelRole) {
-                    await member.roles.add(newLevelRole.roleId).catch(() => {});
-                }
-            }
-            
+            nextLevelXpCheck = getNextLevelXp(user.level); // Recalculate for the new level
+        }
+
+        if (leveledUp) {
             // Send level-up message
-            if (levelUpChannel && leveledUp) {
+            try {
+                const settings = await Settings.findOne({ guildId: interaction.guild.id });
+                const levelUpChannelId = settings?.levelUpChannelId;
+                let notifyChannel = interaction.channel;
+                 if (levelUpChannelId) {
+                     const foundChannel = await interaction.guild.channels.fetch(levelUpChannelId).catch(() => null);
+                     if (foundChannel) notifyChannel = foundChannel;
+                 }
                 const levelUpEmbed = new EmbedBuilder()
                     .setTitle('🚀 Level UP!')
                     .setDescription(`${interaction.user}, congratulations! You've leveled up to **Level ${user.level}**! 🎉`)
                     .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
                     .setColor(0xFFD700)
                     .setTimestamp();
-                
-                await levelUpChannel.send({ content: `${interaction.user}`, embeds: [levelUpEmbed] });
+
+                await notifyChannel.send({ content: `${interaction.user}`, embeds: [levelUpEmbed] });
+
+                // Update leveling roles (ensure member is fetched)
+                 const member = interaction.member || await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+                 if (member) {
+                     const levelingRoles = client.config.levelingRoles || [];
+                     // Logic to remove old roles and add the new highest eligible role
+                     const targetLevelRole = levelingRoles
+                         .filter(r => r.level <= user.level)
+                         .sort((a, b) => b.level - a.level)[0];
+                     const targetLevelRoleId = targetLevelRole ? targetLevelRole.roleId : null;
+
+                     for (const roleConfig of levelingRoles) {
+                         const roleId = roleConfig.roleId;
+                         const hasRole = member.roles.cache.has(roleId);
+                         if (roleId === targetLevelRoleId) {
+                             if (!hasRole) await member.roles.add(roleId).catch(console.error);
+                         } else {
+                             if (hasRole) await member.roles.remove(roleId).catch(console.error);
+                         }
+                     }
+                 }
+
+            } catch (levelError) {
+                 console.error("Error during level up notification/role assignment:", levelError);
             }
         }
+        // --- End Level Up Check ---
 
         await user.save();
-        
-        // Recalculate dynamic title for the final embed after successful work and potential internal promotion
-        const worksInCurrentMajorAfter = user.successfulWorks - currentJob.minWorks;
-        let subTierAfter = 10;
-        if (totalWorksInMajor !== Infinity) {
-            const worksPerSubTier = Math.floor(totalWorksInMajor / 10) || 1;
-            subTierAfter = Math.min(10, Math.floor(worksInCurrentMajorAfter / worksPerSubTier) + 1);
-        }
+
+        // Recalculate dynamic title for the final embed *after* potential level up
+        const levelWithinTierAfter = Math.max(0, user.level - currentJob.minLevel);
+        let subTierAfter = Math.min(10, Math.floor(levelWithinTierAfter / levelsPerSubTier) + 1);
+        if (currentJob.maxLevel === Infinity && user.level >= currentJob.minLevel) subTierAfter = 10;
         const finalDynamicTitle = `${currentJob.title} (Sub-Tier ${subTierAfter}/10)`;
+
 
         const embed = new EmbedBuilder()
             .setTitle(`💼 ${finalDynamicTitle} - Payday!`)
@@ -191,45 +201,43 @@ module.exports = {
             .addFields(
                 { name: 'Coins Earned', value: `${coinsEarned} 💰`, inline: true },
                 { name: 'XP Earned', value: `${xpEarned} ✨`, inline: true },
-                { name: 'Successful Works', value: `${user.successfulWorks} Jobs Completed`, inline: true },
                 { name: 'Current Balance', value: `${user.coins} 💰`, inline: true },
-                { name: 'Current Level', value: `${user.level} ✨`, inline: true } // Still display chat level
+                { name: 'Current Level', value: `${user.level} ✨`, inline: true }, // Show current chat level
+                { name: 'XP Progress', value: `\`${user.xp}/${getNextLevelXp(user.level)}\``, inline: true } // Show XP progress
             )
-            .setColor(0x8B4513)
+            .setColor(0x8B4513) // Brown
             .setTimestamp()
             .setFooter({ text: `Next work attempt in 1 hour.` });
+
+        if (leveledUp && user.level >= (nextJob?.minLevel || Infinity)) {
+            embed.addFields({ name: '⬆️ Promotion Available!', value: `You now qualify for **${nextJob.title}**! Use \`/work apply\` to see.`});
+        }
+
 
         await interaction.editReply({ embeds: [embed] });
 
     // --- SUBCOMMAND: APPLY ---
     } else if (subcommand === 'apply') {
         const currentJob = workProgression.find(job => job.id === user.currentJob);
-        
-        // Build Job List UI
+        const currentJobIndex = currentJob ? workProgression.findIndex(j => j.id === currentJob.id) : -1;
+
         const applyEmbed = new EmbedBuilder()
-            // CRITICAL FIX: Removed chat level display from job market.
             .setTitle('📝 Job Market')
-            .setDescription(`You are currently **${currentJob ? currentJob.title : 'Unemployed'}** (**${user.successfulWorks}** Works Completed).`)
-            .setColor(0x3498DB);
-            
-        const jobButtons = [];
+            .setDescription(`You are currently **${currentJob ? currentJob.title : 'Unemployed'}** (Level **${user.level}**).`)
+            .setColor(0x3498DB); // Blue
+
         let jobListValue = '';
+        const jobButtons = [];
         let row = new ActionRowBuilder();
 
         workProgression.forEach((job, index) => {
-            // CRITICAL FIX: Removed minLevel check.
-            const meetsWorks = user.successfulWorks >= job.minWorks;
+            const meetsLevel = user.level >= job.minLevel;
             const isCurrent = currentJob && job.id === currentJob.id;
-            
-            // FIX/Refinement: The goal is only to show the immediate next job OR the starting job if unemployed.
-            const isNextJob = currentJob 
-                ? (index === workProgression.findIndex(j => j.id === currentJob.id) + 1) // Is the direct next job in the list
-                : index === 0; // Is the very first job (Intern/Level 0)
-                
-            // The job is eligible to apply for if:
-            // 1. It is the starting job (Index 0) AND the user is unemployed, OR
-            // 2. It is the next sequential job AND the user meets the work requirement.
-            const isEligibleToApply = (!currentJob && index === 0) || (currentJob && isNextJob && meetsWorks);
+
+            // Eligible to apply if:
+            // 1. Unemployed AND it's the first job (Intern)
+            // 2. Currently employed AND it's the *next* job in sequence AND meets level requirement
+            const isEligibleToApply = (!currentJob && index === 0) || (currentJob && index === currentJobIndex + 1 && meetsLevel);
 
             let status = '';
             let emoji = '💼';
@@ -240,91 +248,78 @@ module.exports = {
             } else if (isEligibleToApply) {
                 status = `**[ELIGIBLE - APPLY NOW]**`;
                 emoji = '⬆️';
-            } else if (meetsWorks && currentJob && job.minWorks > currentJob.minWorks) {
-                // User is eligible for this job but it's NOT the next sequential one (e.g., they skipped one).
-                // Or user is eligible for the direct next one, but it's not the correct logic path above.
-                // Revert to [INELIGIBLE] for display purposes, they can only apply for the direct next job.
-                status = `[INELIGIBLE]`;
-                emoji = '❌';
-            } else if (job.minWorks > user.successfulWorks) {
-                 status = `[INELIGIBLE - Need ${job.minWorks} Works]`;
-                 emoji = '❌';
+            } else if (meetsLevel && currentJob && job.minLevel > currentJob.minLevel) {
+                status = `[AVAILABLE - Apply for previous jobs first]`; // Eligible level-wise, but not next sequence
+                emoji = '✔️';
+            } else if (!meetsLevel) {
+                 status = `[LOCKED - Requires Level ${job.minLevel}]`;
+                 emoji = '🔒';
             } else {
-                 status = `[INELIGIBLE]`;
-                 emoji = '❌';
+                 status = `[COMPLETED]`; // User has passed this job's level range
+                 emoji = '☑️';
             }
-            
-            // CRITICAL FIX: Removed minLevel display.
-            jobListValue += `\n${emoji} **${job.title}** ${status}\n\`-\` Req: **${job.minWorks}** Works`;
+
+            jobListValue += `\n${emoji} **${job.title}** ${status}\n\`-\` Req: Level **${job.minLevel}**${job.maxLevel !== Infinity ? ` - ${job.maxLevel}` : '+'}`;
 
             if (isEligibleToApply) {
                  const button = new ButtonBuilder()
                     .setCustomId(`job_apply_${job.id}`)
                     .setLabel(`Apply: ${job.title}`)
                     .setStyle(ButtonStyle.Primary)
-                    .setEmoji(emoji);
-                
-                // Only add the button if the job is an *immediate* promotion or starting job
+                    .setEmoji('⬆️'); // Use promotion emoji
+
                 if (row.components.length < 5) {
                     row.addComponents(button);
                 }
             }
-            
-            // Max 5 buttons per row
-            if (row.components.length === 5 || index === workProgression.length - 1) {
-                if (row.components.length > 0) {
-                    jobButtons.push(row);
-                }
-                row = new ActionRowBuilder();
-            }
         });
-        
-        // Add the last row if it has components
+
+         // Add the last row if it has components
         if (row.components.length > 0) {
             jobButtons.push(row);
         }
 
         applyEmbed.addFields({ name: 'Career Progression', value: jobListValue.substring(0, 1024), inline: false });
 
-
         await interaction.editReply({
             embeds: [applyEmbed],
-            components: jobButtons.length > 0 ? jobButtons : [],
+            components: jobButtons.length > 0 ? jobButtons : [], // Only show buttons if there's an eligible job
         });
-        
+
     // --- SUBCOMMAND: RESIGN ---
     } else if (subcommand === 'resign') {
-        const RESIGN_COOLDOWN_MS = ms('1h');
-        if (user.lastResigned && (Date.now() - user.lastResigned.getTime()) < RESIGN_COOLDOWN_MS) {
+         if (user.lastResigned && (Date.now() - user.lastResigned.getTime()) < RESIGN_COOLDOWN_MS) {
             const timeLeft = ms(RESIGN_COOLDOWN_MS - (Date.now() - user.lastResigned.getTime()), { long: true });
-            return interaction.editReply({ 
-                content: `⏱️ **Resignation Cooldown:** You must wait **${timeLeft}** before applying for a new job.`, 
-                ephemeral: true 
+            return interaction.editReply({
+                content: `⏱️ **Resignation Cooldown:** You recently resigned. You can apply for a new job in **${timeLeft}**.`,
+                ephemeral: true
             });
         }
 
         if (!user.currentJob) {
-            return interaction.editReply({ 
-                content: `⚠️ You are already unemployed.`, 
-                ephemeral: true 
+            return interaction.editReply({
+                content: `⚠️ You are already unemployed.`,
+                ephemeral: true
             });
         }
-        
+
+        const resignedJobTitle = workProgression.find(j => j.id === user.currentJob)?.title || 'your previous job';
+
         user.currentJob = null;
-        user.lastWork = null; // Reset work cooldown (FIX)
+        user.lastWork = null; // Reset work cooldown
         user.lastResigned = new Date(); // Set resignation cooldown
         await user.save();
-        
+
         const resignEmbed = new EmbedBuilder()
-            .setTitle('🚪 Resignation Successful')
-            .setDescription('You have resigned from your previous position. Use `/work apply` to view open positions.')
+            .setTitle('🚪 Resignation Submitted')
+            .setDescription(`You have resigned from **${resignedJobTitle}**. Use \`/work apply\` after the cooldown to view open positions.`)
             .addFields(
-                { name: 'Next Application', value: `<t:${Math.floor((Date.now() + RESIGN_COOLDOWN_MS) / 1000)}:R>`, inline: true },
+                { name: 'Next Application Available', value: `<t:${Math.floor((Date.now() + RESIGN_COOLDOWN_MS) / 1000)}:R>`, inline: true },
                 { name: 'Current Status', value: 'Unemployed', inline: true }
             )
-            .setColor(0xFF4500)
+            .setColor(0xFF4500) // OrangeRed
             .setTimestamp();
-            
+
         await interaction.editReply({ embeds: [resignEmbed] });
     }
   },
