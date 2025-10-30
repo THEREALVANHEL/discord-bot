@@ -1,4 +1,3 @@
-// index.js (FIX: Corrected command loading logic for prefix/hybrid commands)
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder } = require('discord.js');
 const mongoose = require('mongoose');
@@ -34,7 +33,6 @@ client.grantedUsers = new Map();   // userId -> { roleId: string, timeoutId: Nod
 client.rrpanel_builders = new Map(); // NEW: For building rrpanels interactively
 
 // --- Bot Configuration ---
-// (Your client.config.roles, levelingRoles, cookieRoles, workProgression, etc. remain here)
 client.config = {
   guildId: process.env.GUILD_ID,
   roles: {
@@ -94,11 +92,7 @@ for (const file of commandFiles) {
         const command = require(filePath);
         let loaded = false;
 
-        // --- 1. Check for HYBRID command ---
-        // (Has both slash 'data' and prefix 'name') - TICKET IS NO LONGER HYBRID
-        // if (command.data && command.name && command.execute) { ... } // Removed this block
-
-        // --- 2. Check for SLASH-ONLY command ---
+        // --- 1. Check for SLASH-ONLY command ---
         // (Has 'data' but NO prefix 'name')
         if (command.data && command.execute && !command.name) {
             // Ensure data.name exists before setting
@@ -110,7 +104,7 @@ for (const file of commandFiles) {
                  console.warn(`[WARNING] Slash command file '${file}' is missing 'data.name'. Skipping.`);
             }
         }
-        // --- 3. Check for PREFIX-ONLY command ---
+        // --- 2. Check for PREFIX-ONLY command ---
         // (Has 'name' but NO slash 'data') - Includes tpanel.js and the modified ticket.js
         else if (command.name && command.execute && !command.data) {
              client.commands.set(command.name, command);
@@ -315,27 +309,4 @@ mongoose.connection.on('reconnected', () => {
 connectMongoDB();
 
 client.login(process.env.DISCORD_TOKEN).then(() => {
-    console.log(`✅ Logged in as ${client.user.tag}`);
-    client.user.setActivity('with code');
-}).catch(err => {
-    console.error('❌ Bot login failed:', err);
-    process.exit(1);
-});
-
-// --- Graceful Shutdown ---
-process.on('SIGINT', async () => {
-    console.log('SIGINT received. Shutting down gracefully...');
-    await mongoose.disconnect();
-    console.log('MongoDB disconnected.');
-    client.destroy();
-    console.log('Discord client destroyed.');
-    process.exit(0);
-});
-process.on('SIGTERM', async () => {
-    console.log('SIGTERM received. Shutting down gracefully...');
-    await mongoose.disconnect();
-    console.log('MongoDB disconnected.');
-    client.destroy();
-    console.log('Discord client destroyed.');
-    process.exit(0);
-});
+    console.log(`✅ Logged in as ${
