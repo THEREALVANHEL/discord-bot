@@ -7,13 +7,26 @@ module.exports = {
     if (user.bot) return;
     if (!reaction.message.guild) return;
 
+    // Fetch reaction data if it's partial
+    if (reaction.partial) {
+        try {
+            await reaction.fetch();
+        } catch (error) {
+            console.error('Something went wrong when fetching the message reaction:', error);
+            return;
+        }
+    }
+
     const settings = await Settings.findOne({ guildId: reaction.message.guild.id });
     if (!settings) return;
 
+    // --- FIX: Use reaction.emoji.toString() to match custom emojis ---
     const rr = settings.reactionRoles.find(r =>
       r.messageId === reaction.message.id &&
-      (r.emoji === reaction.emoji.identifier || r.emoji === reaction.emoji.name)
+      r.emoji === reaction.emoji.toString() // Use .toString()
     );
+    // --- END FIX ---
+    
     if (!rr) return;
 
     const member = await reaction.message.guild.members.fetch(user.id);
