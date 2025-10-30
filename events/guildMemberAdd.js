@@ -1,4 +1,4 @@
-// events/guildMemberAdd.js (REPLACE - Premium welcome, Fixed timestamp format, Added Rules/Intro Channels)
+// events/guildMemberAdd.js (REPLACE - Added Modlog logging)
 const Settings = require('../models/Settings');
 const { EmbedBuilder } = require('discord.js');
 
@@ -33,13 +33,32 @@ module.exports = {
             .setTimestamp()
             .setImage('https://tenor.com/view/catdance-gangnam-style-cute-cat-gif-11020797830010762324.gif'); // GIF EMBEDDED
             
-          await channel.send({ // Added await for robustness
+          await channel.send({ 
             content: `Welcome, ${member}!`, // Pings the user
             embeds: [welcomeEmbed],
-            // Removed files: ['...gif'],
           });
         }
       }
+
+      // --- LOGGING FIX: Send log to modlog channel ---
+      if (settings && settings.modlogChannelId) {
+        const modlogChannel = member.guild.channels.cache.get(settings.modlogChannelId);
+        if (modlogChannel) {
+            const logEmbed = new EmbedBuilder()
+                .setTitle('📥 Member Joined')
+                .setColor(0x00FF00)
+                .setAuthor({ name: member.user.tag, iconURL: member.user.displayAvatarURL() })
+                .addFields(
+                    { name: 'User', value: `${member.user} (${member.user.id})`, inline: false },
+                    { name: 'Account Age', value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`, inline: true },
+                    { name: 'Total Members', value: `${member.guild.memberCount}`, inline: true }
+                )
+                .setTimestamp();
+            await modlogChannel.send({ embeds: [logEmbed] }).catch(console.error);
+        }
+      }
+      // --- END LOGGING FIX ---
+
 
       // Send Premium DM to user
       try {
