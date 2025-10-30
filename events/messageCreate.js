@@ -10,7 +10,7 @@ const { generateUserLevel } = require('../utils/levelSystem');
 const { XP_COOLDOWN, generateXP } = require('../utils/xpSystem');
 
 // --- AI Configuration ---
-const AI_MODEL_NAME = 'gemini-pro'; // Gemini Model
+const AI_MODEL_NAME = 'gemini-1.5-flash'; // Updated to a more current model
 const AI_TRIGGER_PREFIX = '?blecky';
 const MAX_HISTORY = 5;
 const AI_COOLDOWN_MS = 3000;
@@ -170,7 +170,7 @@ module.exports = {
             }
         }
 
-        // --- AI Trigger Logic (?blecky or AI Channel) - UPDATED FOR GEMINI ---
+        // --- AI Trigger Logic (?blecky or AI Channel) ---
         if (geminiModel && (lowerContent.startsWith(AI_TRIGGER_PREFIX) || message.channel.id === settings?.aiChannelId)) {
             let userPrompt;
              if (lowerContent.startsWith(AI_TRIGGER_PREFIX)) {
@@ -232,62 +232,71 @@ module.exports = {
                 console.log(`[AI Call] Sending request for ${message.author.tag}... Model: ${AI_MODEL_NAME}`);
                 
                 // --- Gemini API Call (FIXED) ---
-                const result = await geminiModel.generateContent(fullPrompt);
-                const response = await result.response;
-                let aiTextResult = response.text();
-                console.log(`[AI Call] Received response for ${message.author.tag}. Success: ${!!aiTextResult}`);
-                // --- End Gemini API Call ---
-
-                if (!aiTextResult) {
-                    console.warn("[AI Error] Gemini returned empty response.");
-                    aiTextResult = "I'm having trouble formulating a response right now. Could you try rephrasing?";
-                } else {
-                    // Update conversation history
-                    geminiHistory.push(`User: ${userPrompt}`);
-                    geminiHistory.push(`Assistant: ${aiTextResult}`);
+                try {
+                    const result = await geminiModel.generateContent(fullPrompt);
+                    const response = await result.response;
+                    let aiTextResult = response.text();
+                    console.log(`[AI Call] Received response for ${message.author.tag}. Success: ${!!aiTextResult}`);
                     
-                    // Limit history length
-                    if (geminiHistory.length > MAX_HISTORY * 2) {
-                        geminiHistory = geminiHistory.slice(-(MAX_HISTORY * 2));
+                    if (!aiTextResult) {
+                        console.warn("[AI Error] Gemini returned empty response.");
+                        aiTextResult = "I'm having trouble formulating a response right now. Could you try rephrasing?";
+                    } else {
+                        // Update conversation history
+                        geminiHistory.push(`User: ${userPrompt}`);
+                        geminiHistory.push(`Assistant: ${aiTextResult}`);
+                        
+                        // Limit history length
+                        if (geminiHistory.length > MAX_HISTORY * 2) {
+                            geminiHistory = geminiHistory.slice(-(MAX_HISTORY * 2));
+                        }
+                        conversationHistory.set(userId, geminiHistory);
                     }
-                    conversationHistory.set(userId, geminiHistory);
-                }
 
-                let aiTextResponseForUser = aiTextResult;
-                const actionsToPerform = [];
-                const actionRegex = /\[ACTION:([A-Z_]+)\s*(.*?)\]/gi;
-                let match;
-                 while ((match = actionRegex.exec(aiTextResult)) !== null) {
-                    actionsToPerform.push({ type: match[1].toUpperCase(), args: match[2]?.trim() });
-                    aiTextResponseForUser = aiTextResponseForUser.replace(match[0], '').trim();
-                 }
+                    let aiTextResponseForUser = aiTextResult;
+                    const actionsToPerform = [];
+                    const actionRegex = /\[ACTION:([A-Z_]+)\s*(.*?)\]/gi;
+                    let match;
+                    while ((match = actionRegex.exec(aiTextResult)) !== null) {
+                        actionsToPerform.push({ type: match[1].toUpperCase(), args: match[2]?.trim() });
+                        aiTextResponseForUser = aiTextResponseForUser.replace(match[0], '').trim();
+                    }
 
-                 console.log(`[AI Respond] Sending text response (if any) for ${message.author.tag}`);
-                if (aiTextResponseForUser) {
-                    await message.reply(aiTextResponseForUser.substring(0, 2000)).catch(console.error);
-                } else if (actionsToPerform.length === 0 && aiTextResult) {
-                     await message.reply("Okay.").catch(console.error);
-                }
+                    console.log(`[AI Respond] Sending text response (if any) for ${message.author.tag}`);
+                    if (aiTextResponseForUser) {
+                        await message.reply(aiTextResponseForUser.substring(0, 2000)).catch(console.error);
+                    } else if (actionsToPerform.length === 0 && aiTextResult) {
+                         await message.reply("Okay.").catch(console.error);
+                    }
 
-                 console.log(`[AI Respond] Executing ${actionsToPerform.length} actions for ${message.author.tag}`);
-                for (const action of actionsToPerform) {
-                    await performAction(message, action.type, action.args);
+                    console.log(`[AI Respond] Executing ${actionsToPerform.length} actions for ${message.author.tag}`);
+                    for (const action of actionsToPerform) {
+                        await performAction(message, action.type, action.args);
+                    }
+                    
+                } catch (apiError) {
+                    // Handle specific Gemini API errors
+                    console.error("[AI API Error] Gemini API call failed:", apiError);
+                    throw new Error(`Gemini API Error: ${apiError.message}`);
                 }
+                // --- End Gemini API Call ---
 
             } catch (error) {
                 console.error("[AI Error] Error during AI processing:", error);
-                 aiCooldowns.delete(message.author.id);
-                 try {
+                aiCooldowns.delete(message.author.id);
+                try {
                     if (error.code !== 50013 && message.channel.permissionsFor(message.guild.members.me)?.has(PermissionsBitField.Flags.SendMessages)) {
                          let errorMsg = "⚠️ Oops! Something went wrong with my AI core.";
                          if (error.message) {
                              // More user-friendly error messages
-                             if (error.message.includes('API key not valid')) {
-                                 errorMsg = "⚠️ AI service is temporarily unavailable. Please try again later.";
+                             if (error.message.includes('API key not valid') || error.message.includes('401')) {
+                                 errorMsg = "⚠️ AI service authentication failed. Please contact the bot administrator.";
                              } else if (error.message.includes('404') || error.message.includes('Not Found')) {
                                  errorMsg = "⚠️ AI model is currently being updated. Please try again in a few moments.";
                              } else if (error.message.includes('quota') || error.message.includes('rate limit')) {
                                  errorMsg = "⚠️ AI service is experiencing high demand. Please try again later.";
+                             } else if (error.message.includes('Gemini API Error')) {
+                                 errorMsg = "⚠️ AI service is temporarily unavailable. Please try again later.";
                              } else {
                                  errorMsg += ` (${error.message})`;
                              }
