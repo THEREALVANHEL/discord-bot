@@ -1,4 +1,4 @@
-// commands/purge.js (Converted to Prefix Command)
+// commands/purge.js (Converted to Prefix Command, Added specific logging)
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
 const Settings = require('../models/Settings'); // Required for logging
 const { logModerationAction } = require('../utils/logModerationAction'); // Required for logging
@@ -6,9 +6,8 @@ const { logModerationAction } = require('../utils/logModerationAction'); // Requ
 module.exports = {
     name: 'purge',
     description: 'Delete a specified number of messages from the channel.',
-    aliases: ['clear', 'prune'], // Optional aliases
-    // cooldown: 5, // Optional: Cooldown in seconds
-
+    aliases: ['clear', 'prune'], 
+    
     async execute(message, args, client) {
         // 1. Permission Check (User)
         if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
@@ -20,9 +19,6 @@ module.exports = {
         if (!message.channel.permissionsFor(botMember).has(PermissionsBitField.Flags.ManageMessages)) {
              return message.reply('❌ I need the `Manage Messages` permission in this channel to delete messages.');
         }
-         // Deprecated check, use permissionsFor
-         // if (!message.channel.manageable) { ... }
-
 
         // 3. Argument Parsing: ?purge <amount>
         const amount = parseInt(args[0], 10);
@@ -30,13 +26,16 @@ module.exports = {
         if (isNaN(amount) || amount < 1 || amount > 100) {
             return message.reply('Usage: `?purge <number_between_1_and_100>`');
         }
-
-        // Add 1 to include the command message itself if desired, otherwise just use `amount`
-        const amountToDelete = amount; // Or amount + 1
+        
+        // We will delete the command message separately
+        const amountToDelete = amount;
 
         // 4. Delete Messages
         try {
-            // Fetch messages before deleting (bulkDelete requires fetched messages)
+            // Attempt to delete the original command message first
+            await message.delete().catch(() => {}); 
+
+            // Fetch messages (bulkDelete doesn't accept a number > 100)
             const messages = await message.channel.messages.fetch({ limit: amountToDelete });
             const deletedMessages = await message.channel.bulkDelete(messages, true); // `true` filters messages older than 14 days
 
@@ -46,21 +45,27 @@ module.exports = {
             const confirmationMsg = await message.channel.send(`🧹 **Purge Executed:** ${deletedCount} message(s) deleted by ${message.author.tag}.`);
             setTimeout(() => confirmationMsg.delete().catch(() => {}), 5000); // Delete confirmation after 5 seconds
 
-            // 6. Log Action
+            // 6. Log Action (FIX: Enhanced Logging)
             const settings = await Settings.findOne({ guildId: message.guild.id });
             if (settings && settings.modlogChannelId) {
-                await logModerationAction(message.guild, settings, 'Purge', message.channel, message.author, `Deleted ${deletedCount} messages`, `Amount requested: ${amount}`);
+                // Use logModerationAction utility
+                await logModerationAction(
+                    message.guild, 
+                    settings, 
+                    'Purge', // Action
+                    message.channel, // Target (the channel)
+                    message.author, // Moderator
+                    `Deleted ${deletedCount} messages`, // Reason
+                    `Amount requested: ${amount}` // Extra
+                );
             }
-
-            // Attempt to delete the original command message
-            await message.delete().catch(() => {}); // Ignore errors if already deleted or permissions missing
+            // --- END LOGGING FIX ---
 
         } catch (error) {
             console.error('Purge error:', error);
-             // Handle specific common errors
-             if (error.code === 50035) { // Invalid Form Body (often due to deleting 0 messages or other API issues)
+             if (error.code === 50035) { 
                  message.reply('❌ Error: Could not delete messages. They might be too old (Discord limits bulk delete to messages under 14 days old).').catch(console.error);
-             } else if (error.code === 50013) { // Missing Permissions
+             } else if (error.code === 50013) { 
                  message.reply('❌ Error: I seem to be missing permissions to delete messages here.').catch(console.error);
              } else {
                  message.reply('❌ An unexpected error occurred while trying to purge messages.').catch(console.error);
