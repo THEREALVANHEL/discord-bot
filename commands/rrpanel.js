@@ -17,15 +17,30 @@ module.exports = {
     const fullInput = args.join(' ');
 
     // 3. Split by fullstop (period) to get panel description and role entries
-    const sections = fullInput.split('.').map(s => s.trim()).filter(s => s);
+    // If no periods, treat the whole thing as one entry (single role panel)
+    let sections = fullInput.split('.').map(s => s.trim()).filter(s => s);
+    
+    // If only one section (no periods found), assume it's: description, roleID, desc, emoji
+    if (sections.length === 1) {
+        const parts = sections[0].split(',').map(p => p.trim());
+        if (parts.length >= 4) {
+            // Rearrange: first part is panel desc, rest is the role
+            sections = [parts[0], parts.slice(1).join(', ')];
+        }
+    }
 
     // 4. Validate minimum input (panel description + at least 1 role)
     if (sections.length < 2) {
         return message.reply(
             '❌ Invalid format!\n\n' +
-            '**Usage:** `?rpanel <Panel Description>, <RoleID>, <Role Description>, <Emoji>. <RoleID2>, <Role Description2>, <Emoji2>. ...`\n\n' +
+            '**Usage:** `?rpanel <Panel Description>, <RoleID>, <Role Description>, <Emoji>. <RoleID2>, <Role Description2>, <Emoji2>.`\n\n' +
             '**Example:**\n' +
-            '`?rpanel Get your awesome roles here, 123456789012345678, Color Role Red, ❤️. 876543210987654321, Notification Role, 🔔.`'
+            '```?rpanel Get your awesome roles here, 123456789012345678, Color Role Red, ❤️. 876543210987654321, Notification Role, 🔔.```\n\n' +
+            '**Important Notes:**\n' +
+            '• Separate role entries with a period (`.`)\n' +
+            '• Each role entry has 3 parts separated by commas\n' +
+            '• Format: `RoleID, Description, Emoji`\n' +
+            '• Don\'t forget the period at the end of each role!'
         );
     }
 
@@ -46,9 +61,13 @@ module.exports = {
         // Validate we have exactly 3 parts
         if (parts.length !== 3) {
             return message.reply(
-                `❌ Invalid format in section ${i + 1}: "${section}"\n\n` +
-                'Each role entry must have exactly 3 parts separated by commas:\n' +
-                '`<RoleID>, <Role Description>, <Emoji>`'
+                `❌ Invalid format in entry ${i + 1}: "${section}"\n\n` +
+                `**Found ${parts.length} parts, expected 3:**\n` +
+                parts.map((p, idx) => `${idx + 1}. \`${p}\``).join('\n') +
+                '\n\n**Required format:** `<RoleID>, <Role Description>, <Emoji>`\n\n' +
+                '**Examples:**\n' +
+                '• Single role: `?rpanel Panel Title, 123456789, Red Color Role, ❤️`\n' +
+                '• Multiple roles: `?rpanel Panel Title, 123456789, Red Role, ❤️. 987654321, Blue Role, 💙.`'
             );
         }
 
