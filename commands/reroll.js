@@ -1,6 +1,6 @@
 // commands/prefix/reroll.js (NEW FILE)
 const { EmbedBuilder } = require('discord.js');
-const { findUserInGuild } = require('../../utils/findUserInGuild'); // Adjust path
+const { findUserInGuild } = require('../utils/findUserInGuild'); // Adjust path
 
 module.exports = {
     name: 'reroll',
