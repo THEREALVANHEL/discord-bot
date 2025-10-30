@@ -1,5 +1,5 @@
 // events/interactionCreate.js (REPLACE)
-const { Events, EmbedBuilder, PermissionsBitField, ChannelType, Collection, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Events, EmbedBuilder, PermissionsBitField, ChannelType, Collection, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, InteractionFlags } = require('discord.js');
 const Settings = require('../models/Settings');
 const User = require('../models/User');
 const fs = require('fs').promises;
@@ -111,8 +111,19 @@ module.exports = {
 
     // --- BUTTON INTERACTION LOGIC ---
     if (interaction.isButton()) {
+        // --- FIX: Debounce to prevent "Interaction already acknowledged" ---
+        if (client.activeInteractions.has(interaction.id)) {
+            // User clicked the same button twice very fast. Ignore the second click.
+            return;
+        }
+        client.activeInteractions.add(interaction.id);
+        // --- END FIX ---
+        
         const customId = interaction.customId;
-        if (!interaction.channel || !interaction.guild) return;
+        if (!interaction.channel || !interaction.guild) {
+             client.activeInteractions.delete(interaction.id); // Clean up
+             return;
+        }
 
         // --- Job Apply Button ---
         if (customId.startsWith('job_apply_')) {
@@ -145,6 +156,8 @@ module.exports = {
 
             } catch (error) {
                 console.error("Error handling job_apply button:", error);
+            } finally {
+                client.activeInteractions.delete(interaction.id); // Clean up
             }
             return;
         }
@@ -167,6 +180,8 @@ module.exports = {
                 // endPoll now handles the reply
             } catch (error) {
                 console.error("Error handling poll_result_manual button:", error);
+            } finally {
+                client.activeInteractions.delete(interaction.id); // Clean up
             }
             return;
         }
@@ -200,13 +215,18 @@ module.exports = {
                 await interaction.editReply({ content: `✅ Reminder (ID: ${reminderId}) has been successfully removed.`, components: [] });
             } catch (error) {
                 console.error("Error handling remove_reminder button:", error);
+            } finally {
+                client.activeInteractions.delete(interaction.id); // Clean up
             }
             return;
         }
         // --- TICKET CREATION BUTTON ---
         else if (customId === 'create_ticket') {
             try {
-                await interaction.deferReply({ ephemeral: true });
+                // --- FIX: Use new ephemeral flag ---
+                await interaction.deferReply({ flags: InteractionFlags.Ephemeral }); 
+                // --- END FIX ---
+                
                 const guild = interaction.guild;
                 const user = interaction.user;
                 const userName = user.username;
@@ -274,11 +294,15 @@ module.exports = {
 
             } catch (error) {
                  console.error('Error handling create_ticket button:', error);
-                 if (!interaction.replied && !interaction.deferred && error.code !== 10062) {
-                     await interaction.reply({ content: 'An error occurred while creating your ticket.', ephemeral: true }).catch(console.error);
-                 } else if (!interaction.replied && error.code !== 10062) {
-                      await interaction.editReply({ content: 'An error occurred while creating your ticket.' }).catch(console.error);
+                 if (error.code !== 40060) { // Don't try to reply if it was an "already acknowledged" error
+                     if (!interaction.replied && !interaction.deferred) {
+                         await interaction.reply({ content: 'An error occurred while creating your ticket.', ephemeral: true }).catch(console.error);
+                     } else {
+                          await interaction.editReply({ content: 'An error occurred while creating your ticket.' }).catch(console.error);
+                     }
                  }
+            } finally {
+                client.activeInteractions.delete(interaction.id); // Clean up
             }
             return;
          }
@@ -307,7 +331,8 @@ module.exports = {
                     return interaction.reply({ content: 'You do not have permission to close this ticket.', ephemeral: true });
                 }
 
-                await interaction.deferReply({ content: '🔒 Closing ticket and generating transcript...', ephemeral: true });
+                // --- FIX: Use new ephemeral flag ---
+                await interaction.deferReply({ flags: InteractionFlags.Ephemeral });
 
                 // --- TRANSCRIPT LOGIC ---
                 let transcriptContent = `Transcript for Ticket\nChannel: #${channel.name} (${channel.id})\n${topic}\nClosed by: ${interaction.user.tag}\n\n`;
@@ -379,14 +404,21 @@ module.exports = {
                 }, 5000); // 5 seconds
             } catch (error) {
                 console.error("Error handling close_ticket_button:", error);
-                if (!interaction.replied && !interaction.deferred && error.code !== 10062) {
-                     await interaction.reply({ content: 'An error occurred while closing the ticket.', ephemeral: true }).catch(console.error);
-                 } else if (!interaction.replied && error.code !== 10062) {
-                      await interaction.editReply({ content: 'An error occurred while closing the ticket.' }).catch(console.error);
+                if (error.code !== 40060) {
+                    if (!interaction.replied && !interaction.deferred) {
+                         await interaction.reply({ content: 'An error occurred while closing the ticket.', ephemeral: true }).catch(console.error);
+                     } else {
+                          await interaction.editReply({ content: 'An error occurred while closing the ticket.' }).catch(console.error);
+                     }
                  }
+            } finally {
+                client.activeInteractions.delete(interaction.id); // Clean up
             }
             return;
          }
+         
+         // --- Fallback for unknown button ---
+         client.activeInteractions.delete(interaction.id);
     }
      
     // --- SELECT MENU HANDLER (Example for /quicksetup wizard) ---
