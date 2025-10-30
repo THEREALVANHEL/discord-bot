@@ -1,3 +1,4 @@
+// index.js (REPLACE)
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder } = require('discord.js');
 const mongoose = require('mongoose');
@@ -13,26 +14,27 @@ const client = new Client({
     GatewayIntentBits.MessageContent, // Required for prefix commands
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessageReactions,
-    GatewayIntentBits.GuildBans, // Ensure this is present
-    GatewayIntentBits.GuildModeration, // For timeouts etc.
+    GatewayIntentBits.GuildBans,
+    GatewayIntentBits.GuildModeration,
   ],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.GuildMember],
 });
 
-global.clientInstance = client; // Make client accessible globally if needed by older utils
+global.clientInstance = client;
 
 // --- Collections and Maps ---
-client.commands = new Collection(); // Stores both slash and prefix commands
-client.cooldowns = new Collection(); // For command cooldowns
-client.giveaways = new Map();      // messageId -> giveaway data or timeout
-client.locks = new Map();          // channelId -> { endTime, reason, timeoutId, moderatorId }
-client.reminders = new Map();      // reminderId (from DB) -> timeoutId
-client.polls = new Map();          // messageId -> poll data
-client.xpCooldowns = new Map();    // userId -> timestamp
-client.grantedUsers = new Map();   // userId -> { roleId: string, timeoutId: NodeJS.Timeout } (for grant/ungrant)
-client.rrpanel_builders = new Map(); // NEW: For building rrpanels interactively
+client.commands = new Collection(); // Stores BOTH slash and prefix commands
+client.cooldowns = new Collection();
+client.giveaways = new Map();
+client.locks = new Map();
+client.reminders = new Map();
+client.polls = new Map();
+client.xpCooldowns = new Map();
+client.grantedUsers = new Map();
+client.rrpanel_builders = new Map();
 
 // --- Bot Configuration ---
+// (Your existing config remains unchanged)
 client.config = {
   guildId: process.env.GUILD_ID,
   roles: {
@@ -79,60 +81,66 @@ client.config = {
    ],
 };
 
-// --- Load Commands ---
-const commandsPath = path.join(__dirname, 'commands');
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
-
+// --- NEW Command Loader ---
 console.log("--- Loading Commands ---");
 
-// --- REWORKED COMMAND LOADER (Handles tpanel and prefix-only ticket) ---
-for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
-    try {
-        const command = require(filePath);
-        let loaded = false;
+// Function to recursively load commands from subfolders
+const loadCommands = (dir, type) => {
+    const commandFolders = fs.readdirSync(dir, { withFileTypes: true })
+        .filter(dirent => dirent.isDirectory())
+        .map(dirent => dirent.name);
 
-        // --- 1. Check for SLASH-ONLY command ---
-        // (Has 'data' but NO prefix 'name')
-        if (command.data && command.execute && !command.name) {
-            // Ensure data.name exists before setting
-            if (command.data.name) {
+    // Load files in the current directory
+    const commandFiles = fs.readdirSync(dir).filter(file => file.endsWith('.js'));
+    for (const file of commandFiles) {
+        const filePath = path.join(dir, file);
+        try {
+            const command = require(filePath);
+            let loaded = false;
+
+            if (type === 'slash' && command.data && command.execute) {
                 client.commands.set(command.data.name, command);
                 console.log(`[SLASH] Loaded: ${command.data.name}`);
                 loaded = true;
-            } else {
-                 console.warn(`[WARNING] Slash command file '${file}' is missing 'data.name'. Skipping.`);
+            } else if (type === 'prefix' && command.name && command.execute) {
+                client.commands.set(command.name, command);
+                console.log(`[PREFIX] Loaded: ${command.name}`);
+                loaded = true;
+                if (command.aliases && Array.isArray(command.aliases)) {
+                    command.aliases.forEach(alias => {
+                        if (!client.commands.has(alias)) {
+                            client.commands.set(alias, command);
+                            console.log(`       - Alias: ${alias}`);
+                        } else {
+                            console.warn(`[WARNING] Alias '${alias}' for command '${command.name}' conflicts. Skipping.`);
+                        }
+                    });
+                }
             }
-        }
-        // --- 2. Check for PREFIX-ONLY command ---
-        // (Has 'name' but NO slash 'data') - Includes tpanel.js and the modified ticket.js
-        else if (command.name && command.execute && !command.data) {
-             client.commands.set(command.name, command);
-             console.log(`[PREFIX] Loaded: ${command.name}`);
-             loaded = true;
 
-             // Load aliases for prefix-only command
-             if (command.aliases && Array.isArray(command.aliases)) {
-                 command.aliases.forEach(alias => {
-                     if (!client.commands.has(alias)) {
-                        client.commands.set(alias, command);
-                        console.log(`       - Alias: ${alias}`);
-                     } else {
-                        console.warn(`[WARNING] Alias '${alias}' for command '${command.name}' conflicts with existing command/alias. Skipping alias.`);
-                     }
-                 });
-             }
+            if (!loaded && file !== 'index.js') {
+                 console.warn(`[WARNING] Command file '${file}' in '${dir}' is invalid or wrong type. Skipping.`);
+            }
+        } catch (error) {
+            console.error(`❌ Error loading command ${file}:`, error);
         }
-
-        if (!loaded && file !== 'index.js') { // index.js is not a command
-             console.warn(`[WARNING] Command file '${file}' is invalid or missing properties. Skipping.`);
-        }
-
-    } catch (error) {
-        console.error(`❌ Error loading command ${file}:`, error);
     }
-}
-// --- END REWORKED LOADER ---
+
+    // Recursively load from subfolders
+    for (const folder of commandFolders) {
+        loadCommands(path.join(dir, folder), type);
+    }
+};
+
+// Create dirs if they don't exist (for user's step-by-step)
+const slashCommandsPath = path.join(__dirname, 'commands', 'slash');
+const prefixCommandsPath = path.join(__dirname, 'commands', 'prefix');
+if (!fs.existsSync(slashCommandsPath)) fs.mkdirSync(slashCommandsPath, { recursive: true });
+if (!fs.existsSync(prefixCommandsPath)) fs.mkdirSync(prefixCommandsPath, { recursive: true });
+
+// Load commands
+loadCommands(slashCommandsPath, 'slash');
+loadCommands(prefixCommandsPath, 'prefix');
 
 console.log("--- Finished Loading Commands ---");
 
@@ -184,6 +192,7 @@ async function connectMongoDB() {
 }
 
 // --- Data Loading Functions ---
+// (Your existing loadReminders and loadGiveaways functions remain unchanged)
 async function loadReminders() {
   try {
     const User = require('./models/User');
@@ -248,7 +257,8 @@ async function loadReminders() {
 async function loadGiveaways() {
   try {
     const Giveaway = require('./models/Giveaway');
-    const { endGiveaway } = require('./commands/giveaway');
+    // IMPORTANT: We must require the command file *here* to get the exported helper function
+    const { endGiveaway } = require('./commands/slash/giveaway.js'); // Assuming you move it to /slash
 
     const giveaways = await Giveaway.find({ endTime: { $gt: new Date() } });
     let loadedCount = 0;
@@ -280,7 +290,7 @@ async function loadGiveaways() {
 }
 
 
-// --- Dummy HTTP Server (for hosting platforms) ---
+// --- Dummy HTTP Server ---
 const app = express();
 const PORT = process.env.PORT || 10000;
 app.get('/', (req, res) => res.send('Discord Bot is running!'));
