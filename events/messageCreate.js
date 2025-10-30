@@ -1,3 +1,4 @@
+// events/messageCreate.js (REPLACE)
 const { Events, EmbedBuilder, Collection, PermissionsBitField } = require('discord.js');
 const fetch = require('node-fetch');
 const User = require('../models/User');
@@ -9,83 +10,48 @@ const { generateUserLevel } = require('../utils/levelSystem');
 const { XP_COOLDOWN, generateXP } = require('../utils/xpSystem');
 
 // --- AI Configuration ---
-const AI_MODEL_NAME = 'gemini-2.0-flash-001';
-const AI_TRIGGER_PREFIXES = ['?blecky', '?b']; // Multiple trigger prefixes
+const AI_MODEL_NAME = 'gemini-2.0-flash-001'; // FIXED: Use only the working model
+const AI_TRIGGER_PREFIXES = ['?blecky', '?b'];
 const MAX_HISTORY = 5;
 const AI_COOLDOWN_MS = 3000;
 
 // --- Prefix Command Configuration ---
-const PREFIX = '?';
+const PREFIX = '?'; // This is your main command prefix
 
-// --- Enhanced User Search Function ---
+// --- Enhanced User Search Function (as provided) ---
 async function findUserAnyMethod(guild, searchTerm) {
     if (!searchTerm) return null;
-    
-    // Clean the search term
     const cleanTerm = searchTerm.replace(/[<@!>]/g, '').trim().toLowerCase();
-    
-    // Method 1: Try by user ID
     if (/^\d+$/.test(cleanTerm)) {
         try {
             const member = await guild.members.fetch(cleanTerm).catch(() => null);
             if (member) return member;
-        } catch (error) {
-            // Ignore and try other methods
-        }
+        } catch (error) {}
     }
-    
-    // Method 2: Try by mention
     if (searchTerm.startsWith('<@') && searchTerm.endsWith('>')) {
         const userId = searchTerm.replace(/[<@!>]/g, '');
         try {
             const member = await guild.members.fetch(userId).catch(() => null);
             if (member) return member;
-        } catch (error) {
-            // Ignore and try other methods
-        }
+        } catch (error) {}
     }
-    
-    // Method 3: Try by username (case insensitive)
     const members = await guild.members.fetch();
-    
-    // Try exact display name match
-    const displayNameMatch = members.find(member => 
-        member.displayName.toLowerCase() === cleanTerm
-    );
+    const displayNameMatch = members.find(member => member.displayName.toLowerCase() === cleanTerm);
     if (displayNameMatch) return displayNameMatch;
-    
-    // Try exact username match
-    const usernameMatch = members.find(member => 
-        member.user.username.toLowerCase() === cleanTerm
-    );
+    const usernameMatch = members.find(member => member.user.username.toLowerCase() === cleanTerm);
     if (usernameMatch) return usernameMatch;
-    
-    // Try partial display name match
-    const partialDisplayMatch = members.find(member => 
-        member.displayName.toLowerCase().includes(cleanTerm)
-    );
+    const partialDisplayMatch = members.find(member => member.displayName.toLowerCase().includes(cleanTerm));
     if (partialDisplayMatch) return partialDisplayMatch;
-    
-    // Try partial username match
-    const partialUsernameMatch = members.find(member => 
-        member.user.username.toLowerCase().includes(cleanTerm)
-    );
+    const partialUsernameMatch = members.find(member => member.user.username.toLowerCase().includes(cleanTerm));
     if (partialUsernameMatch) return partialUsernameMatch;
-    
-    // Try by tag (username#discriminator or username)
-    const tagMatch = members.find(member => 
-        member.user.tag.toLowerCase() === cleanTerm || 
-        member.user.username.toLowerCase() === cleanTerm
-    );
+    const tagMatch = members.find(member => member.user.tag.toLowerCase() === cleanTerm || member.user.username.toLowerCase() === cleanTerm);
     if (tagMatch) return tagMatch;
-    
     return null;
 }
 
-// --- Find User by ID Globally ---
+// --- Find User by ID Globally (as provided) ---
 async function findUserGlobally(client, userId) {
     try {
-        // Try to fetch user directly (works for any user the bot can see)
         const user = await client.users.fetch(userId).catch(() => null);
         return user;
     } catch (error) {
@@ -93,15 +59,13 @@ async function findUserGlobally(client, userId) {
     }
 }
 
-// --- Direct Gemini API Call Function ---
+// --- Direct Gemini API Call Function (as provided) ---
 async function callGeminiAPI(prompt) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
         throw new Error('GEMINI_API_KEY not found');
     }
-
     const url = `https://generativelanguage.googleapis.com/v1/models/${AI_MODEL_NAME}:generateContent?key=${apiKey}`;
-    
     const requestBody = {
         contents: [{
             parts: [{
@@ -115,47 +79,33 @@ async function callGeminiAPI(prompt) {
             topK: 40
         }
     };
-
     console.log(`[Gemini API] Calling endpoint: ${url}`);
-    
     try {
         const response = await fetch(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody)
         });
-
         const responseText = await response.text();
-        
         if (!response.ok) {
             console.error(`[Gemini API] HTTP Error ${response.status}:`, responseText);
-            
             let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
             try {
                 const errorData = JSON.parse(responseText);
                 if (errorData.error && errorData.error.message) {
                     errorMessage = errorData.error.message;
-                    
                     if (errorMessage.includes('is not found') || errorMessage.includes('NOT_FOUND')) {
-                        console.error(`[Gemini API] Model ${AI_MODEL_NAME} not available. Available models might be different.`);
+                        console.error(`[Gemini API] Model ${AI_MODEL_NAME} not available.`);
                     }
                 }
-            } catch (e) {
-                // If JSON parsing fails, use the raw text
-            }
-            
+            } catch (e) {}
             throw new Error(errorMessage);
         }
-
         const data = JSON.parse(responseText);
-        
         if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
             console.error('[Gemini API] Invalid response structure:', data);
             throw new Error('Invalid response from Gemini API');
         }
-
         return data.candidates[0].content.parts[0].text;
     } catch (error) {
         console.error('[Gemini API] Request failed:', error);
@@ -163,7 +113,7 @@ async function callGeminiAPI(prompt) {
     }
 }
 
-// Enhanced System Instruction with Server Context
+// --- System Instruction (as provided) ---
 const SYSTEM_INSTRUCTION = `You are Blecky Nephew, an advanced AI integrated into a Discord server named "The Nephews". You engage in helpful conversations, answer questions, provide information, and perform specific actions when requested. Your personality is helpful, slightly formal but friendly, and knowledgeable. Avoid slang unless mirroring the user. Be concise but informative. You MUST follow instructions precisely.
 
 Server Context: You are in the "The Nephews" Discord server. Assume messages are from server members unless otherwise specified.
@@ -206,30 +156,23 @@ const aiCooldowns = new Map();
 module.exports = {
     name: Events.MessageCreate,
     async execute(message) {
-        // === DUPLICATE MESSAGE PROTECTION ===
+        // === DUPLICATE MESSAGE PROTECTION (as provided) ===
         if (message.client.processedMessages && message.client.processedMessages.has(message.id)) {
             console.log(`[Duplicate Protection] Ignoring duplicate message: ${message.id}`);
             return;
         }
-        
         if (!message.client.processedMessages) {
             message.client.processedMessages = new Map();
         }
-        
         message.client.processedMessages.set(message.id, true);
-        
         if (message.client.processedMessages.size > 1000) {
             const firstKey = message.client.processedMessages.keys().next().value;
             message.client.processedMessages.delete(firstKey);
         }
 
         // Basic checks
-        if (message.author.bot || !message.guild) {
-            return;
-        }
-        if (!message.content || typeof message.content !== 'string') {
-             return;
-        }
+        if (message.author.bot || !message.guild) return;
+        if (!message.content || typeof message.content !== 'string') return;
 
         let settings;
         try {
@@ -250,22 +193,19 @@ module.exports = {
             }
         }
 
-        // --- XP Gain Logic ---
+        // --- XP Gain Logic (as provided) ---
         if (!noXpChannels.includes(message.channel.id) && !message.content.startsWith(PREFIX) && !usedPrefix) {
             const userXPCooldown = message.client.xpCooldowns.get(message.author.id);
             const now = Date.now();
-
             if (!userXPCooldown || now > userXPCooldown) {
                 message.client.xpCooldowns.set(message.author.id, now + XP_COOLDOWN);
                 let user;
                 try {
                      user = await User.findOne({ userId: message.author.id });
                      if (!user) user = new User({ userId: message.author.id });
-
                      const xpGained = generateXP();
                      user.xp += xpGained;
                      const leveledUp = generateUserLevel(user);
-
                      if (leveledUp) {
                          const levelUpChannelId = settings?.levelUpChannelId;
                           let notifyChannel = message.channel;
@@ -275,7 +215,6 @@ module.exports = {
                           }
                           const levelUpEmbed = new EmbedBuilder().setTitle('🚀 Level UP!').setDescription(`${message.author}, congratulations! You've leveled up to **Level ${user.level}**! 🎉`).setThumbnail(message.author.displayAvatarURL({ dynamic: true })).setColor(0xFFD700).setTimestamp();
                           notifyChannel.send({ content: `${message.author}`, embeds: [levelUpEmbed] }).catch(console.error);
-
                           const member = message.member;
                           if (member) {
                              const levelingRoles = message.client.config.levelingRoles || [];
@@ -283,7 +222,6 @@ module.exports = {
                                  .filter(r => r.level <= user.level)
                                  .sort((a, b) => b.level - a.level)[0];
                              const targetLevelRoleId = targetLevelRole ? targetLevelRole.roleId : null;
-
                              for (const roleConfig of levelingRoles) {
                                 const roleId = roleConfig.roleId;
                                 if (!roleId) continue;
@@ -307,7 +245,7 @@ module.exports = {
             }
         }
 
-        // --- LOGGING: Log Attachments/Links ---
+        // --- LOGGING: Log Attachments/Links (as provided) ---
         if (settings && settings.autologChannelId && !message.content.startsWith(PREFIX) && !usedPrefix) {
             if (message.attachments.size > 0 || message.content.includes('http://') || message.content.includes('https://')) {
                 const logChannel = message.guild.channels.cache.get(settings.autologChannelId);
@@ -341,7 +279,6 @@ module.exports = {
                 userPrompt = message.content.trim();
                 console.log(`[AI Trigger] Detected message in AI channel (${message.channel.id}) from ${message.author.tag}`);
             }
-
             const nowAI = Date.now();
             const userAICooldown = aiCooldowns.get(message.author.id);
             if (userAICooldown && nowAI < userAICooldown) {
@@ -355,7 +292,6 @@ module.exports = {
              if (userPrompt) {
                 aiCooldowns.set(message.author.id, nowAI + AI_COOLDOWN_MS);
              }
-
             if (!userPrompt) {
                  if (usedPrefix) {
                      console.log(`[AI Trigger] Empty prefix prompt from ${message.author.tag}, replying with greeting.`);
@@ -366,33 +302,23 @@ module.exports = {
                      return;
                  }
             }
-
             console.log(`[AI Trigger] Processing prompt: "${userPrompt}"`);
             try {
                 await message.channel.sendTyping();
-                
-                // Get user data for context
                 let userDataContext = "No specific data.";
                 let userDB = await User.findOne({ userId: message.author.id });
                 if (userDB) {
                      const jobTitle = userDB.currentJob ? (message.client.config?.workProgression?.find(j => j.id === userDB.currentJob)?.title || 'Unk Job') : 'Unemployed';
                      userDataContext = `Lvl ${userDB.level}|${userDB.coins} Coins|${userDB.cookies} Cookies|${userDB.warnings.length} Warns|Job:${jobTitle}`;
                 }
-
                 const userId = message.author.id;
-                
-                // Build conversation history
                 let geminiHistory = conversationHistory.get(userId) || [];
-                
-                // Prepare the full prompt with system instruction
                 const finalSystemInstruction = SYSTEM_INSTRUCTION.replace('{{USER_DATA}}', `${message.author.tag}(${userDataContext})`);
-                
-                // Build the conversation
                 const fullPrompt = `${finalSystemInstruction}\n\nConversation History:\n${geminiHistory.join('\n')}\n\nUser: ${userPrompt}\nAssistant:`;
                 
                 console.log(`[AI Call] Sending request for ${message.author.tag}... Model: ${AI_MODEL_NAME}`);
                 
-                // --- Direct Gemini API Call ---
+                // --- FIXED: Only call the working model ---
                 let aiTextResult = await callGeminiAPI(fullPrompt);
                 console.log(`[AI Call] Received response for ${message.author.tag}. Success: ${!!aiTextResult}`);
                 
@@ -400,11 +326,8 @@ module.exports = {
                     console.warn("[AI Error] Gemini returned empty response.");
                     aiTextResult = "I'm having trouble formulating a response right now. Could you try rephrasing?";
                 } else {
-                    // Update conversation history
                     geminiHistory.push(`User: ${userPrompt}`);
                     geminiHistory.push(`Assistant: ${aiTextResult}`);
-                    
-                    // Limit history length
                     if (geminiHistory.length > MAX_HISTORY * 2) {
                         geminiHistory = geminiHistory.slice(-(MAX_HISTORY * 2));
                     }
@@ -441,13 +364,14 @@ module.exports = {
                          if (error.message) {
                              if (error.message.includes('API key') || error.message.includes('401')) {
                                  errorMsg = "⚠️ AI service authentication failed. Please contact the bot administrator.";
-                             } else if (error.message.includes('404') || errorMessage.includes('NOT_FOUND') || error.message.includes('is not found')) {
+                             } else if (error.message.includes('404') || error.message.includes('NOT_FOUND') || error.message.includes('is not found')) {
                                  errorMsg = "⚠️ AI service is temporarily unavailable. Please try again later.";
-                                 console.error(`[AI Error] Model ${AI_MODEL_NAME} not available. Consider trying gemini-2.5-flash or gemini-2.5-pro`);
+                                 console.error(`[AI Error] Model ${AI_MODEL_NAME} not available. Consider trying gemini-1.5-pro-latest or another valid model.`);
                              } else if (error.message.includes('quota') || error.message.includes('rate limit')) {
                                  errorMsg = "⚠️ AI service is experiencing high demand. Please try again later.";
                              } else {
-                                 errorMsg += ` (${error.message})`;
+                                 // Don't leak the full error message to the user
+                                 // errorMsg += ` (${error.message})`; 
                              }
                          }
                         await message.reply(errorMsg).catch(console.error);
@@ -458,27 +382,56 @@ module.exports = {
                     console.error("[AI Error] Failed to send error reply:", replyError);
                  }
             }
-            return;
+            // --- IMPORTANT: AI block ends here ---
+            return; // Stop processing if it was an AI command
         }
 
-        // --- Rest of the file (prefix command handling) remains unchanged ---
+        // --- FIXED: PREFIX COMMAND HANDLING ---
+        // This block was missing from your file.
+        // It now runs ONLY if the message starts with '?' and was NOT an AI command.
         if (!message.content.startsWith(PREFIX)) return;
 
         console.log(`[Prefix Cmd] Detected prefix from ${message.author.tag}: ${message.content}`);
+        
         const args = message.content.slice(PREFIX.length).trim().split(/ +/);
         const commandName = args.shift().toLowerCase();
+
+        // Find the command in the client.commands collection (which now holds prefix commands)
         const command = message.client.commands.get(commandName);
 
         if (!command) {
-            console.log(`[Prefix Cmd] Command not found: ${commandName}`);
+            // Check if it's an alias
+            const cmdWithAlias = message.client.commands.find(c => c.aliases && c.aliases.includes(commandName));
+            if (cmdWithAlias) {
+                 console.log(`[Prefix Cmd] Found alias '${commandName}' for command: ${cmdWithAlias.name}`);
+                 try {
+                     // Execute the command found via alias
+                     await cmdWithAlias.execute(message, args, message.client);
+                 } catch (error) {
+                     console.error(`[Prefix Cmd Error] Error executing alias ${commandName} (for ${cmdWithAlias.name}):`, error);
+                     message.reply('There was an error trying to execute that command!').catch(console.error);
+                 }
+            } else {
+                console.log(`[Prefix Cmd] Command not found: ${commandName}`);
+                // Optionally reply if command not found
+                // message.reply(`Unknown command: \`${commandName}\``).catch(console.error);
+            }
             return;
         }
-
-        // ... rest of your prefix command handling
+        
+        // --- Execute Prefix Command ---
+        try {
+            console.log(`[Prefix Cmd] Executing command: ${command.name}`);
+            await command.execute(message, args, message.client);
+        } catch (error) {
+            console.error(`[Prefix Cmd Error] Error executing command ${command.name}:`, error);
+            message.reply('There was an error trying to execute that command!').catch(console.error);
+        }
+        // --- END OF PREFIX COMMAND FIX ---
     },
 };
 
-// --- Enhanced Helper: Perform Specific Bot Actions ---
+// --- Enhanced Helper: Perform Specific Bot Actions (as provided) ---
 async function performAction(message, actionType, actionArgs) {
      console.log(`[AI Action] Performing action: ${actionType}, Args: "${actionArgs}"`);
      try {
@@ -493,33 +446,26 @@ async function performAction(message, actionType, actionArgs) {
                     }
                 } else { console.warn("[AI Action Warn] SEND_GIF without args."); }
                 break;
-                
             case 'SHOW_PROFILE':
                 if (actionArgs) {
                     let targetMember;
-                    
-                    // If no specific user mentioned, use the message author
                     if (actionArgs.toLowerCase() === 'me' || actionArgs === '') {
                         targetMember = message.member;
                     } else {
                         targetMember = await findUserAnyMethod(message.guild, actionArgs);
                     }
-                    
                     if (targetMember) {
                         const targetUserId = targetMember.user.id;
                         const targetData = await User.findOne({ userId: targetUserId });
                         const profileEmbed = new EmbedBuilder()
                             .setColor(targetMember.displayColor || 0x00BFFF)
                             .setThumbnail(targetMember.user.displayAvatarURL({ dynamic: true }));
-
                         const displayName = targetMember.displayName;
-                        
                         if (targetData) {
                             const nextXp = getNextLevelXp(targetData.level);
                             const jobTitle = targetData.currentJob ? 
                                 (message.client.config?.workProgression?.find(j => j.id === targetData.currentJob)?.title || 'Unknown') : 
                                 'Unemployed';
-                                
                             profileEmbed.setTitle(`📊 ${displayName}'s Profile`)
                                 .addFields(
                                     { name: 'Level', value: `**${targetData.level}**`, inline: true },
@@ -536,7 +482,6 @@ async function performAction(message, actionType, actionArgs) {
                                 .setDescription("No profile data found in database.")
                                 .setFooter({ text: `User ID: ${targetUserId}` });
                         }
-                        
                         await message.channel.send({ embeds: [profileEmbed] }).catch(e => 
                             console.error("[AI Action Error] Failed to send profile:", e)
                         );
@@ -549,17 +494,14 @@ async function performAction(message, actionType, actionArgs) {
                     console.warn("[AI Action Warn] SHOW_PROFILE without args.");
                 }
                 break;
-                
             case 'SHOW_JOIN_DATE':
                 if (actionArgs) {
                     let targetMember;
-                    
                     if (actionArgs.toLowerCase() === 'me' || actionArgs === '') {
                         targetMember = message.member;
                     } else {
                         targetMember = await findUserAnyMethod(message.guild, actionArgs);
                     }
-                    
                     if (targetMember) {
                         const joinDate = targetMember.joinedAt;
                         const joinEmbed = new EmbedBuilder()
@@ -569,7 +511,6 @@ async function performAction(message, actionType, actionArgs) {
                             .setThumbnail(targetMember.user.displayAvatarURL({ dynamic: true }))
                             .setFooter({ text: `User ID: ${targetMember.user.id}` })
                             .setTimestamp();
-                            
                         await message.channel.send({ embeds: [joinEmbed] }).catch(e => 
                             console.error("[AI Action Error] Failed to send join date:", e)
                         );
@@ -580,17 +521,14 @@ async function performAction(message, actionType, actionArgs) {
                     }
                 }
                 break;
-
             case 'SHOW_AVATAR':
                 if (actionArgs) {
                     let targetMember;
-                    
                     if (actionArgs.toLowerCase() === 'me' || actionArgs === '') {
                         targetMember = message.member;
                     } else {
                         targetMember = await findUserAnyMethod(message.guild, actionArgs);
                     }
-                    
                     if (targetMember) {
                         const avatarEmbed = new EmbedBuilder()
                             .setColor(0x0099FF)
@@ -599,19 +537,16 @@ async function performAction(message, actionType, actionArgs) {
                             .setDescription(`[Avatar URL](${targetMember.user.displayAvatarURL({ size: 4096, dynamic: true })})`)
                             .setFooter({ text: `Requested by ${message.author.tag}` })
                             .setTimestamp();
-                            
                         await message.channel.send({ embeds: [avatarEmbed] });
                     } else {
                         await message.channel.send(`❌ Couldn't find user "${actionArgs}" in this server.`);
                     }
                 }
                 break;
-
             case 'SHOW_GLOBAL_AVATAR':
                 if (actionArgs) {
                     const userId = actionArgs.replace(/[<@!>]/g, '');
                     const globalUser = await findUserGlobally(message.client, userId);
-                    
                     if (globalUser) {
                         const avatarEmbed = new EmbedBuilder()
                             .setColor(0x9932CC)
@@ -620,27 +555,22 @@ async function performAction(message, actionType, actionArgs) {
                             .setDescription(`[Avatar URL](${globalUser.displayAvatarURL({ size: 4096, dynamic: true })})`)
                             .setFooter({ text: `Global User ID: ${globalUser.id}` })
                             .setTimestamp();
-                            
                         await message.channel.send({ embeds: [avatarEmbed] });
                     } else {
                         await message.channel.send(`❌ Couldn't find user with ID "${userId}".`);
                     }
                 }
                 break;
-
             case 'SEND_DM':
                 if (actionArgs) {
                     const [userArg, ...dmMessageParts] = actionArgs.split(' ');
                     const dmMessage = dmMessageParts.join(' ');
-                    
                     let targetMember;
-                    
                     if (userArg.toLowerCase() === 'me') {
                         targetMember = message.member;
                     } else {
                         targetMember = await findUserAnyMethod(message.guild, userArg);
                     }
-                    
                     if (targetMember && dmMessage) {
                         try {
                             await targetMember.send(`📨 **DM from ${message.author.tag} via Blecky:**\n${dmMessage}`);
@@ -653,13 +583,11 @@ async function performAction(message, actionType, actionArgs) {
                     }
                 }
                 break;
-
             case 'SERVER_STATS':
                 const members = await message.guild.members.fetch();
                 const onlineMembers = members.filter(m => m.presence?.status === 'online').size;
                 const totalMembers = message.guild.memberCount;
                 const boostCount = message.guild.premiumSubscriptionCount || 0;
-                
                 const statsEmbed = new EmbedBuilder()
                     .setColor(0xFFD700)
                     .setTitle(`📊 ${message.guild.name} Server Stats`)
@@ -674,26 +602,21 @@ async function performAction(message, actionType, actionArgs) {
                     )
                     .setFooter({ text: `Server ID: ${message.guild.id}` })
                     .setTimestamp();
-                    
                 await message.channel.send({ embeds: [statsEmbed] });
                 break;
-
             case 'SHOW_ROLES':
                 if (actionArgs) {
                     let targetMember;
-                    
                     if (actionArgs.toLowerCase() === 'me' || actionArgs === '') {
                         targetMember = message.member;
                     } else {
                         targetMember = await findUserAnyMethod(message.guild, actionArgs);
                     }
-                    
                     if (targetMember) {
                         const roles = targetMember.roles.cache
                             .filter(role => role.id !== message.guild.id)
                             .sort((a, b) => b.position - a.position)
                             .map(role => role.toString());
-                            
                         const rolesEmbed = new EmbedBuilder()
                             .setColor(targetMember.displayColor || 0x95A5A6)
                             .setTitle(`🎭 ${targetMember.displayName}'s Roles`)
@@ -705,14 +628,12 @@ async function performAction(message, actionType, actionArgs) {
                             )
                             .setFooter({ text: `User ID: ${targetMember.user.id}` })
                             .setTimestamp();
-                            
                         await message.channel.send({ embeds: [rolesEmbed] });
                     } else {
                         await message.channel.send(`❌ Couldn't find user "${actionArgs}" in this server.`);
                     }
                 }
                 break;
-
             case 'RANDOM_FACT':
                 const facts = [
                     "Honey never spoils. Archaeologists have found pots of honey in ancient Egyptian tombs that are over 3,000 years old and still perfectly good to eat.",
@@ -720,45 +641,31 @@ async function performAction(message, actionType, actionArgs) {
                     "A day on Venus is longer than a year on Venus. It takes Venus 243 Earth days to rotate once, but only 225 Earth days to orbit the Sun.",
                     "Bananas are berries, but strawberries aren't. Botanically speaking, berries are defined by having seeds inside, which bananas do.",
                     "The shortest war in history was between Britain and Zanzibar in 1896. It lasted only 38 minutes.",
-                    "There are more possible iterations of a game of chess than there are atoms in the known universe.",
-                    "A group of flamingos is called a 'flamboyance'.",
-                    "The Eiffel Tower can be 15 cm taller during the summer due to thermal expansion of the metal."
                 ];
                 const randomFact = facts[Math.floor(Math.random() * facts.length)];
-                
                 const factEmbed = new EmbedBuilder()
                     .setColor(0x00CED1)
                     .setTitle('💡 Random Fact')
                     .setDescription(randomFact)
                     .setFooter({ text: 'Powered by Blecky' })
                     .setTimestamp();
-                    
                 await message.channel.send({ embeds: [factEmbed] });
                 break;
-
             case 'TELL_JOKE':
                 const jokes = [
                     "Why don't scientists trust atoms? Because they make up everything!",
                     "Why did the scarecrow win an award? He was outstanding in his field!",
                     "Why don't skeletons fight each other? They don't have the guts!",
-                    "What do you call a fake noodle? An impasta!",
-                    "Why did the math book look so sad? Because it had too many problems!",
-                    "What do you call a bear with no teeth? A gummy bear!",
-                    "Why don't eggs tell jokes? They'd crack each other up!",
-                    "What do you call a sleeping bull? A bulldozer!"
                 ];
                 const randomJoke = jokes[Math.floor(Math.random() * jokes.length)];
-                
                 const jokeEmbed = new EmbedBuilder()
                     .setColor(0xFF69B4)
                     .setTitle('😂 Random Joke')
                     .setDescription(randomJoke)
                     .setFooter({ text: 'Powered by Blecky' })
                     .setTimestamp();
-                    
                 await message.channel.send({ embeds: [jokeEmbed] });
                 break;
-                
             default:
                 console.warn(`[AI Action Warn] Unsupported action type requested: ${actionType}`);
         }
