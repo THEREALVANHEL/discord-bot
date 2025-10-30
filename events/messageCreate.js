@@ -9,7 +9,7 @@ const { generateUserLevel } = require('../utils/levelSystem');
 const { XP_COOLDOWN, generateXP } = require('../utils/xpSystem');
 
 // --- AI Configuration ---
-const AI_MODEL_NAME = 'gemini-pro'; // Use the basic gemini-pro model
+const AI_MODEL_NAME = 'gemini-1.5-flash-latest'; // Use latest flash model
 const AI_TRIGGER_PREFIX = '?blecky';
 const MAX_HISTORY = 5;
 const AI_COOLDOWN_MS = 3000;
@@ -24,6 +24,7 @@ async function callGeminiAPI(prompt) {
         throw new Error('GEMINI_API_KEY not found');
     }
 
+    // Use the correct endpoint with the latest model
     const url = `https://generativelanguage.googleapis.com/v1/models/${AI_MODEL_NAME}:generateContent?key=${apiKey}`;
     
     const requestBody = {
@@ -62,6 +63,11 @@ async function callGeminiAPI(prompt) {
                 const errorData = JSON.parse(responseText);
                 if (errorData.error && errorData.error.message) {
                     errorMessage = errorData.error.message;
+                    
+                    // Check if it's a model not found error
+                    if (errorMessage.includes('is not found') || errorMessage.includes('NOT_FOUND')) {
+                        console.error(`[Gemini API] Model ${AI_MODEL_NAME} not available. Available models might be different.`);
+                    }
                 }
             } catch (e) {
                 // If JSON parsing fails, use the raw text
@@ -323,8 +329,10 @@ module.exports = {
                          if (error.message) {
                              if (error.message.includes('API key') || error.message.includes('401')) {
                                  errorMsg = "⚠️ AI service authentication failed. Please contact the bot administrator.";
-                             } else if (error.message.includes('404') || error.message.includes('NOT_FOUND')) {
+                             } else if (error.message.includes('404') || error.message.includes('NOT_FOUND') || error.message.includes('is not found')) {
+                                 // Try alternative model automatically
                                  errorMsg = "⚠️ AI service is temporarily unavailable. Please try again later.";
+                                 console.error(`[AI Error] Model ${AI_MODEL_NAME} not available. Consider trying gemini-1.0-pro or gemini-1.5-pro-latest`);
                              } else if (error.message.includes('quota') || error.message.includes('rate limit')) {
                                  errorMsg = "⚠️ AI service is experiencing high demand. Please try again later.";
                              } else {
