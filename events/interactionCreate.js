@@ -223,8 +223,8 @@ module.exports = {
         // --- TICKET CREATION BUTTON ---
         else if (customId === 'create_ticket') {
             try {
-                // --- FIX: Use new ephemeral flag ---
-                await interaction.deferReply({ flags: InteractionFlags.Ephemeral }); // <-- FIX: Ephemeral (not EPHEMERAL)
+                // --- FIX: Use new ephemeral flag (Capital E) ---
+                await interaction.deferReply({ flags: InteractionFlags.Ephemeral }); 
                 // --- END FIX ---
                 
                 const guild = interaction.guild;
@@ -331,7 +331,7 @@ module.exports = {
                     return interaction.reply({ content: 'You do not have permission to close this ticket.', ephemeral: true });
                 }
 
-                // --- FIX: Use new ephemeral flag ---
+                // --- FIX: Use new ephemeral flag (Capital E) ---
                 await interaction.deferReply({ flags: InteractionFlags.Ephemeral }); // <-- FIX: Ephemeral (not EPHEMERAL)
 
                 // --- TRANSCRIPT LOGIC ---
