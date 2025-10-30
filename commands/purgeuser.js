@@ -1,4 +1,4 @@
-// commands/purgeuser.js (Converted to Prefix Command)
+// commands/purgeuser.js (Converted to Prefix Command, Added specific logging)
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
 const Settings = require('../models/Settings'); // Required for logging
 const { logModerationAction } = require('../utils/logModerationAction'); // Required for logging
@@ -8,7 +8,6 @@ module.exports = {
     name: 'purgeuser',
     description: 'Delete messages from a specific user in the channel.',
     aliases: ['clearuser'],
-    // cooldown: 10, // Optional cooldown
 
     async execute(message, args, client) {
         // 1. Permission Check (User)
@@ -51,6 +50,9 @@ module.exports = {
 
         // 5. Fetch and Delete User's Messages
         try {
+            // Attempt to delete the original command message first
+            await message.delete().catch(() => {});
+
             // Fetch last 100 messages (Discord API limit for scanning)
             const fetchedMessages = await message.channel.messages.fetch({ limit: 100 });
             // Filter messages by the target user
@@ -69,14 +71,20 @@ module.exports = {
             const confirmationMsg = await message.channel.send(`🧹 **User Purge:** ${deletedCount} message(s) by ${target.tag} deleted by ${message.author.tag}.`);
             setTimeout(() => confirmationMsg.delete().catch(() => {}), 7000); // Delete confirmation after 7 seconds
 
-            // 7. Log Action
+            // 7. Log Action (FIX: Enhanced Logging)
             const settings = await Settings.findOne({ guildId: message.guild.id });
              if (settings && settings.modlogChannelId) {
-                await logModerationAction(message.guild, settings, 'Purge User', target, message.author, `Deleted ${deletedCount} messages`, `Channel: ${message.channel}\nAmount requested: ${amount}`);
+                await logModerationAction(
+                    message.guild, 
+                    settings, 
+                    'Purge User', // Action
+                    target, // Target (the user)
+                    message.author, // Moderator
+                    `Deleted ${deletedCount} messages`, // Reason
+                    `Channel: ${message.channel}\nAmount requested: ${amount}` // Extra
+                );
             }
-
-            // Attempt to delete the original command message
-            await message.delete().catch(() => {});
+            // --- END LOGGING FIX ---
 
         } catch (error) {
             console.error('Purge User error:', error);
